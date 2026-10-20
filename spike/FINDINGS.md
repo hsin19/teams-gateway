@@ -36,8 +36,25 @@
   teams skill 現在發話走瀏覽器 DOM，改走 REST 就不需要 Chromium。
 - 測試用群組 `teams-gateway test`（只有自己）的 id 存在 `spike/.local/state.json`；`48:notes` 在個人版不存在（404）。
 
-## 即時事件
+## 即時事件（Trouter 推播，不需要瀏覽器）
 
-- 網頁版連 `wss://go.trouter.teams.microsoft.com/v4/c`（query：`epid`、`con_num`、`cor_id`、`tc`、`timeout`、`dom`），
-  再 `POST https://teams.microsoft.com/registrar/prod/v2/registrations`（帶 `X-Skypetoken`）把這條連線註冊成推播端點。
-- 協定與事件格式待確認。
+`trouter_client.py` 只用 skypetoken 就能收到推播，發話後約 0.4 秒到。
+
+1. **連線**：`wss://go.trouter.skype.com/v4/c?tc=<client 資訊 JSON>&timeout=40&epid=<自產 UUID>&cor_id=<UUID>&con_num=<ms>_0`
+   協定是舊版 socket.io（0.9）的文字 frame：
+   - `1::` 連上 → 送 `5:1+::{"name":"user.authenticate","args":[{"headers":{"X-Skypetoken":"..."}}]}`
+   - 收 `5:N::{"name":"trouter.connected","args":[{"surl":"https://pub-...trouter.skype.com:3443/v4/f/<id>/", ...}]}`
+   - 收 `trouter.message_loss` 要回 `trouter.processed_message_loss`（同 args）
+   - 每 30～40 秒送 `5:N+::{"name":"ping"}`，收 `6:::N+["pong"]`
+2. **註冊推播**：`POST https://edge.skype.com/registrar/prod/v2/registrations`（`X-Skypetoken`）
+   `{"clientDescription":{"appId":"TeamsCDLWebWorker","templateKey":"TeamsCDLWebWorker_2.7","productContext":"TFL","platform":"chrome",...},"registrationId":"<epid>","transports":{"TROUTER":[{"path":"<surl>","ttl":3600}]}}` → 202。
+   `ttl` 3600 秒，要每小時重新註冊。
+3. **收事件**：`3:::{"id":N,"method":"POST","url":"/v4/f/<id>/messaging","headers":{...,"trouter-request":"..."},"body":"<JSON 字串>"}`
+   body：`{"type":"EventMessage","resourceType":"NewMessage","resource":{"id","clientmessageid","content","messagetype","from","imdisplayname","to","threadtopic","composetime","conversationLink",...}}`
+4. **回 ack**：`3:::{"id":N,"status":200,"headers":{"trouter-request":"<原樣帶回>","trouter-client":"{\"cd\":1}"},"body":""}`。
+
+注意：
+- 網頁版的訊息功能跑在 Web Worker 裡（`TeamsCDLWebWorker`），用 CDP 錄流量要 `Target.setAutoAttach` 連 Worker 才看得到 chatsvc 與這條 Trouter。
+  主頁面另一條 `go.trouter.teams.microsoft.com`（`SkypeSpacesWeb`）收不到訊息推播。
+- 自己發的訊息也會推回來，訂閱端要能分辨（`from` 是自己）。
+- 推播漏掉時（斷線、`message_loss`）要用 chatsvc 的訊息 API 補，訊息 id 是遞增的時間戳，可以拿來當游標。
