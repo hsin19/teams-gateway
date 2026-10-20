@@ -1,0 +1,9 @@
+# spike 的本機資料：profile 複本、抓到的封包、token，絕不進版控
+spike/.local/
+.venv/
+__pycache__/
+bin/
+obj/
+*.db
+.state/
+.env
