@@ -10,5 +10,24 @@ teams-gateway 用一個專用帳號登入，對外提供：
 
 ## 狀態
 
-- `spike/`：拋棄式的 Python 腳本，摸清非官方 API（登入、token、讀寫、即時事件）。結論在 [`spike/FINDINGS.md`](spike/FINDINGS.md)。
-- 正式版預計用 C#（.NET 10、Native AOT）實作，平常只跑一個小行程；瀏覽器只在登入時才開。
+- `spike/`：拋棄式的 Python 腳本，摸清非官方 API（登入、token、讀寫、即時事件）。結論在 [`spike/FINDINGS.md`](spike/FINDINGS.md)：**執行期完全不需要瀏覽器**。
+- `src/`：正式版（.NET 10 + Aspire + EF Core/SQLite），開發中。
+
+## 技術選型
+
+.NET 10 + Aspire + ASP.NET Core Minimal API + EF Core（SQLite）。選型與為什麼不用 Native AOT 見 [`docs/adr/0001-tech-stack.md`](docs/adr/0001-tech-stack.md)。
+
+```
+src/
+  TeamsGateway.AppHost          Aspire 編排（只在 dev，不部署）
+  TeamsGateway.ServiceDefaults  Aspire 共用：OTel / health / resilience
+  TeamsGateway.Service          gateway 本體（HTTP API + 背景工作）
+```
+
+## 開發
+
+```
+dotnet build                 # 建置
+aspire run                   # AppHost：起 dashboard + gateway
+dotnet run --project src/TeamsGateway.Service   # 只跑 gateway
+```

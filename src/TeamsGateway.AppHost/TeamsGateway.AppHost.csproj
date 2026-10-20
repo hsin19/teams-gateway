@@ -1,0 +1,12 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.4.3">
+
+  <ItemGroup>
+    <ProjectReference Include="..\TeamsGateway.Service\TeamsGateway.Service.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UserSecretsId>ee123c81-fc88-416f-95ae-d4b19a26bcbe</UserSecretsId>
+  </PropertyGroup>
+
+</Project>

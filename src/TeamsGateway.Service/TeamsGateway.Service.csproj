@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <UserSecretsId>teams-gateway</UserSecretsId>
+    <!-- 低流量的常駐服務：workstation GC + 非並行，記憶體佔用遠低於預設的 server GC -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TeamsGateway.ServiceDefaults\TeamsGateway.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+</Project>

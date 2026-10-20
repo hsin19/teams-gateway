@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TeamsGateway.AppHost/TeamsGateway.AppHost.csproj" />
+    <Project Path="src/TeamsGateway.Service/TeamsGateway.Service.csproj" />
+    <Project Path="src/TeamsGateway.ServiceDefaults/TeamsGateway.ServiceDefaults.csproj" />
+  </Folder>
+</Solution>
