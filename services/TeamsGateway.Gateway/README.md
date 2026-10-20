@@ -52,6 +52,7 @@ cookie 與 token 以 DataProtection 加密後存進 SQLite（`SecureValues` 表�
 | `POST /v1/chats/{id}/messages` `{"text":"..."}` | 發話 |
 | `GET /v1/events?chats=<id>,<id>` | **SSE** 即時新訊息串流（像 Slack Socket Mode）；`chats` 省略 = 全部 |
 | `POST /mcp` | **MCP** server（Streamable HTTP）：`list_chats` / `read_messages` / `send_message`，給 agent 用。接法見 `clients/mcp/` |
+| `POST/GET/DELETE /v1/webhooks` | 登記 / 列 / 刪 webhook；有符合的新訊息時 gateway POST 過去，帶 `X-TeamsGateway-Signature: sha256=<hmac>` |
 
 即時推播由背景的 Trouter 連線收進來，寫進 `MessageEvents` 後 publish 給 SSE。自己發的訊息也會推回來（`from` 是自己）。
 

@@ -22,6 +22,7 @@ public static class Extensions
         builder.Services.AddSingleton<GatewayEventBus>();
         builder.Services.AddSingleton<TrouterClient>();
         builder.Services.AddHostedService<TrouterBackgroundService>();
+        builder.Services.AddHostedService<WebhookDeliveryService>();
 
         // MCP：讀 / 發是純 function，開成 MCP tool 給任何 MCP client 用（見 Mcp/TeamsTools）
         builder.Services.AddMcpServer().WithHttpTransport().WithToolsFromAssembly();
@@ -40,6 +41,7 @@ public static class Extensions
         app.MapAdminApi();
         app.MapChatsApi();
         app.MapEventsApi();
+        app.MapWebhooksApi();
         app.MapMcp("/mcp");
         app.MapGet("/", () => "teams-gateway");
     }
