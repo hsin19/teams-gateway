@@ -9,4 +9,7 @@
     <Project Path="shared/TeamsGateway.Contracts/TeamsGateway.Contracts.csproj" />
     <Project Path="shared/TeamsGateway.ServiceDefaults/TeamsGateway.ServiceDefaults.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TeamsGateway.Gateway.Tests/TeamsGateway.Gateway.Tests.csproj" />
+  </Folder>
 </Solution>

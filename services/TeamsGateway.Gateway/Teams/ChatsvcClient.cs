@@ -40,15 +40,23 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
     /// <summary>把 thread id（19:...）直接放行；否則當群名對 topic 做前綴 / 包含比對。找不到就丟例外。</summary>
     public async Task<string> ResolveChatAsync(string spec, CancellationToken ct = default)
     {
-        if (spec.StartsWith("19:", StringComparison.Ordinal) || spec.Contains("@thread", StringComparison.Ordinal))
+        if (IsThreadId(spec))
             return spec;
-        var chats = await GetConversationsAsync(ct);
-        var low = spec.ToLowerInvariant();
-        var hit = chats.FirstOrDefault(c => c.Topic?.ToLowerInvariant().StartsWith(low) == true)
-                  ?? chats.FirstOrDefault(c => c.Topic?.ToLowerInvariant().Contains(low) == true);
+        var hit = MatchByName(await GetConversationsAsync(ct), spec);
         if (hit is null)
             throw new InvalidOperationException($"找不到群 '{spec}'（名稱不符）");
         return hit.Id;
+    }
+
+    public static bool IsThreadId(string spec) =>
+        spec.StartsWith("19:", StringComparison.Ordinal) || spec.Contains("@thread", StringComparison.Ordinal);
+
+    /// <summary>群名對 topic 做前綴比對（優先）或包含比對，不分大小寫。</summary>
+    public static ConversationDto? MatchByName(IReadOnlyList<ConversationDto> chats, string spec)
+    {
+        var low = spec.ToLowerInvariant();
+        return chats.FirstOrDefault(c => c.Topic?.ToLowerInvariant().StartsWith(low) == true)
+               ?? chats.FirstOrDefault(c => c.Topic?.ToLowerInvariant().Contains(low) == true);
     }
 
     public async Task<MessagePage> GetMessagesAsync(string threadId, int pageSize, string? cursor, CancellationToken ct = default)
