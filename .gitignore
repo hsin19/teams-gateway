@@ -12,3 +12,6 @@ obj/
 obj/
 [Bb]in/
 *.user
+*.db-shm
+*.db-wal
+.data/
