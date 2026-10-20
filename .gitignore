@@ -18,3 +18,5 @@ obj/
 # python client build
 dist/
 *.egg-info/
+.publish/
+.env

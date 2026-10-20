@@ -23,7 +23,7 @@ namespace TeamsGateway.Gateway.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
+                    b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("KeyHash")
@@ -34,7 +34,7 @@ namespace TeamsGateway.Gateway.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("RevokedAt")
+                    b.Property<DateTime?>("RevokedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -62,7 +62,7 @@ namespace TeamsGateway.Gateway.Data.Migrations
                     b.Property<string>("Topic")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("UpdatedAt")
+                    b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -75,7 +75,7 @@ namespace TeamsGateway.Gateway.Data.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("ComposeTime")
+                    b.Property<DateTime>("ComposeTime")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Content")
@@ -92,7 +92,7 @@ namespace TeamsGateway.Gateway.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("ReceivedAt")
+                    b.Property<DateTime>("ReceivedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SenderMri")
@@ -122,7 +122,7 @@ namespace TeamsGateway.Gateway.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("UpdatedAt")
+                    b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Key");
@@ -145,7 +145,7 @@ namespace TeamsGateway.Gateway.Data.Migrations
                     b.Property<string>("ConversationId")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
+                    b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Secret")

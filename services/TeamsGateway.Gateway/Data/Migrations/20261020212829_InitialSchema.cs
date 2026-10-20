@@ -18,8 +18,8 @@ namespace TeamsGateway.Gateway.Data.Migrations
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
                     Name = table.Column<string>(type: "TEXT", nullable: false),
                     KeyHash = table.Column<string>(type: "TEXT", nullable: false),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    RevokedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
+                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    RevokedAt = table.Column<DateTime>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -35,7 +35,7 @@ namespace TeamsGateway.Gateway.Data.Migrations
                     ThreadType = table.Column<string>(type: "TEXT", nullable: true),
                     LastMessageId = table.Column<string>(type: "TEXT", nullable: true),
                     Subscribed = table.Column<bool>(type: "INTEGER", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -48,7 +48,7 @@ namespace TeamsGateway.Gateway.Data.Migrations
                 {
                     Key = table.Column<string>(type: "TEXT", nullable: false),
                     Protected = table.Column<string>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -65,7 +65,7 @@ namespace TeamsGateway.Gateway.Data.Migrations
                     TargetUrl = table.Column<string>(type: "TEXT", nullable: false),
                     Secret = table.Column<string>(type: "TEXT", nullable: true),
                     Active = table.Column<bool>(type: "INTEGER", nullable: false),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -89,8 +89,8 @@ namespace TeamsGateway.Gateway.Data.Migrations
                     MessageType = table.Column<string>(type: "TEXT", nullable: true),
                     Content = table.Column<string>(type: "TEXT", nullable: true),
                     SequenceId = table.Column<long>(type: "INTEGER", nullable: false),
-                    ComposeTime = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    ReceivedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    ComposeTime = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    ReceivedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
                     RawJson = table.Column<string>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>

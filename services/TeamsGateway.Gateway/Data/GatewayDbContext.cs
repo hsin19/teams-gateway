@@ -4,6 +4,13 @@ namespace TeamsGateway.Gateway.Data;
 
 public class GatewayDbContext(DbContextOptions<GatewayDbContext> options) : DbContext(options)
 {
+    protected override void ConfigureConventions(ModelConfigurationBuilder builder)
+    {
+        // SQLite 不能對 DateTimeOffset 做 ORDER BY / 比較；存成 UTC DateTime（可排序、可做時間範圍查詢）。
+        // 我們的時間一律當 UTC 用，不吃 offset。
+        builder.Properties<DateTimeOffset>().HaveConversion<UtcDateTimeConverter>();
+    }
+
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<MessageEvent> MessageEvents => Set<MessageEvent>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();

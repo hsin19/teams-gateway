@@ -14,6 +14,19 @@ dotnet run --project services/TeamsGateway.Gateway   # 只跑 gateway
 
 migration：`dotnet dotnet-ef migrations add <Name> --project services/TeamsGateway.Gateway --output-dir Data/Migrations`
 
+## 本機常駐（launchd）
+
+掛在本機 `localhost:5199`，不用 Docker（見 `docs/adr/0004`）：
+
+```
+ops/service.sh install                                   # 發佈 + launchd 啟動（首次產生 .env 的 admin token）
+ops/service.sh bootstrap spike/.local/login_cookies.json client   # 匯入 cookie + 建一把 API key
+ops/service.sh key <name>                                # 再建 API key（明文只出現一次）
+ops/service.sh status | logs | restart | uninstall
+```
+
+資料（cookie / token / SQLite）在 repo `.data/`、admin token 在 `.env`（都 gitignored）。約 150–170MB RSS。
+
 ## Bootstrap：綁定 Teams 帳號
 
 第一次要把專用帳號的登入 cookie 匯進來（之後 gateway 自己換 token）。cookie 用 `spike/http_refresh.py export` 從已登入的瀏覽器 profile 匯出。
