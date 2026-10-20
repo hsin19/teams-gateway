@@ -1,6 +1,7 @@
 using TeamsGateway.Service.Apis;
 using TeamsGateway.Service.Auth;
 using TeamsGateway.Service.Data;
+using TeamsGateway.Service.Events;
 using TeamsGateway.Service.Teams;
 
 namespace TeamsGateway.Service;
@@ -16,6 +17,11 @@ public static class Extensions
         builder.AddTeams();
 
         builder.Services.AddSingleton<ApiKeyService>();
+
+        // 即時推播：Trouter 背景連線 → 行程內匯流排 → SSE
+        builder.Services.AddSingleton<GatewayEventBus>();
+        builder.Services.AddSingleton<TrouterClient>();
+        builder.Services.AddHostedService<TrouterBackgroundService>();
     }
 
     public static async Task UseApplicationAsync(this WebApplication app)
@@ -25,6 +31,7 @@ public static class Extensions
         app.MapDefaultEndpoints();
         app.MapAdminApi();
         app.MapChatsApi();
+        app.MapEventsApi();
         app.MapGet("/", () => "teams-gateway");
     }
 }

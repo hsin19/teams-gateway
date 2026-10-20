@@ -87,7 +87,7 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
             GetString(m, "imdisplayname"),
             GetString(m, "messagetype"),
             GetString(m, "content"),
-            long.TryParse(GetString(m, "sequenceId"), out var seq) ? seq : 0,
+            GetInt64(m, "sequenceId"),
             ParseTime(GetString(m, "composetime")) ?? DateTimeOffset.UtcNow);
     }
 
@@ -129,6 +129,19 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
 
     private static string? GetString(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private static long GetInt64(JsonElement e, string name)
+    {
+        // chatsvc 讀回來是數字，Trouter 推播也是數字，但偶爾是字串，兩種都接
+        if (e.ValueKind != JsonValueKind.Object || !e.TryGetProperty(name, out var v))
+            return 0;
+        return v.ValueKind switch
+        {
+            JsonValueKind.Number when v.TryGetInt64(out var n) => n,
+            JsonValueKind.String when long.TryParse(v.GetString(), out var n) => n,
+            _ => 0,
+        };
+    }
 
     private static string? Mri(string? from) => from?.Split('/').LastOrDefault();
 
