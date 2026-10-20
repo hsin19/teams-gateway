@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="TeamsGateway.Gateway.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\shared\TeamsGateway.ServiceDefaults\TeamsGateway.ServiceDefaults.csproj" />
     <ProjectReference Include="..\..\shared\TeamsGateway.Contracts\TeamsGateway.Contracts.csproj" />
   </ItemGroup>
