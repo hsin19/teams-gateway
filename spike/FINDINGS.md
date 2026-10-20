@@ -9,17 +9,43 @@
   Playwright 在 macOS 用 mock keychain 加密 cookie，所以一定要帶這個參數才解得開。
 - 複製時略過 Cache / Code Cache / Service Worker 的 CacheStorage 等快取，原本 1.2 GB 的 profile 剩不到 100 MB。
 
-## Token
+## 結論
 
-兩層 token：
+**執行期完全不需要瀏覽器。** 瀏覽器只在第一次登入時用來拿 login.live.com 的登入 cookie；之後換 token、讀、發、收推播全部是 HTTP / WebSocket。
 
-| token | 怎麼來 | 壽命 | 用途 |
-|---|---|---|---|
-| MSA access / refresh token | MSAL（SPA）對 `login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/oauth2/v2.0/token` 用 `grant_type=refresh_token` | access 8h；refresh token 只剩當初登入起算的 ~24h（`refresh_token_expires_in` 每次遞減，不會因續期延長） | 換 skypetoken、其他服務 |
-| skypetoken（JWT） | 待確認（網頁快取還有效時不會重換） | 8 小時（`exp - iat = 28800`） | chatsvc 的 `x-skypetoken` / `authentication` header |
+| 能力 | 做法 | 驗證腳本 |
+|---|---|---|
+| 換 skypetoken | 拿登入 cookie 做靜默授權（純 HTTP） | `http_refresh.py` |
+| 讀對話 / 訊息 | chatsvc REST | `chats.py`、`members.py` |
+| 發話、建群組 | chatsvc REST | `send.py` |
+| 即時事件 | Trouter WebSocket + registrar | `trouter_client.py` |
 
-- client_id `4b3e8f46-56d3-427f-b1e2-d239b2ea6bca`，redirect_uri `https://teams.live.com/v2/authv2`（SPA，要帶 Origin）。
-- SPA refresh token 有 24 小時的硬上限，純 HTTP 續期最多撐一天；之後要靠 login.live.com 的登入 cookie 做 `prompt=none` 的靜默授權，這是下一步要驗的。
+## Token（純 HTTP，`http_refresh.py`）
+
+只要有 login.live.com 的登入 cookie，就能照網頁版 MSAL 的流程自己換：
+
+1. `GET https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize`
+   `client_id=4b3e8f46-56d3-427f-b1e2-d239b2ea6bca`、`redirect_uri=https://teams.live.com/v2/authv2`、`response_type=code`、`response_mode=fragment`、
+   `prompt=none`、PKCE（S256）、`scope=https://mtsvc.fl.teams.microsoft.com/teams.mt.readwrite openid profile offline_access`
+   → 302 到 `login.live.com/oauth20_authorize.srf` → 302 到 `https://teams.live.com/v2/authv2#code=...`（不需要跑 JS）
+2. `POST .../consumers/oauth2/v2.0/token`（`grant_type=authorization_code` + `code_verifier`，帶 `Origin: https://teams.live.com`）→ access + refresh token
+3. 同一個 token 端點用 `grant_type=refresh_token` 換 `https://auth.fl.teams.microsoft.com/teams.auth.readwrite`
+4. `POST https://teams.live.com/api/auth/v2.0/authz/consumer`，`Authorization: Bearer <第 3 步的 access token>`、
+   `ms-teams-authz-type: ExplicitLogin`、`x-ms-client-type: web`、`claimschallengecapable: true`，body 空
+   → `{"skypeToken":{"skypetoken","expiresIn":28799,"skypeid",...},"regionGtms":{...},...}`
+
+壽命：
+
+| 東西 | 壽命 | 備註 |
+|---|---|---|
+| skypetoken | 8 小時 | 到期前重跑上面四步就好 |
+| SPA refresh token | 從登入起最多 24 小時，續期不會延長 | 所以不靠它，每次都從靜默授權開始 |
+| login.live.com 登入 cookie | `__Host-MSAAUTHP` 約一年（這次看到 2027-11-15 到期） | 靜默授權時回來的 Set-Cookie 要存回去，讓它持續更新 |
+
+登入 cookie 只要 `login.live.com` / `login.microsoftonline.com` 這兩個網域的；匯出方式見 `http_refresh.py export`
+（開一次 profile 用 CDP `Storage.getCookies` 拿）。
+
+網頁版另外也會用 MSAL 快取的 refresh token 直接換各服務的 token（`/9188040d-.../oauth2/v2.0/token`），但那顆 token 有 24 小時上限，不適合長期跑。
 
 ## 讀取
 
