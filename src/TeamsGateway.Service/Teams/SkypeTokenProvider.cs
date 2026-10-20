@@ -45,6 +45,22 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
         }
     }
 
+    /// <summary>強制重換（例如打 chatsvc 收到 401 時）。</summary>
+    public async Task<SkypeToken> RefreshAsync(CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            _cached = await MintAsync(ct);
+            logger.LogInformation("強制換 skypetoken，skypeid={SkypeId}", _cached.SkypeId);
+            return _cached;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     private async Task<SkypeToken> MintAsync(CancellationToken ct)
     {
         var cookiesJson = await secureStore.GetAsync(CookieSecureKey, ct)
