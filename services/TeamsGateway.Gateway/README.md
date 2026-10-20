@@ -51,6 +51,7 @@ cookie 與 token 以 DataProtection 加密後存進 SQLite（`SecureValues` 表�
 | `GET /v1/chats/{id}/messages?limit=&cursor=` | 讀訊息（`cursor` 用上一頁回的 `nextCursor` 往更舊翻） |
 | `POST /v1/chats/{id}/messages` `{"text":"..."}` | 發話 |
 | `GET /v1/events?chats=<id>,<id>` | **SSE** 即時新訊息串流（像 Slack Socket Mode）；`chats` 省略 = 全部 |
+| `POST /mcp` | **MCP** server（Streamable HTTP）：`list_chats` / `read_messages` / `send_message`，給 agent 用。接法見 `clients/mcp/` |
 
 即時推播由背景的 Trouter 連線收進來，寫進 `MessageEvents` 後 publish 給 SSE。自己發的訊息也會推回來（`from` 是自己）。
 

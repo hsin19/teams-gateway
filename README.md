@@ -10,8 +10,8 @@
 |---|---|---|
 | `services/TeamsGateway.Gateway` | Teams → HTTP/SSE gateway（列群組/讀/發/事件串流） | ✅ 可用 |
 | `services/slack-relay` | 訂閱 gateway、把訊息轉進 Slack（只看 Slack 就能接收與回覆） | 規劃中 |
-| `clients/python` | Python client | 規劃中 |
-| `clients/cli` | 命令列工具 | 規劃中 |
+| `clients/python` | Python client（程式 / 常駐訂閱用，含 SSE） | ✅ |
+| `clients/mcp` | agent 接法：gateway 原生 MCP server（`/mcp`） | ✅ |
 | `shared/TeamsGateway.Contracts` | 對外 wire DTO，服務與 .NET client 共用 | ✅ |
 | `shared/TeamsGateway.ServiceDefaults` | Aspire 共用（OTel / health / resilience） | ✅ |
 | `apphost/TeamsGateway.AppHost` | Aspire 編排（只在 dev，不部署） | ✅ |

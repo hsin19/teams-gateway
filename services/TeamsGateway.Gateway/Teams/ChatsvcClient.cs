@@ -37,6 +37,20 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         return result;
     }
 
+    /// <summary>把 thread id（19:...）直接放行；否則當群名對 topic 做前綴 / 包含比對。找不到就丟例外。</summary>
+    public async Task<string> ResolveChatAsync(string spec, CancellationToken ct = default)
+    {
+        if (spec.StartsWith("19:", StringComparison.Ordinal) || spec.Contains("@thread", StringComparison.Ordinal))
+            return spec;
+        var chats = await GetConversationsAsync(ct);
+        var low = spec.ToLowerInvariant();
+        var hit = chats.FirstOrDefault(c => c.Topic?.ToLowerInvariant().StartsWith(low) == true)
+                  ?? chats.FirstOrDefault(c => c.Topic?.ToLowerInvariant().Contains(low) == true);
+        if (hit is null)
+            throw new InvalidOperationException($"找不到群 '{spec}'（名稱不符）");
+        return hit.Id;
+    }
+
     public async Task<MessagePage> GetMessagesAsync(string threadId, int pageSize, string? cursor, CancellationToken ct = default)
     {
         var url = cursor ?? $"conversations/{Uri.EscapeDataString(threadId)}/messages?view={View}&pageSize={pageSize}&startTime=0";
