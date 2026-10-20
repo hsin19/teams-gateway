@@ -15,3 +15,6 @@ obj/
 *.db-shm
 *.db-wal
 .data/
+# python client build
+dist/
+*.egg-info/
