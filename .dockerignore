@@ -1,0 +1,21 @@
+# secret / 部署專屬：絕不烤進 image（runtime 掛進來）
+**/.env
+**/appsettings.Local.json
+**/.data/
+
+# build 產物
+**/bin/
+**/obj/
+
+# 不需要進 build context
+.git/
+.github/
+worktrees/
+tests/
+docs/
+spike/
+tools/
+clients/
+**/*.md
+**/Dockerfile
+docker-compose*.yml
