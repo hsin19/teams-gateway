@@ -34,6 +34,10 @@ public sealed class TrouterClient(
                     $"&cor_id={Guid.NewGuid()}&con_num={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_0";
 
         using var ws = new ClientWebSocket();
+        // 偵測 half-open 死連線：定期送 WS ping，對方沒回 pong 就 abort，ReceiveAsync 會丟例外 → 觸發重連。
+        // 少了這個，TCP 靜默斷線時 ReceiveAsync 會永遠卡住、收不到也不重連。
+        ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+        ws.Options.KeepAliveTimeout = TimeSpan.FromSeconds(30);
         await ws.ConnectAsync(new Uri(TrouterUrl + query), ct);
         logger.LogInformation("Trouter 已連線");
 
