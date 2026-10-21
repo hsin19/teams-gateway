@@ -41,4 +41,41 @@ public class TeamsTextTests
 
     [Fact]
     public void Null_is_safe() => Assert.Equal("", TeamsText.ToSlack(null));
+
+    // reply 在上、引用在下：不該出現大塊空行
+    [Fact]
+    public void Reply_then_quote_has_no_blank_line_gaps()
+    {
+        const string html =
+            "<p>Hi <span itemtype=\"http://schema.skype.com/Mention\">Someone</span>,</p>" +
+            "<p>a reply line.</p>" +
+            "<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"1\">" +
+            "<strong itemprop=\"mri\">Bob</strong><span itemprop=\"time\"></span>" +
+            "<p itemprop=\"preview\">quoted text</p></blockquote>";
+
+        var result = TeamsText.ToSlack(html);
+
+        Assert.DoesNotContain("\n\n", result);     // 收斂成單行距，無空行
+        Assert.Contains("a reply line.", result);
+        Assert.Contains("> ", result);             // 引用
+        Assert.Contains("quoted text", result);
+    }
+
+    // 引用在上、reply 在下：轉出來要以 "> " 開頭（Format 才會另起一行渲染成 blockquote）
+    [Fact]
+    public void Quote_then_reply_starts_with_quote()
+    {
+        const string html =
+            "<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"1\">" +
+            "<strong itemprop=\"mri\">Carol</strong><span itemprop=\"time\"></span>" +
+            "<p itemprop=\"preview\">earlier msg</p></blockquote>" +
+            "<p>my response.</p>";
+
+        var result = TeamsText.ToSlack(html);
+
+        Assert.StartsWith("> ", result);
+        Assert.Contains("earlier msg", result);
+        Assert.Contains("my response.", result);
+        Assert.DoesNotContain("\n\n", result);
+    }
 }

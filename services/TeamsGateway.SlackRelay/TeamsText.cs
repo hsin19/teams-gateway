@@ -28,7 +28,7 @@ public static partial class TeamsText
         text = text.Replace(' ', ' ');           // nbsp → 一般空白
 
         text = TrailingSpaceRegex().Replace(text, "\n");
-        text = ExtraBlankRegex().Replace(text, "\n\n");
+        text = ExtraBlankRegex().Replace(text, "\n"); // 連續換行收成一個，不留大塊空行
         return text.Trim();
     }
 
@@ -47,6 +47,6 @@ public static partial class TeamsText
     [GeneratedRegex(@"[ \t]+\n")]
     private static partial Regex TrailingSpaceRegex();
 
-    [GeneratedRegex(@"\n{3,}")]
+    [GeneratedRegex(@"\n{2,}")]
     private static partial Regex ExtraBlankRegex();
 }

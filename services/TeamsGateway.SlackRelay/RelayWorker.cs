@@ -74,8 +74,12 @@ public sealed class RelayWorker(
     private static string Format(MessageDto message)
     {
         var who = string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName;
-        var tag = message.Deleted ? "(deleted) " : message.Edited ? "(edited) " : "";
-        var text = TeamsText.ToSlack(message.Content); // Teams RichText/Html → Slack 看得順的文字
-        return $"*{who}*: {tag}{text}";
+        var marker = message.Deleted ? "(deleted)" : message.Edited ? "(edited)" : null;
+        var head = marker is null ? $"*{who}*:" : $"*{who}*: {marker}";
+
+        var body = TeamsText.ToSlack(message.Content); // Teams RichText/Html → Slack 看得順的文字
+        // 多行、或以引用開頭時內容另起一行，Slack 才會把 "> " 當 blockquote 渲染（不會黏在 header 後）
+        var joiner = body.Length > 0 && (body.Contains('\n') || body.StartsWith('>')) ? "\n" : " ";
+        return $"{head}{joiner}{body}";
     }
 }
