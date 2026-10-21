@@ -61,7 +61,15 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
         if (dto.Version <= existing.Version)
             return IngestResult.Unchanged; // 同版或更舊（重送）
 
-        // 被編輯 / 刪除
+        // 被編輯 / 刪除：先留存舊版本，再更新成最新
+        db.MessageRevisions.Add(new MessageRevision
+        {
+            MessageId = existing.Id,
+            Version = existing.Version,
+            Content = existing.Content,
+            RawJson = existing.RawJson,
+            SupersededAt = DateTimeOffset.UtcNow,
+        });
         existing.Content = dto.Content;
         existing.MessageType = dto.Type;
         existing.Version = dto.Version;

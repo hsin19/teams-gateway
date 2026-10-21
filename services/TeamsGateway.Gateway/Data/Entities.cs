@@ -40,6 +40,21 @@ public class MessageEvent
     public required string RawJson { get; set; }
 
     public Conversation? Conversation { get; set; }
+    public ICollection<MessageRevision> Revisions { get; set; } = [];
+}
+
+/// <summary>一則訊息被編輯 / 刪除前的舊版本，保留編輯歷史（給稽核與 ES 歷史搜尋）。</summary>
+public class MessageRevision
+{
+    public required string MessageId { get; set; }
+    /// <summary>這個被取代掉的版本號。</summary>
+    public long Version { get; set; }
+    public string? Content { get; set; }
+    public required string RawJson { get; set; }
+    /// <summary>被新版本取代的時間。</summary>
+    public DateTimeOffset SupersededAt { get; set; }
+
+    public MessageEvent? Message { get; set; }
 }
 
 /// <summary>訂閱者的 API key。只存 hash。</summary>

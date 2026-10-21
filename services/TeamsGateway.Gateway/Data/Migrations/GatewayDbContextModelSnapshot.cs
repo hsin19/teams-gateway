@@ -125,6 +125,29 @@ namespace TeamsGateway.Gateway.Data.Migrations
                     b.ToTable("MessageEvents");
                 });
 
+            modelBuilder.Entity("TeamsGateway.Gateway.Data.MessageRevision", b =>
+                {
+                    b.Property<string>("MessageId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Content")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RawJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("SupersededAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("MessageId", "Version");
+
+                    b.ToTable("MessageRevisions");
+                });
+
             modelBuilder.Entity("TeamsGateway.Gateway.Data.SecureValue", b =>
                 {
                     b.Property<string>("Key")
@@ -187,6 +210,17 @@ namespace TeamsGateway.Gateway.Data.Migrations
                     b.Navigation("Conversation");
                 });
 
+            modelBuilder.Entity("TeamsGateway.Gateway.Data.MessageRevision", b =>
+                {
+                    b.HasOne("TeamsGateway.Gateway.Data.MessageEvent", "Message")
+                        .WithMany("Revisions")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+                });
+
             modelBuilder.Entity("TeamsGateway.Gateway.Data.WebhookSubscription", b =>
                 {
                     b.HasOne("TeamsGateway.Gateway.Data.ApiKey", "ApiKey")
@@ -206,6 +240,11 @@ namespace TeamsGateway.Gateway.Data.Migrations
             modelBuilder.Entity("TeamsGateway.Gateway.Data.Conversation", b =>
                 {
                     b.Navigation("Messages");
+                });
+
+            modelBuilder.Entity("TeamsGateway.Gateway.Data.MessageEvent", b =>
+                {
+                    b.Navigation("Revisions");
                 });
 #pragma warning restore 612, 618
         }

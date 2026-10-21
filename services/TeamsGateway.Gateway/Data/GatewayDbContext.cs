@@ -13,6 +13,7 @@ public class GatewayDbContext(DbContextOptions<GatewayDbContext> options) : DbCo
 
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<MessageEvent> MessageEvents => Set<MessageEvent>();
+    public DbSet<MessageRevision> MessageRevisions => Set<MessageRevision>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<WebhookSubscription> WebhookSubscriptions => Set<WebhookSubscription>();
     public DbSet<SecureValue> SecureValues => Set<SecureValue>();
@@ -27,6 +28,12 @@ public class GatewayDbContext(DbContextOptions<GatewayDbContext> options) : DbCo
             e.HasIndex(m => new { m.ConversationId, m.SequenceId });
             e.HasIndex(m => m.ReceivedAt);
             e.HasOne(m => m.Conversation).WithMany(c => c.Messages).HasForeignKey(m => m.ConversationId);
+        });
+
+        b.Entity<MessageRevision>(e =>
+        {
+            e.HasKey(r => new { r.MessageId, r.Version });
+            e.HasOne(r => r.Message).WithMany(m => m.Revisions).HasForeignKey(r => r.MessageId);
         });
 
         b.Entity<ApiKey>(e =>

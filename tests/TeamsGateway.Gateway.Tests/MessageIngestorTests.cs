@@ -47,6 +47,11 @@ public class MessageIngestorTests
         Assert.Equal("改過", row.Content);
         Assert.True(row.Edited);
         Assert.Equal(200, row.Version);
+
+        // 舊版本留在 revisions，看得到被改掉前的內容
+        var revision = ctx.MessageRevisions.Single();
+        Assert.Equal("原文", revision.Content);
+        Assert.Equal(100, revision.Version);
     }
 
     [Fact]
