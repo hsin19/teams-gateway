@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="TeamsGateway.Gateway.Tests" />
+    <InternalsVisibleTo Include="TeamsGateway.Gateway.FunctionalTests" />
   </ItemGroup>
 
   <ItemGroup>
