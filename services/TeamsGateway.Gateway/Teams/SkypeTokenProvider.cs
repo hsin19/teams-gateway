@@ -25,6 +25,14 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
 
     public SkypeToken? Current => _cached;
 
+    // Teams 認證健康：給 /v1/status，讓 relay 偵測 cookie 失效並告警
+    public DateTimeOffset? LastSuccessAt { get; private set; }
+    public DateTimeOffset? LastFailureAt { get; private set; }
+    public string? LastError { get; private set; }
+
+    /// <summary>最近一次換 token 的結果是成功（且之後沒再失敗）。從沒換過 = 尚未 bootstrap，也視為不健康。</summary>
+    public bool Healthy => LastSuccessAt is { } success && (LastFailureAt is not { } failure || success >= failure);
+
     public async Task<SkypeToken> GetAsync(CancellationToken ct = default)
     {
         if (_cached is { } hit && hit.ExpiresAt - RefreshSkew > DateTimeOffset.UtcNow)
@@ -35,7 +43,7 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
         {
             if (_cached is { } hit2 && hit2.ExpiresAt - RefreshSkew > DateTimeOffset.UtcNow)
                 return hit2;
-            _cached = await MintAsync(ct);
+            _cached = await MintTrackedAsync(ct);
             logger.LogInformation("換到新的 skypetoken，skypeid={SkypeId}，到期 {ExpiresAt:u}", _cached.SkypeId, _cached.ExpiresAt);
             return _cached;
         }
@@ -51,13 +59,31 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
         await _gate.WaitAsync(ct);
         try
         {
-            _cached = await MintAsync(ct);
+            _cached = await MintTrackedAsync(ct);
             logger.LogInformation("強制換 skypetoken，skypeid={SkypeId}", _cached.SkypeId);
             return _cached;
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>包住 <see cref="MintAsync"/>，記下成功 / 失敗時間給健康狀態用。</summary>
+    private async Task<SkypeToken> MintTrackedAsync(CancellationToken ct)
+    {
+        try
+        {
+            var token = await MintAsync(ct);
+            LastSuccessAt = DateTimeOffset.UtcNow;
+            LastError = null;
+            return token;
+        }
+        catch (Exception ex)
+        {
+            LastFailureAt = DateTimeOffset.UtcNow;
+            LastError = ex.Message;
+            throw;
         }
     }
 

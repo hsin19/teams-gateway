@@ -14,6 +14,16 @@ public static class ChatsApi
     {
         var v1 = app.MapGroup("/v1").AddEndpointFilter<ApiKeyFilter>();
 
+        // Teams 認證健康：給訂閱者（relay）偵測 cookie 失效並告警
+        v1.MapGet("/status", (SkypeTokenProvider tokens) => Results.Ok(new
+        {
+            teamsAuth = tokens.Healthy ? "ok" : "failed",
+            lastTokenAt = tokens.LastSuccessAt,
+            lastFailureAt = tokens.LastFailureAt,
+            lastError = tokens.Healthy ? null : tokens.LastError,
+            tokenExpiresAt = tokens.Current?.ExpiresAt,
+        }));
+
         v1.MapGet("/chats", async (ChatsvcClient chatsvc, CancellationToken ct) =>
             Results.Ok(await chatsvc.GetConversationsAsync(ct)));
 
