@@ -7,7 +7,7 @@
 ```
 services/     可部署的服務
   TeamsGateway.Gateway      Teams → HTTP/SSE gateway（已實作）
-  slack-relay/              訂閱 gateway、把訊息轉進 Slack（規劃中）
+  TeamsGateway.SlackRelay/  訂閱 gateway、把訊息轉進 Slack（Phase 1：Teams→Slack 已做）
 packages/       跨專案共用
   TeamsGateway.Contracts    對外 wire DTO（gateway 與 .NET relay 共用）
   TeamsGateway.ServiceDefaults  Aspire 共用（OTel / health / resilience）

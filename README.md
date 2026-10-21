@@ -11,7 +11,7 @@
 | 路徑 | 是什麼 | 狀態 |
 |---|---|---|
 | `services/TeamsGateway.Gateway` | Teams → HTTP/SSE gateway（列群組/讀/發/事件串流） | ✅ 可用 |
-| `services/slack-relay` | 訂閱 gateway、把訊息轉進 Slack（只看 Slack 就能接收與回覆） | 規劃中 |
+| `services/TeamsGateway.SlackRelay` | 訂閱 gateway、把訊息轉進 Slack（只看 Slack 就能接收與回覆） | Phase 1 ✅（Teams→Slack） |
 
 **Client**（接 gateway 的）
 

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>teams-slack-relay</UserSecretsId>
+    <!-- 低流量的常駐服務：workstation GC，記憶體佔用遠低於預設 server GC -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\packages\TeamsGateway.ServiceDefaults\TeamsGateway.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\packages\TeamsGateway.Contracts\TeamsGateway.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

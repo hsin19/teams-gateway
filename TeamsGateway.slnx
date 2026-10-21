@@ -4,6 +4,7 @@
   </Folder>
   <Folder Name="/services/">
     <Project Path="services/TeamsGateway.Gateway/TeamsGateway.Gateway.csproj" />
+    <Project Path="services/TeamsGateway.SlackRelay/TeamsGateway.SlackRelay.csproj" />
   </Folder>
   <Folder Name="/packages/">
     <Project Path="packages/TeamsGateway.Contracts/TeamsGateway.Contracts.csproj" />
@@ -13,5 +14,6 @@
     <Project Path="tests/TeamsGateway.Gateway.UnitTests/TeamsGateway.Gateway.UnitTests.csproj" />
     <Project Path="tests/TeamsGateway.Gateway.E2E/TeamsGateway.Gateway.E2E.csproj" />
     <Project Path="tests/TeamsGateway.Gateway.FunctionalTests/TeamsGateway.Gateway.FunctionalTests.csproj" />
+    <Project Path="tests/TeamsGateway.SlackRelay.UnitTests/TeamsGateway.SlackRelay.UnitTests.csproj" />
   </Folder>
 </Solution>
