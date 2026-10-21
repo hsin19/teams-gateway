@@ -59,24 +59,58 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
                ?? chats.FirstOrDefault(c => c.Topic?.ToLowerInvariant().Contains(low) == true);
     }
 
+    /// <summary>一則訊息連同原始 JSON（給持久化留存）。</summary>
+    public readonly record struct RawMessage(MessageDto Dto, string Raw);
+
     public async Task<MessagePage> GetMessagesAsync(string threadId, int pageSize, string? cursor, CancellationToken ct = default)
+    {
+        var (items, next) = await FetchPageAsync(threadId, pageSize, cursor, ct);
+        return new MessagePage(items.Select(i => i.Dto).ToList(), next);
+    }
+
+    /// <summary>往回翻頁抓歷史，直到訊息比 <paramref name="cutoff"/> 舊或到頂（或到 <paramref name="maxMessages"/> 上限）。給回補用。</summary>
+    public async Task<IReadOnlyList<RawMessage>> GetHistoryAsync(string threadId, DateTimeOffset cutoff, int maxMessages, CancellationToken ct = default)
+    {
+        var result = new List<RawMessage>();
+        string? cursor = null;
+        for (var page = 0; page < 40 && result.Count < maxMessages; page++)
+        {
+            var (items, next) = await FetchPageAsync(threadId, 200, cursor, ct);
+            if (items.Count == 0)
+                break;
+            var reachedCutoff = false;
+            foreach (var item in items)
+            {
+                if (item.Dto.Time is { } t && t < cutoff)
+                    reachedCutoff = true;
+                else if (item.Dto.Type is "Text" or "RichText/Html")
+                    result.Add(item);
+            }
+            if (reachedCutoff || next is null)
+                break;
+            cursor = next;
+        }
+        return result;
+    }
+
+    private async Task<(List<RawMessage> Items, string? Next)> FetchPageAsync(string threadId, int pageSize, string? cursor, CancellationToken ct)
     {
         var url = cursor ?? $"conversations/{Uri.EscapeDataString(threadId)}/messages?view={View}&pageSize={pageSize}&startTime=0";
         using var resp = await SendAsync(() => new HttpRequestMessage(HttpMethod.Get, url), ct);
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
 
-        var messages = new List<MessageDto>();
+        var items = new List<RawMessage>();
         if (doc.RootElement.TryGetProperty("messages", out var arr))
         {
             foreach (var m in arr.EnumerateArray())
             {
                 var parsed = ParseMessage(m, threadId);
                 if (parsed is not null)
-                    messages.Add(parsed);
+                    items.Add(new RawMessage(parsed, m.GetRawText()));
             }
         }
         var next = doc.RootElement.TryGetProperty("_metadata", out var meta) ? GetString(meta, "backwardLink") : null;
-        return new MessagePage(messages, next);
+        return (items, next);
     }
 
     public async Task<SendMessageResult> SendMessageAsync(string threadId, string text, string displayName, CancellationToken ct = default)

@@ -11,4 +11,7 @@ public sealed class GatewayOptions
 
     /// <summary>SQLite 與 DataProtection key 的存放目錄；預設 content root 下的 <c>.data</c>。</summary>
     public string? DataDir { get; set; }
+
+    /// <summary>訂閱 / 啟動時回補幾天的歷史訊息（給 Elasticsearch 歷史搜尋留料）。</summary>
+    public int BackfillDays { get; set; } = 7;
 }

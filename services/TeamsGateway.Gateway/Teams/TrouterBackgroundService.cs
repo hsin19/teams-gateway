@@ -1,14 +1,9 @@
-using Microsoft.EntityFrameworkCore;
-using TeamsGateway.Gateway.Data;
-using TeamsGateway.Gateway.Events;
-
 namespace TeamsGateway.Gateway.Teams;
 
-/// <summary>常駐跑 Trouter 連線：收到新訊息就去重寫進 DB，再 publish 給 SSE / webhook。斷線重連，退避。</summary>
+/// <summary>常駐跑 Trouter 連線：收到「訂閱中對話」的新訊息就去重寫進 DB、publish 給 SSE / webhook。斷線重連，退避。</summary>
 public sealed class TrouterBackgroundService(
     TrouterClient trouter,
-    IDbContextFactory<GatewayDbContext> factory,
-    GatewayEventBus bus,
+    MessageIngestor ingestor,
     ILogger<TrouterBackgroundService> logger) : BackgroundService
 {
     private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(5);
@@ -47,46 +42,9 @@ public sealed class TrouterBackgroundService(
 
     private async Task OnMessageAsync(IncomingMessage incoming, CancellationToken ct)
     {
-        var dto = incoming.Message;
-        await using var db = await factory.CreateDbContextAsync(ct);
-
-        // 以 Teams 訊息 id 當主鍵天然去重（自己發的也會推回來、Trouter 偶爾重送）
-        if (await db.MessageEvents.AnyAsync(m => m.Id == dto.Id, ct))
+        // 只收訂閱中的對話（Trouter 會推帳號所有對話）；其餘丟掉，不入庫
+        if (!await ingestor.IsSubscribedAsync(incoming.Message.ConversationId, ct))
             return;
-
-        db.MessageEvents.Add(new MessageEvent
-        {
-            Id = dto.Id,
-            ConversationId = dto.ConversationId,
-            SenderMri = dto.From,
-            SenderName = dto.FromName,
-            MessageType = dto.Type,
-            Content = dto.Content,
-            SequenceId = dto.SequenceId,
-            ComposeTime = dto.Time,
-            ReceivedAt = DateTimeOffset.UtcNow,
-            RawJson = incoming.RawJson,
-        });
-
-        var conversation = await db.Conversations.FindAsync([dto.ConversationId], ct);
-        if (conversation is null)
-        {
-            db.Conversations.Add(new Conversation
-            {
-                Id = dto.ConversationId,
-                Topic = incoming.ThreadTopic,
-                LastMessageId = dto.Id,
-                UpdatedAt = DateTimeOffset.UtcNow,
-            });
-        }
-        else
-        {
-            conversation.Topic = incoming.ThreadTopic ?? conversation.Topic;
-            conversation.LastMessageId = dto.Id;
-            conversation.UpdatedAt = DateTimeOffset.UtcNow;
-        }
-
-        await db.SaveChangesAsync(ct);
-        bus.Publish(dto);
+        await ingestor.StoreAsync(incoming.Message, incoming.RawJson, publish: true, ct);
     }
 }

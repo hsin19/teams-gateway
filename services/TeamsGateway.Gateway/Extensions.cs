@@ -20,9 +20,14 @@ public static class Extensions
 
         // 即時推播：Trouter 背景連線 → 行程內匯流排 → SSE
         builder.Services.AddSingleton<GatewayEventBus>();
+        builder.Services.AddSingleton<MessageIngestor>();
         builder.Services.AddSingleton<TrouterClient>();
         builder.Services.AddHostedService<TrouterBackgroundService>();
         builder.Services.AddHostedService<WebhookDeliveryService>();
+
+        // 只追訂閱中的對話，並在訂閱 / 啟動時回補歷史（給 Elasticsearch 歷史搜尋留料）
+        builder.Services.AddScoped<Backfiller>();
+        builder.Services.AddHostedService<StartupBackfillService>();
 
         // MCP：讀 / 發是純 function，開成 MCP tool 給任何 MCP client 用（見 Mcp/TeamsTools）
         builder.Services.AddMcpServer().WithHttpTransport().WithToolsFromAssembly();

@@ -41,6 +41,17 @@ curl -X POST -H "X-Admin-Token: $TOKEN" -d '{"name":"client"}'              $BAS
 
 cookie 與 token 以 DataProtection 加密後存進 SQLite（`SecureValues` 表），key 在 `.data/keys/`。
 
+## 訂閱哪些對話（範圍）
+
+gateway **只追 / 存訂閱中的對話**（Trouter 會推帳號的所有對話，但只有訂閱的會入庫、才會進 SSE / webhook）。
+訂閱時會同步回補一段歷史（預設 7 天，`Gateway:BackfillDays`）；重啟時也會補停機期間的缺口——給之後接 Elasticsearch 歷史搜尋留料。
+
+```
+curl -X PUT    -H "X-Admin-Token: $T" -d '{"chat":"General Chat"}' $BASE/admin/subscriptions  # chat 可給 id 或群名
+curl           -H "X-Admin-Token: $T"                                        $BASE/admin/subscriptions  # 列訂閱
+curl -X DELETE -H "X-Admin-Token: $T"  $BASE/admin/subscriptions/<id>                                    # 取消（保留已存歷史）
+```
+
 ## 對外 API（給 skills / client / slack-relay 接）
 
 帶 `Authorization: Bearer tgw_...`：

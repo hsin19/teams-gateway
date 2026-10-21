@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using TeamsGateway.Gateway.Auth;
+using TeamsGateway.Gateway.Data;
 using TeamsGateway.Gateway.Teams;
 
 namespace TeamsGateway.Gateway.Apis;
@@ -63,6 +65,54 @@ public static class AdminApi
         admin.MapDelete("/api-keys/{id:guid}", async (Guid id, ApiKeyService keys, CancellationToken ct) =>
             await keys.RevokeAsync(id, ct) ? Results.NoContent() : Results.NotFound());
 
+        // 訂閱對話：gateway 只追 / 存訂閱中的對話（Trouter 會推帳號所有對話，但只有這些入庫）
+        admin.MapGet("/subscriptions", async (IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
+        {
+            await using var db = await factory.CreateDbContextAsync(ct);
+            var subs = await db.Conversations.Where(c => c.Subscribed)
+                .Select(c => new { c.Id, c.Topic, c.LastMessageId, c.UpdatedAt }).ToListAsync(ct);
+            return Results.Ok(subs);
+        });
+
+        // chat 可給 id 或群名；訂閱後同步回補歷史（預設一週）
+        admin.MapPut("/subscriptions", async (SubscribeRequest body, ChatsvcClient chatsvc, IDbContextFactory<GatewayDbContext> factory, Backfiller backfiller, CancellationToken ct) =>
+        {
+            var chats = await chatsvc.GetConversationsAsync(ct);
+            var hit = ChatsvcClient.IsThreadId(body.Chat)
+                ? chats.FirstOrDefault(c => c.Id == body.Chat) ?? new Contracts.ConversationDto(body.Chat, null, null, null)
+                : ChatsvcClient.MatchByName(chats, body.Chat);
+            if (hit is null)
+                return Results.NotFound(new { error = $"找不到對話 '{body.Chat}'" });
+
+            await using (var db = await factory.CreateDbContextAsync(ct))
+            {
+                var conv = await db.Conversations.FindAsync([hit.Id], ct);
+                if (conv is null)
+                    db.Conversations.Add(new Conversation { Id = hit.Id, Topic = hit.Topic, Subscribed = true, UpdatedAt = DateTimeOffset.UtcNow });
+                else
+                {
+                    conv.Subscribed = true;
+                    conv.Topic = hit.Topic ?? conv.Topic;
+                    conv.UpdatedAt = DateTimeOffset.UtcNow;
+                }
+                await db.SaveChangesAsync(ct);
+            }
+
+            await backfiller.BackfillAsync(hit.Id, ct); // 回補歷史
+            return Results.Ok(new { id = hit.Id, topic = hit.Topic });
+        });
+
+        admin.MapDelete("/subscriptions/{id}", async (string id, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
+        {
+            await using var db = await factory.CreateDbContextAsync(ct);
+            var conv = await db.Conversations.FindAsync([id], ct);
+            if (conv is null || !conv.Subscribed)
+                return Results.NotFound();
+            conv.Subscribed = false; // 保留已存的歷史
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
+
         return admin;
     }
 
@@ -70,3 +120,5 @@ public static class AdminApi
 }
 
 public sealed record CreateApiKeyRequest(string Name);
+
+public sealed record SubscribeRequest(string Chat);
