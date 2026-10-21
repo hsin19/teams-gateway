@@ -41,6 +41,35 @@ public class TeamsTextTests
     [Fact]
     public void Null_is_safe() => Assert.Equal("", TeamsText.ToSlack(null));
 
+    [Fact]
+    public void QuotedMessageId_reads_blockquote_itemid()
+    {
+        const string html =
+            "<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"1792522584402\">" +
+            "<strong itemprop=\"mri\">Bob</strong><p itemprop=\"preview\">x</p></blockquote><p>reply</p>";
+        Assert.Equal("1792522584402", TeamsText.QuotedMessageId(html));
+    }
+
+    [Fact]
+    public void QuotedMessageId_null_when_not_a_reply()
+    {
+        Assert.Null(TeamsText.QuotedMessageId("<p>just a message</p>"));
+        Assert.Null(TeamsText.QuotedMessageId(null));
+    }
+
+    [Fact]
+    public void Drops_quote_when_includeQuote_false()
+    {
+        const string html =
+            "<blockquote itemscope=\"\" itemid=\"1\"><strong itemprop=\"mri\">Bob</strong>" +
+            "<p itemprop=\"preview\">quoted</p></blockquote><p>my reply</p>";
+        var result = TeamsText.ToSlack(html, includeQuote: false);
+
+        Assert.DoesNotContain(">", result);     // 完全沒有引用
+        Assert.DoesNotContain("quoted", result);
+        Assert.Equal("my reply", result);
+    }
+
     // reply 在上、引用在下：不該出現大塊空行
     [Fact]
     public void Reply_then_quote_has_no_blank_line_gaps()

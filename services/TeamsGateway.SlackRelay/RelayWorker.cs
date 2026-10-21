@@ -10,6 +10,7 @@ namespace TeamsGateway.SlackRelay;
 public sealed class RelayWorker(
     GatewayEventStream stream,
     SlackClient slack,
+    MessageLinks links,
     IOptions<RelayOptions> options,
     ILogger<RelayWorker> logger) : BackgroundService
 {
@@ -68,18 +69,28 @@ public sealed class RelayWorker(
         if (channel is null)
             return; // 沒對應頻道、也沒 default
 
-        await slack.PostMessageAsync(channel, Format(message), ct);
+        var text = await FormatAsync(message, channel, ct);
+        var ts = await slack.PostMessageAsync(channel, text, ct);
+        if (ts is not null)
+            links.Remember(message.Id, channel, ts); // 記住對應，之後的回覆才連得回這則
     }
 
-    private static string Format(MessageDto message)
+    private async Task<string> FormatAsync(MessageDto message, string channel, CancellationToken ct)
     {
         var who = string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName;
         var marker = message.Deleted ? "(deleted)" : message.Edited ? "(edited)" : null;
         var head = marker is null ? $"*{who}*:" : $"*{who}*: {marker}";
 
-        var body = TeamsText.ToSlack(message.Content); // Teams RichText/Html → Slack 看得順的文字
-        // 多行、或以引用開頭時內容另起一行，Slack 才會把 "> " 當 blockquote 渲染（不會黏在 header 後）
-        var joiner = body.Length > 0 && (body.Contains('\n') || body.StartsWith('>')) ? "\n" : " ";
-        return $"{head}{joiner}{body}";
+        // 若是回覆、且被引用那則我們轉過：用 Slack permalink（Slack 會 unfurl 成原生引用），不再畫 blockquote
+        string? permalink = null;
+        if (TeamsText.QuotedMessageId(message.Content) is { } quotedId && links.Lookup(quotedId) is { } slackRef)
+            permalink = await slack.GetPermalinkAsync(slackRef.Channel, slackRef.Ts, ct);
+
+        var body = TeamsText.ToSlack(message.Content, includeQuote: permalink is null);
+        var content = permalink is null ? body : $"<{permalink}>\n{body}".TrimEnd();
+
+        // 多行、以引用開頭、或有 permalink 時，內容另起一行
+        var joiner = content.Length > 0 && (content.Contains('\n') || content.StartsWith('>') || content.StartsWith('<')) ? "\n" : " ";
+        return $"{head}{joiner}{content}";
     }
 }

@@ -41,6 +41,7 @@ public static class Extensions
                 http.DefaultRequestHeaders.Authorization = new("Bearer", gateway.ApiKey);
         });
 
+        builder.Services.AddSingleton<MessageLinks>();
         builder.Services.AddHostedService<RelayWorker>();
         builder.Services.AddHostedService<AuthMonitor>();
     }

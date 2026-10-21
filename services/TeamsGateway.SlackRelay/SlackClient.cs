@@ -3,23 +3,39 @@ using System.Text.Json.Serialization;
 
 namespace TeamsGateway.SlackRelay;
 
-/// <summary>Slack Web API 的 <c>chat.postMessage</c>（bot token，<c>chat:write</c>）。</summary>
+/// <summary>Slack Web API：發訊息、取訊息 permalink（bot token，<c>chat:write</c>）。</summary>
 public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
 {
-    public async Task<bool> PostMessageAsync(string channel, string text, CancellationToken ct)
+    /// <summary>發訊息，回傳貼成的訊息 ts（給之後連回引用用）；失敗回 null。</summary>
+    public async Task<string?> PostMessageAsync(string channel, string text, CancellationToken ct)
     {
         using var resp = await http.PostAsJsonAsync("chat.postMessage", new { channel, text }, ct);
         // Slack 失敗也回 200，要看 body 的 ok
-        var result = await resp.Content.ReadFromJsonAsync<SlackResponse>(ct);
+        var result = await resp.Content.ReadFromJsonAsync<PostResponse>(ct);
         if (result is { Ok: true })
-            return true;
+            return result.Ts;
 
         logger.LogError("Slack chat.postMessage 失敗（channel={Channel}）：{Error}",
             channel, result?.Error ?? ((int)resp.StatusCode).ToString());
-        return false;
+        return null;
     }
 
-    private sealed record SlackResponse(
+    /// <summary>某則訊息的 permalink（貼進訊息裡 Slack 會 unfurl 成原生引用）；取不到回 null。</summary>
+    public async Task<string?> GetPermalinkAsync(string channel, string ts, CancellationToken ct)
+    {
+        var url = $"chat.getPermalink?channel={Uri.EscapeDataString(channel)}&message_ts={Uri.EscapeDataString(ts)}";
+        using var resp = await http.GetAsync(url, ct);
+        var result = await resp.Content.ReadFromJsonAsync<PermalinkResponse>(ct);
+        return result is { Ok: true } ? result.Permalink : null;
+    }
+
+    private sealed record PostResponse(
         [property: JsonPropertyName("ok")] bool Ok,
+        [property: JsonPropertyName("ts")] string? Ts,
+        [property: JsonPropertyName("error")] string? Error);
+
+    private sealed record PermalinkResponse(
+        [property: JsonPropertyName("ok")] bool Ok,
+        [property: JsonPropertyName("permalink")] string? Permalink,
         [property: JsonPropertyName("error")] string? Error);
 }

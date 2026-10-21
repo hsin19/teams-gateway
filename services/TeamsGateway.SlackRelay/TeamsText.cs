@@ -10,14 +10,17 @@ namespace TeamsGateway.SlackRelay;
 /// </summary>
 public static partial class TeamsText
 {
-    public static string ToSlack(string? content)
+    /// <summary><paramref name="includeQuote"/>=false 時連 blockquote 一起拿掉（呼叫端改用 Slack permalink 連回引用）。</summary>
+    public static string ToSlack(string? content, bool includeQuote = true)
     {
         if (string.IsNullOrWhiteSpace(content))
             return content ?? "";
 
-        // 回覆引用：抽出「發話者 + 被引用內容」，渲染成兩行 Slack blockquote
+        // 回覆引用：抽出「發話者 + 被引用內容」，渲染成兩行 Slack blockquote（或整個拿掉）
         var text = BlockquoteRegex().Replace(content, match =>
         {
+            if (!includeQuote)
+                return "";
             var inner = match.Groups[1].Value;
             var author = QuotedAuthor(inner);
             var quoted = QuotedText(inner) ?? Decode(CollapseTags(inner));
@@ -34,6 +37,15 @@ public static partial class TeamsText
         text = TrailingSpaceRegex().Replace(text, "\n");
         text = ExtraBlankRegex().Replace(text, "\n"); // 連續換行收成一個，不留大塊空行
         return text.Trim();
+    }
+
+    /// <summary>若是回覆，回傳被引用的那則 Teams 訊息 id（blockquote 的 itemid）；不是回覆則 null。</summary>
+    public static string? QuotedMessageId(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return null;
+        var m = QuoteIdRegex().Match(content);
+        return m.Success ? m.Groups[1].Value : null;
     }
 
     /// <summary>引用的發話者（itemprop="mri" 元素的文字）。要完整 decode + trim，不然尾端空白會讓 Slack 粗體失效。</summary>
@@ -63,6 +75,9 @@ public static partial class TeamsText
 
     [GeneratedRegex(@"<blockquote\b[^>]*>(.*?)</blockquote>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex BlockquoteRegex();
+
+    [GeneratedRegex(@"<blockquote\b[^>]*\bitemid=""(\d+)""", RegexOptions.IgnoreCase)]
+    private static partial Regex QuoteIdRegex();
 
     [GeneratedRegex(@"itemprop=""mri""[^>]*>([^<]*)", RegexOptions.IgnoreCase)]
     private static partial Regex MriRegex();
