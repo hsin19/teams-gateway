@@ -1,3 +1,4 @@
+using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 using TeamsGateway.Gateway.Apis;
 using TeamsGateway.Gateway.Auth;
@@ -34,14 +35,45 @@ public static class Extensions
         // MCP：讀 / 發是純 function，開成 MCP tool 給任何 MCP client 用（見 Mcp/TeamsTools）
         builder.Services.AddMcpServer().WithHttpTransport().WithToolsFromAssembly();
 
-        // 內建 OpenAPI + Scalar UI（/scalar）。transformer 只改 Info，不指名 Microsoft.OpenApi 型別，避開 net10 的 2.x namespace
-        builder.Services.AddOpenApi(options => options.AddDocumentTransformer((document, context, ct) =>
+        // 內建 OpenAPI + Scalar UI（/scalar）
+        builder.Services.AddOpenApi(options =>
         {
-            document.Info.Title = "teams-gateway";
-            document.Info.Version = "v1";
-            document.Info.Description = "個人版 Teams 的 HTTP gateway。/v1 給訂閱者（帶 Authorization: Bearer tgw_…）。";
-            return Task.CompletedTask;
-        }));
+            options.AddDocumentTransformer((document, context, ct) =>
+            {
+                document.Info.Title = "teams-gateway";
+                document.Info.Version = "v1";
+                document.Info.Description = "個人版 Teams 的 HTTP gateway。/v1 給訂閱者（Bearer tgw_…）、/admin 帶 X-Admin-Token。";
+
+                document.Components ??= new OpenApiComponents();
+                document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
+                document.Components.SecuritySchemes["ApiKey"] = new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.Http,
+                    Scheme = "bearer",
+                    Description = "訂閱者 API key：Authorization: Bearer tgw_…",
+                };
+                document.Components.SecuritySchemes["AdminToken"] = new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey,
+                    In = ParameterLocation.Header,
+                    Name = "X-Admin-Token",
+                    Description = "管理端點用的 token",
+                };
+
+                // 每個端點依路徑套對應 auth，Scalar 的 try-it 就會帶，不用手動貼 header
+                var apiKey = new OpenApiSecuritySchemeReference("ApiKey", document);
+                var adminToken = new OpenApiSecuritySchemeReference("AdminToken", document);
+                foreach (var (path, item) in document.Paths)
+                {
+                    if (item.Operations is null)
+                        continue;
+                    var scheme = path.StartsWith("/admin", StringComparison.OrdinalIgnoreCase) ? adminToken : apiKey;
+                    foreach (var operation in item.Operations.Values)
+                        operation.Security = [new OpenApiSecurityRequirement { [scheme] = [] }];
+                }
+                return Task.CompletedTask;
+            });
+        });
     }
 
     public static async Task UseApplicationAsync(this WebApplication app)
