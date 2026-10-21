@@ -7,6 +7,10 @@
 - **Phase 1（已做）Teams → Slack**：當 `GET /v1/events`（SSE）的訂閱者，把 Teams 訊息貼進對應的 Slack 頻道。斷線用 `Last-Event-ID` 續接。
 - **Phase 2（未做）Slack → Teams**：Socket Mode 收 Slack 回覆 → 對應回 Teams 對話 → `POST /v1/chats/{id}/messages`。
 
+## Slack app
+
+bot 的 app 定義在 [`slack-app-manifest.yaml`](slack-app-manifest.yaml)。到 api.slack.com/apps → Create New App → From an app manifest 貼它建立，Install 後把 **Bot User OAuth Token**（`xoxb-…`）設成 `Relay__Slack__BotToken`。`chat:write.public` 讓 bot 不用被邀請就能貼公開頻道。
+
 ## 設定
 
 appsettings 放完整 default，secret 走 env（雙底線覆蓋）或 user-secrets。
