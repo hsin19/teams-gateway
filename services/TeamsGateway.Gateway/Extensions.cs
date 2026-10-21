@@ -1,3 +1,4 @@
+using Scalar.AspNetCore;
 using TeamsGateway.Gateway.Apis;
 using TeamsGateway.Gateway.Auth;
 using TeamsGateway.Gateway.Data;
@@ -32,6 +33,15 @@ public static class Extensions
 
         // MCP：讀 / 發是純 function，開成 MCP tool 給任何 MCP client 用（見 Mcp/TeamsTools）
         builder.Services.AddMcpServer().WithHttpTransport().WithToolsFromAssembly();
+
+        // 內建 OpenAPI + Scalar UI（/scalar）。transformer 只改 Info，不指名 Microsoft.OpenApi 型別，避開 net10 的 2.x namespace
+        builder.Services.AddOpenApi(options => options.AddDocumentTransformer((document, context, ct) =>
+        {
+            document.Info.Title = "teams-gateway";
+            document.Info.Version = "v1";
+            document.Info.Description = "個人版 Teams 的 HTTP gateway。/v1 給訂閱者（帶 Authorization: Bearer tgw_…）。";
+            return Task.CompletedTask;
+        }));
     }
 
     public static async Task UseApplicationAsync(this WebApplication app)
@@ -50,6 +60,10 @@ public static class Extensions
         app.MapWebhooksApi();
         app.MapMcp("/mcp");
         app.MapGet("/", () => "teams-gateway");
+
+        // API doc：/openapi/v1.json + Scalar UI /scalar（借 eShop：關掉預設字型下載，不打外部）
+        app.MapOpenApi();
+        app.MapScalarApiReference(options => options.DefaultFonts = false);
     }
 
     private static async Task RequireApiKey(HttpContext ctx, RequestDelegate next)
