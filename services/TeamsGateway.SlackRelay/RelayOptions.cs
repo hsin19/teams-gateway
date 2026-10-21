@@ -15,9 +15,20 @@ public sealed class RelayOptions
     public sealed class SlackSettings
     {
         public string? BotToken { get; set; }
-        /// <summary>沒對應到 <see cref="ChannelMap"/> 的對話落這個頻道；null = 不轉。</summary>
+        /// <summary>沒對應到 <see cref="Routes"/> 的對話落這個頻道；null = 不轉。</summary>
         public string? DefaultChannel { get; set; }
-        /// <summary>Teams 對話 id → Slack 頻道（id 或 #name）。空 = 全部走 DefaultChannel。</summary>
-        public Dictionary<string, string> ChannelMap { get; set; } = new();
+        /// <summary>
+        /// Teams 對話 → Slack 頻道 的轉送路由。
+        /// 用 list 而非 dict：Teams 對話 id 含 <c>:</c>，當 config dict 的 key 會被 .NET config 的階層分隔符拆掉。
+        /// </summary>
+        public List<ChannelRoute> Routes { get; set; } = [];
+    }
+
+    public sealed class ChannelRoute
+    {
+        /// <summary>Teams 對話 id（<c>19:…@thread.v2</c> / <c>@thread.skype</c>）。</summary>
+        public string Chat { get; set; } = "";
+        /// <summary>Slack 頻道 id 或 <c>#name</c>。</summary>
+        public string Channel { get; set; } = "";
     }
 }

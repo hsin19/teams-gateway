@@ -20,3 +20,7 @@ dist/
 *.egg-info/
 .publish/
 .env
+
+# 本機 / 部署專屬設定（ChannelMap 等），不進 repo
+appsettings.Local.json
+**/appsettings.Local.json
