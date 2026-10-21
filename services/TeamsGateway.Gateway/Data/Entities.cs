@@ -28,8 +28,14 @@ public class MessageEvent
     public string? MessageType { get; set; }
     public string? Content { get; set; }
     public long SequenceId { get; set; }
+    /// <summary>訊息版本；編輯時遞增（新訊息 = Id）。用來判斷「同 id 但被編輯」要更新。</summary>
+    public long Version { get; set; }
+    public bool Edited { get; set; }
+    public bool Deleted { get; set; }
     public DateTimeOffset ComposeTime { get; set; }
     public DateTimeOffset ReceivedAt { get; set; }
+    /// <summary>最後更新（收到或被編輯更新）時間。</summary>
+    public DateTimeOffset UpdatedAt { get; set; }
     /// <summary>原始 resource JSON，保留給之後更完整的解析或 ES。</summary>
     public required string RawJson { get; set; }
 

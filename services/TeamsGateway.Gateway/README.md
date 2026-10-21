@@ -46,6 +46,8 @@ cookie 與 token 以 DataProtection 加密後存進 SQLite（`SecureValues` 表�
 gateway **只追 / 存訂閱中的對話**（Trouter 會推帳號的所有對話，但只有訂閱的會入庫、才會進 SSE / webhook）。
 訂閱時會同步回補一段歷史（預設 7 天，`Gateway:BackfillDays`）；重啟時也會補停機期間的缺口——給之後接 Elasticsearch 歷史搜尋留料。
 
+**編輯 / 刪除**：訊息 `version` 在編輯時遞增。同 id 但 version 更大 = 被編輯 / 刪除，gateway 會更新 DB 的內容與 `Edited` / `Deleted` 標記並重發事件。推播不一定帶每個編輯，所以還有「慢更新」：每 `Gateway:ReconcileMinutes`（預設 15）分重掃訂閱對話近 `ReconcileWindowHours`（預設 24）小時的訊息，把漏接的編輯 / 刪除補上。
+
 ```
 curl -X PUT    -H "X-Admin-Token: $T" -d '{"chat":"General Chat"}' $BASE/admin/subscriptions  # chat 可給 id 或群名
 curl           -H "X-Admin-Token: $T"                                        $BASE/admin/subscriptions  # 列訂閱

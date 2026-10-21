@@ -45,6 +45,6 @@ public sealed class TrouterBackgroundService(
         // 只收訂閱中的對話（Trouter 會推帳號所有對話）；其餘丟掉，不入庫
         if (!await ingestor.IsSubscribedAsync(incoming.Message.ConversationId, ct))
             return;
-        await ingestor.StoreAsync(incoming.Message, incoming.RawJson, publish: true, ct);
+        await ingestor.UpsertAsync(incoming.Message, incoming.RawJson, publish: true, ct);
     }
 }

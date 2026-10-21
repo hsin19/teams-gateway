@@ -31,10 +31,10 @@ public sealed class Backfiller(
         var history = await chatsvc.GetHistoryAsync(conversationId, window, MaxMessages, ct);
         var stored = 0;
         foreach (var item in history)
-            if (await ingestor.StoreAsync(item.Dto, item.Raw, publish: false, ct))
+            if (await ingestor.UpsertAsync(item.Dto, item.Raw, publish: false, ct) is not IngestResult.Unchanged)
                 stored++;
 
-        logger.LogInformation("回補 {Conversation}：抓到 {Fetched} 則、新增 {Stored} 則（{Since:u} 起）",
+        logger.LogInformation("回補 {Conversation}：抓到 {Fetched} 則、新增 / 更新 {Stored} 則（{Since:u} 起）",
             conversationId, history.Count, stored, window);
     }
 }

@@ -7,8 +7,8 @@ namespace TeamsGateway.Gateway.Tests;
 
 public class MessageIngestorTests
 {
-    private static MessageDto Msg(string id) =>
-        new(id, "19:x@thread.v2", "8:me", "me", "Text", "hi", 1, DateTimeOffset.UtcNow);
+    private static MessageDto Msg(string id, long version, string? content = "hi", bool edited = false, bool deleted = false) =>
+        new(id, "19:x@thread.v2", "8:me", "me", "Text", content, 1, DateTimeOffset.UtcNow, version, edited, deleted);
 
     private static async Task AddConversationAsync(TestDb db, bool subscribed)
     {
@@ -18,17 +18,49 @@ public class MessageIngestorTests
     }
 
     [Fact]
-    public async Task Store_is_idempotent_by_message_id()
+    public async Task Upsert_inserts_then_dedupes_same_version()
     {
         using var db = new TestDb();
         await AddConversationAsync(db, subscribed: true);
         var ingestor = new MessageIngestor(db, new GatewayEventBus());
 
-        Assert.True(await ingestor.StoreAsync(Msg("m1"), "{}", publish: false, default));
-        Assert.False(await ingestor.StoreAsync(Msg("m1"), "{}", publish: false, default)); // 重送
+        Assert.Equal(IngestResult.Inserted, await ingestor.UpsertAsync(Msg("100", version: 100), "{}", false, default));
+        Assert.Equal(IngestResult.Unchanged, await ingestor.UpsertAsync(Msg("100", version: 100), "{}", false, default));
 
         await using var ctx = db.CreateDbContext();
         Assert.Single(ctx.MessageEvents);
+    }
+
+    [Fact]
+    public async Task Higher_version_updates_content_and_marks_edited()
+    {
+        using var db = new TestDb();
+        await AddConversationAsync(db, subscribed: true);
+        var ingestor = new MessageIngestor(db, new GatewayEventBus());
+
+        await ingestor.UpsertAsync(Msg("100", version: 100, content: "原文"), "{}", false, default);
+        var result = await ingestor.UpsertAsync(Msg("100", version: 200, content: "改過", edited: true), "{}", false, default);
+
+        Assert.Equal(IngestResult.Updated, result);
+        await using var ctx = db.CreateDbContext();
+        var row = ctx.MessageEvents.Single();
+        Assert.Equal("改過", row.Content);
+        Assert.True(row.Edited);
+        Assert.Equal(200, row.Version);
+    }
+
+    [Fact]
+    public async Task Delete_marker_sets_deleted()
+    {
+        using var db = new TestDb();
+        await AddConversationAsync(db, subscribed: true);
+        var ingestor = new MessageIngestor(db, new GatewayEventBus());
+
+        await ingestor.UpsertAsync(Msg("100", version: 100), "{}", false, default);
+        await ingestor.UpsertAsync(Msg("100", version: 300, content: null, deleted: true), "{}", false, default);
+
+        await using var ctx = db.CreateDbContext();
+        Assert.True(ctx.MessageEvents.Single().Deleted);
     }
 
     [Fact]
@@ -37,10 +69,9 @@ public class MessageIngestorTests
         using var db = new TestDb();
         var ingestor = new MessageIngestor(db, new GatewayEventBus());
 
-        Assert.False(await ingestor.IsSubscribedAsync("19:x@thread.v2", default)); // 還沒有這個對話
-
+        Assert.False(await ingestor.IsSubscribedAsync("19:x@thread.v2", default));
         await AddConversationAsync(db, subscribed: false);
-        Assert.False(await ingestor.IsSubscribedAsync("19:x@thread.v2", default)); // 有但沒訂閱
+        Assert.False(await ingestor.IsSubscribedAsync("19:x@thread.v2", default));
     }
 
     [Fact]

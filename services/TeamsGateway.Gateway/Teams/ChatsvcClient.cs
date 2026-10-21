@@ -130,12 +130,16 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         return new SendMessageResult(clientMessageId);
     }
 
-    /// <summary>static 版的訊息解析，給 Trouter 推播事件共用。</summary>
+    /// <summary>static 版的訊息解析，給 Trouter 推播事件共用。編輯會讓 version &gt; id、properties 多 edittime；刪除有 deletetime。</summary>
     public static MessageDto? ParseMessage(JsonElement m, string conversationId)
     {
         var id = GetString(m, "id");
         if (id is null)
             return null;
+        var version = GetInt64(m, "version");
+        var props = Child(m, "properties");
+        var edited = (long.TryParse(id, out var idNum) && version > idNum) || GetString(props, "edittime") is not null;
+        var deleted = GetString(props, "deletetime") is not null;
         return new MessageDto(
             id,
             conversationId,
@@ -144,7 +148,10 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
             GetString(m, "messagetype"),
             GetString(m, "content"),
             GetInt64(m, "sequenceId"),
-            ParseTime(GetString(m, "composetime")) ?? DateTimeOffset.UtcNow);
+            ParseTime(GetString(m, "composetime")) ?? DateTimeOffset.UtcNow,
+            version == 0 && long.TryParse(id, out var v) ? v : version,
+            edited,
+            deleted);
     }
 
     private async Task<HttpResponseMessage> SendAsync(Func<HttpRequestMessage> make, CancellationToken ct)

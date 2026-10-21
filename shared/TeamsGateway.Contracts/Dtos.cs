@@ -3,7 +3,7 @@ namespace TeamsGateway.Contracts;
 /// <summary>對外的對話資訊。</summary>
 public sealed record ConversationDto(string Id, string? Topic, string? ThreadType, DateTimeOffset? LastMessageTime);
 
-/// <summary>對外的一則訊息。</summary>
+/// <summary>對外的一則訊息。<c>Version</c> 在編輯時遞增（新訊息 = Id）；<c>Edited</c> / <c>Deleted</c> 標記編輯 / 刪除。</summary>
 public sealed record MessageDto(
     string Id,
     string ConversationId,
@@ -12,7 +12,10 @@ public sealed record MessageDto(
     string? Type,
     string? Content,
     long SequenceId,
-    DateTimeOffset Time);
+    DateTimeOffset Time,
+    long Version = 0,
+    bool Edited = false,
+    bool Deleted = false);
 
 /// <summary>一頁訊息；<see cref="NextCursor"/> 傳回下一次查詢的游標（往更舊的方向）。</summary>
 public sealed record MessagePage(IReadOnlyList<MessageDto> Messages, string? NextCursor);

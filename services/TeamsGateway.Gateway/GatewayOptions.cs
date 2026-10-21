@@ -14,4 +14,10 @@ public sealed class GatewayOptions
 
     /// <summary>訂閱 / 啟動時回補幾天的歷史訊息（給 Elasticsearch 歷史搜尋留料）。</summary>
     public int BackfillDays { get; set; } = 7;
+
+    /// <summary>慢更新：每隔幾分鐘重掃訂閱對話，補上漏接的編輯 / 刪除。0 = 關閉。</summary>
+    public int ReconcileMinutes { get; set; } = 15;
+
+    /// <summary>慢更新每次回看幾小時內的訊息。</summary>
+    public int ReconcileWindowHours { get; set; } = 24;
 }

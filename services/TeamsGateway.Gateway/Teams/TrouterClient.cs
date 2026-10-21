@@ -118,7 +118,9 @@ public sealed class TrouterClient(
         {
             using var envelope = JsonDocument.Parse(body);
             var env = envelope.RootElement;
-            if (env.TryGetProperty("resourceType", out var rt) && rt.GetString() == "NewMessage" && env.TryGetProperty("resource", out var resource))
+            // NewMessage 是新訊息；編輯 / 刪除可能走別的 resourceType（MessageUpdate 等），一併收，靠 version upsert 決定更新
+            var resourceType = env.TryGetProperty("resourceType", out var rt) ? rt.GetString() : null;
+            if (resourceType is "NewMessage" or "MessageUpdate" or "EditMessage" && env.TryGetProperty("resource", out var resource))
             {
                 var conversationId = resource.TryGetProperty("to", out var to) ? to.GetString() : null;
                 var dto = conversationId is null ? null : ChatsvcClient.ParseMessage(resource, conversationId);

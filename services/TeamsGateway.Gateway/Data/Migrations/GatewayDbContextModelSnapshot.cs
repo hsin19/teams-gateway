@@ -85,6 +85,12 @@ namespace TeamsGateway.Gateway.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Edited")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("MessageType")
                         .HasColumnType("TEXT");
 
@@ -102,6 +108,12 @@ namespace TeamsGateway.Gateway.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<long>("SequenceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
