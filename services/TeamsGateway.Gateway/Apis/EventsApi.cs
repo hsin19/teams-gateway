@@ -61,7 +61,10 @@ public static class EventsApi
                 await WriteAsync(http, message, ct);
             }
         })
-        .AddEndpointFilter<ApiKeyFilter>();
+        .AddEndpointFilter<ApiKeyFilter>()
+        .WithSummary("SSE 即時訊息串流")
+        .WithDescription("連著收即時新訊息（像 Slack Socket Mode）。`chats` 逗號分隔過濾對話、省略 = 全部；重連帶 `Last-Event-ID`（最後收到的訊息 id）會先補回斷線期間漏掉的。")
+        .WithTags("Events");
     }
 
     internal static async Task<IReadOnlyList<MessageDto>> CatchUpAsync(IDbContextFactory<GatewayDbContext> factory, string lastEventId, CancellationToken ct)

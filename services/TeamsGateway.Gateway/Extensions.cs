@@ -59,7 +59,7 @@ public static class Extensions
         app.MapEventsApi();
         app.MapWebhooksApi();
         app.MapMcp("/mcp");
-        app.MapGet("/", () => "teams-gateway");
+        app.MapGet("/", () => "teams-gateway").ExcludeFromDescription(); // liveness，不進 API doc
 
         // API doc：/openapi/v1.json + Scalar UI /scalar（借 eShop：關掉預設字型下載，不打外部）
         app.MapOpenApi();

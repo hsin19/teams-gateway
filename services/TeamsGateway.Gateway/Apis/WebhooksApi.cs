@@ -9,7 +9,7 @@ public static class WebhooksApi
 {
     public static void MapWebhooksApi(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/v1/webhooks").AddEndpointFilter<ApiKeyFilter>();
+        var group = app.MapGroup("/v1/webhooks").AddEndpointFilter<ApiKeyFilter>().WithTags("Webhooks");
 
         group.MapPost("", async (CreateWebhookRequest body, HttpContext http, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
         {
@@ -31,7 +31,9 @@ public static class WebhooksApi
             db.WebhookSubscriptions.Add(hook);
             await db.SaveChangesAsync(ct);
             return Results.Ok(View(hook));
-        });
+        })
+        .WithSummary("登記 webhook")
+        .WithDescription("有符合的新訊息時 gateway 會 POST 到 `targetUrl`，帶 `X-TeamsGateway-Signature: sha256=<hmac>`。`conversationId` 省略 = 所有訂閱對話。");
 
         group.MapGet("", async (HttpContext http, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
         {
@@ -39,7 +41,8 @@ public static class WebhooksApi
             await using var db = await factory.CreateDbContextAsync(ct);
             var hooks = await db.WebhookSubscriptions.Where(w => w.ApiKeyId == apiKey.Id).ToListAsync(ct);
             return Results.Ok(hooks.Select(View));
-        });
+        })
+        .WithSummary("列出自己登記的 webhook");
 
         group.MapDelete("/{id:guid}", async (Guid id, HttpContext http, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
         {
@@ -51,7 +54,8 @@ public static class WebhooksApi
             db.WebhookSubscriptions.Remove(hook);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        });
+        })
+        .WithSummary("刪除 webhook");
     }
 
     private static object View(WebhookSubscription w) =>
