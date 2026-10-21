@@ -1,0 +1,28 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6E70C4"/>
+      <stop offset="1" stop-color="#474A8C"/>
+    </linearGradient>
+  </defs>
+
+  <!-- app-icon 圓角底 -->
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+
+  <!-- 訊息氣泡 -->
+  <path d="M150 132
+           h212 a58 58 0 0 1 58 58
+           v108 a58 58 0 0 1 -58 58
+           h-150 l-74 62 v-62
+           h-0 a58 58 0 0 1 -58 -58
+           v-108 a58 58 0 0 1 58 -58 z"
+        fill="#ffffff"/>
+
+  <!-- 轉送（relay）：上箭頭往右、下箭頭往左，兩路對流 -->
+  <g stroke="#565AB0" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M186 212 h120" />
+    <path d="M286 188 l24 24 -24 24" />
+    <path d="M326 284 h-120" />
+    <path d="M226 260 l-24 24 24 24" />
+  </g>
+</svg>
