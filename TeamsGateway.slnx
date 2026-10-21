@@ -11,5 +11,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TeamsGateway.Gateway.Tests/TeamsGateway.Gateway.Tests.csproj" />
+    <Project Path="tests/TeamsGateway.Gateway.E2E/TeamsGateway.Gateway.E2E.csproj" />
   </Folder>
 </Solution>

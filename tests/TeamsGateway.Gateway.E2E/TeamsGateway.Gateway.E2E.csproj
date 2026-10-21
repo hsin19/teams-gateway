@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- xunit v3 的測試專案要是可執行檔 -->
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- 黑箱打 gateway 的 HTTP；共用對外 wire DTO 當形狀斷言的單一來源 -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\packages\TeamsGateway.Contracts\TeamsGateway.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
