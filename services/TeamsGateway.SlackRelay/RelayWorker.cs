@@ -62,25 +62,36 @@ public sealed class RelayWorker(
 
     private async Task RelayAsync(MessageDto message, Dictionary<string, string> routes, string? defaultChannel, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(message.Content))
-            return; // 純系統事件 / 無文字內容，不轉
-
         var channel = routes.GetValueOrDefault(message.ConversationId) ?? defaultChannel;
         if (channel is null)
             return; // 沒對應頻道、也沒 default
 
+        // 這則我們轉過 → 編輯 / 刪除：原地更新，舊版進 thread 留證（不加 (edited)，靠 Slack 原生標記）
+        if (links.Lookup(message.Id) is { } prior)
+        {
+            await slack.PostReplyAsync(prior.Channel, prior.Ts, $"_上一版_\n{prior.Text}", ct);
+            var updated = message.Deleted
+                ? $"{Header(message)} _（訊息已刪除）_"
+                : await FormatAsync(message, prior.Channel, ct);
+            await slack.UpdateMessageAsync(prior.Channel, prior.Ts, updated, ct);
+            links.Remember(message.Id, prior.Channel, prior.Ts, updated);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(message.Content))
+            return; // 新訊息但無文字內容（純系統事件），不轉
+
         var text = await FormatAsync(message, channel, ct);
         var ts = await slack.PostMessageAsync(channel, text, ct);
         if (ts is not null)
-            links.Remember(message.Id, channel, ts); // 記住對應，之後的回覆才連得回這則
+            links.Remember(message.Id, channel, ts, text); // 記住對應，給之後的回覆 / 編輯用
     }
+
+    private static string Header(MessageDto message) =>
+        $"*{(string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName)}*:";
 
     private async Task<string> FormatAsync(MessageDto message, string channel, CancellationToken ct)
     {
-        var who = string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName;
-        var marker = message.Deleted ? "(deleted)" : message.Edited ? "(edited)" : null;
-        var head = marker is null ? $"*{who}*:" : $"*{who}*: {marker}";
-
         // 若是回覆、且被引用那則我們轉過：用 Slack permalink（Slack 會 unfurl 成原生引用），不再畫 blockquote
         string? permalink = null;
         if (TeamsText.QuotedMessageId(message.Content) is { } quotedId && links.Lookup(quotedId) is { } slackRef)
@@ -91,6 +102,6 @@ public sealed class RelayWorker(
 
         // 多行、以引用開頭、或有 permalink 時，內容另起一行
         var joiner = content.Length > 0 && (content.Contains('\n') || content.StartsWith('>') || content.StartsWith('<')) ? "\n" : " ";
-        return $"{head}{joiner}{content}";
+        return $"{Header(message)}{joiner}{content}";
     }
 }

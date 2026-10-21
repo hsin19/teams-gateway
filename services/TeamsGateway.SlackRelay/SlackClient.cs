@@ -20,6 +20,24 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         return null;
     }
 
+    /// <summary>在某則訊息的 thread 底下回一則（舊版留證用）。</summary>
+    public async Task PostReplyAsync(string channel, string threadTs, string text, CancellationToken ct)
+    {
+        using var resp = await http.PostAsJsonAsync("chat.postMessage", new { channel, text, thread_ts = threadTs }, ct);
+        var result = await resp.Content.ReadFromJsonAsync<PostResponse>(ct);
+        if (result is not { Ok: true })
+            logger.LogError("Slack thread 回覆失敗（channel={Channel}）：{Error}", channel, result?.Error ?? ((int)resp.StatusCode).ToString());
+    }
+
+    /// <summary>原地更新一則訊息（編輯時用；Slack 會自帶 "edited" 標記）。</summary>
+    public async Task UpdateMessageAsync(string channel, string ts, string text, CancellationToken ct)
+    {
+        using var resp = await http.PostAsJsonAsync("chat.update", new { channel, ts, text }, ct);
+        var result = await resp.Content.ReadFromJsonAsync<PostResponse>(ct);
+        if (result is not { Ok: true })
+            logger.LogError("Slack chat.update 失敗（channel={Channel}）：{Error}", channel, result?.Error ?? ((int)resp.StatusCode).ToString());
+    }
+
     /// <summary>某則訊息的 permalink（貼進訊息裡 Slack 會 unfurl 成原生引用）；取不到回 null。</summary>
     public async Task<string?> GetPermalinkAsync(string channel, string ts, CancellationToken ct)
     {
