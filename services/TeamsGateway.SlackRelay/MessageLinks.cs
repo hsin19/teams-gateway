@@ -5,7 +5,8 @@ namespace TeamsGateway.SlackRelay;
 /// <summary>
 /// 記住每則轉過去的 Teams 訊息對到哪個 Slack 訊息（channel + ts + 當前文字），給：
 /// (1) 回覆連回被引用訊息、(2) 編輯時原地更新 + 舊版進 thread 留證。
-/// 行程記憶體：重啟後清空，對舊訊息的回覆 / 編輯就退回當新訊息處理。
+/// 純記憶體；重啟時由 <c>RelayWorker</c> 讀各頻道近期歷史的 Slack message metadata（夾著 Teams id）重建，
+/// 所以不用本機存檔——Slack 自己就是 source of truth。
 /// </summary>
 public sealed class MessageLinks
 {
@@ -16,6 +17,8 @@ public sealed class MessageLinks
 
     public SlackRef? Lookup(string teamsMessageId) =>
         _byTeamsId.TryGetValue(teamsMessageId, out var slackRef) ? slackRef : null;
+
+    public int Count => _byTeamsId.Count;
 
     public readonly record struct SlackRef(string Channel, string Ts, string Text);
 }

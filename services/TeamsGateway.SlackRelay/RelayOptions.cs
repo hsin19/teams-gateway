@@ -5,6 +5,13 @@ public sealed class RelayOptions
 {
     public GatewaySettings Gateway { get; set; } = new();
     public SlackSettings Slack { get; set; } = new();
+    public LinkSettings Links { get; set; } = new();
+
+    public sealed class LinkSettings
+    {
+        /// <summary>啟動時從 Slack 歷史回補多久內的訊息對應（給回覆連結 / 原地編輯用）；更舊的不管。</summary>
+        public int RetentionHours { get; set; } = 24;
+    }
 
     public sealed class GatewaySettings
     {

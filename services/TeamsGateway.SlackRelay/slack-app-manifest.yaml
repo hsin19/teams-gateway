@@ -3,6 +3,8 @@
 # 裝完到 OAuth & Permissions 複製 Bot User OAuth Token（xoxb-…），設成 Relay__Slack__BotToken。
 #
 # chat:write.public 讓 bot 不用被邀請就能貼公開頻道（三個 teams-* 是 public）。
+# channels:history + channels:join：啟動時 bot 加入頻道、讀近期歷史，從訊息 metadata 把
+#   Teams id → Slack 訊息 的對應撈回來（重啟後回覆連結 / 原地編輯才連得到）。
 # Phase 2（Slack→Teams）再加 socket_mode_enabled + app token + event_subscriptions。
 display_information:
   name: Teams Relay
@@ -16,6 +18,8 @@ oauth_config:
     bot:
       - chat:write
       - chat:write.public
+      - channels:history
+      - channels:join
 settings:
   org_deploy_enabled: false
   socket_mode_enabled: false

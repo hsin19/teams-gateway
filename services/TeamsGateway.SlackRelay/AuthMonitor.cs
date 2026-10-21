@@ -43,7 +43,7 @@ public sealed class AuthMonitor(
 
         logger.LogWarning("Teams 認證失效，發同步中斷告警到 {Count} 個頻道", channels.Count);
         foreach (var channel in channels)
-            await slack.PostMessageAsync(channel, text, ct);
+            await slack.PostMessageAsync(channel, text, teamsId: null, ct);
     }
 
     /// <summary>所有要告警的頻道 = Routes 的頻道 + DefaultChannel，去重。</summary>
