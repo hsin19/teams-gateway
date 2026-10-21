@@ -22,7 +22,7 @@ public class CatchUpTests
                 RawJson = "{}",
             });
         }
-        await ctx.SaveChangesAsync();
+        await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -31,7 +31,7 @@ public class CatchUpTests
         using var db = new TestDb();
         await SeedAsync(db);
 
-        var missed = await EventsApi.CatchUpAsync(db, "A", default);
+        var missed = await EventsApi.CatchUpAsync(db, "A", TestContext.Current.CancellationToken);
 
         Assert.Equal(["B", "C"], missed.Select(m => m.Id));
     }
@@ -42,7 +42,7 @@ public class CatchUpTests
         using var db = new TestDb();
         await SeedAsync(db);
 
-        Assert.Empty(await EventsApi.CatchUpAsync(db, "C", default));
+        Assert.Empty(await EventsApi.CatchUpAsync(db, "C", TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -51,6 +51,6 @@ public class CatchUpTests
         using var db = new TestDb();
         await SeedAsync(db);
 
-        Assert.Empty(await EventsApi.CatchUpAsync(db, "does-not-exist", default));
+        Assert.Empty(await EventsApi.CatchUpAsync(db, "does-not-exist", TestContext.Current.CancellationToken));
     }
 }

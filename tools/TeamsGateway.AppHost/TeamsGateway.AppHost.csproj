@@ -1,4 +1,4 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.4.3">
+<Project Sdk="Aspire.AppHost.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\..\services\TeamsGateway.Gateway\TeamsGateway.Gateway.csproj" />
@@ -7,6 +7,8 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <UserSecretsId>ee123c81-fc88-416f-95ae-d4b19a26bcbe</UserSecretsId>
+    <!-- 走 Aspire CLI bundle（aspire run）；13.6 起不明設定會發 ASPIRE010 -->
+    <AspireUseCliBundle>true</AspireUseCliBundle>
   </PropertyGroup>
 
 </Project>

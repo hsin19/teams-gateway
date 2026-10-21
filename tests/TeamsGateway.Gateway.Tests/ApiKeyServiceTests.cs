@@ -10,10 +10,10 @@ public class ApiKeyServiceTests
         using var db = new TestDb();
         var service = new ApiKeyService(db);
 
-        var (key, raw) = await service.CreateAsync("client");
+        var (key, raw) = await service.CreateAsync("client", TestContext.Current.CancellationToken);
 
         Assert.StartsWith("tgw_", raw);
-        var validated = await service.ValidateAsync(raw);
+        var validated = await service.ValidateAsync(raw, TestContext.Current.CancellationToken);
         Assert.NotNull(validated);
         Assert.Equal(key.Id, validated!.Id);
         Assert.Equal("client", validated.Name);
@@ -27,9 +27,9 @@ public class ApiKeyServiceTests
     {
         using var db = new TestDb();
         var service = new ApiKeyService(db);
-        await service.CreateAsync("client");
+        await service.CreateAsync("client", TestContext.Current.CancellationToken);
 
-        Assert.Null(await service.ValidateAsync(raw));
+        Assert.Null(await service.ValidateAsync(raw, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -37,12 +37,12 @@ public class ApiKeyServiceTests
     {
         using var db = new TestDb();
         var service = new ApiKeyService(db);
-        var (key, raw) = await service.CreateAsync("client");
+        var (key, raw) = await service.CreateAsync("client", TestContext.Current.CancellationToken);
 
-        Assert.True(await service.RevokeAsync(key.Id));
+        Assert.True(await service.RevokeAsync(key.Id, TestContext.Current.CancellationToken));
 
-        Assert.Null(await service.ValidateAsync(raw));
-        Assert.False(await service.RevokeAsync(key.Id)); // 重複撤銷
+        Assert.Null(await service.ValidateAsync(raw, TestContext.Current.CancellationToken));
+        Assert.False(await service.RevokeAsync(key.Id, TestContext.Current.CancellationToken)); // 重複撤銷
     }
 
     [Fact]
@@ -52,10 +52,10 @@ public class ApiKeyServiceTests
         // SQLite 不能對 DateTimeOffset 做 ORDER BY，converter 沒設好這裡會丟 500。
         using var db = new TestDb();
         var service = new ApiKeyService(db);
-        await service.CreateAsync("a");
-        await service.CreateAsync("b");
+        await service.CreateAsync("a", TestContext.Current.CancellationToken);
+        await service.CreateAsync("b", TestContext.Current.CancellationToken);
 
-        var all = await service.ListAsync();
+        var all = await service.ListAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["a", "b"], all.Select(k => k.Name));
     }

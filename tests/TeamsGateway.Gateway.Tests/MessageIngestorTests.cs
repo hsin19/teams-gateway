@@ -14,7 +14,7 @@ public class MessageIngestorTests
     {
         await using var ctx = db.CreateDbContext();
         ctx.Conversations.Add(new Conversation { Id = "19:x@thread.v2", Subscribed = subscribed, UpdatedAt = DateTimeOffset.UtcNow });
-        await ctx.SaveChangesAsync();
+        await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -24,8 +24,8 @@ public class MessageIngestorTests
         await AddConversationAsync(db, subscribed: true);
         var ingestor = new MessageIngestor(db, new GatewayEventBus());
 
-        Assert.Equal(IngestResult.Inserted, await ingestor.UpsertAsync(Msg("100", version: 100), "{}", false, default));
-        Assert.Equal(IngestResult.Unchanged, await ingestor.UpsertAsync(Msg("100", version: 100), "{}", false, default));
+        Assert.Equal(IngestResult.Inserted, await ingestor.UpsertAsync(Msg("100", version: 100), "{}", false, TestContext.Current.CancellationToken));
+        Assert.Equal(IngestResult.Unchanged, await ingestor.UpsertAsync(Msg("100", version: 100), "{}", false, TestContext.Current.CancellationToken));
 
         await using var ctx = db.CreateDbContext();
         Assert.Single(ctx.MessageEvents);
@@ -38,8 +38,8 @@ public class MessageIngestorTests
         await AddConversationAsync(db, subscribed: true);
         var ingestor = new MessageIngestor(db, new GatewayEventBus());
 
-        await ingestor.UpsertAsync(Msg("100", version: 100, content: "原文"), "{}", false, default);
-        var result = await ingestor.UpsertAsync(Msg("100", version: 200, content: "改過", edited: true), "{}", false, default);
+        await ingestor.UpsertAsync(Msg("100", version: 100, content: "原文"), "{}", false, TestContext.Current.CancellationToken);
+        var result = await ingestor.UpsertAsync(Msg("100", version: 200, content: "改過", edited: true), "{}", false, TestContext.Current.CancellationToken);
 
         Assert.Equal(IngestResult.Updated, result);
         await using var ctx = db.CreateDbContext();
@@ -61,8 +61,8 @@ public class MessageIngestorTests
         await AddConversationAsync(db, subscribed: true);
         var ingestor = new MessageIngestor(db, new GatewayEventBus());
 
-        await ingestor.UpsertAsync(Msg("100", version: 100), "{}", false, default);
-        await ingestor.UpsertAsync(Msg("100", version: 300, content: null, deleted: true), "{}", false, default);
+        await ingestor.UpsertAsync(Msg("100", version: 100), "{}", false, TestContext.Current.CancellationToken);
+        await ingestor.UpsertAsync(Msg("100", version: 300, content: null, deleted: true), "{}", false, TestContext.Current.CancellationToken);
 
         await using var ctx = db.CreateDbContext();
         Assert.True(ctx.MessageEvents.Single().Deleted);
@@ -74,9 +74,9 @@ public class MessageIngestorTests
         using var db = new TestDb();
         var ingestor = new MessageIngestor(db, new GatewayEventBus());
 
-        Assert.False(await ingestor.IsSubscribedAsync("19:x@thread.v2", default));
+        Assert.False(await ingestor.IsSubscribedAsync("19:x@thread.v2", TestContext.Current.CancellationToken));
         await AddConversationAsync(db, subscribed: false);
-        Assert.False(await ingestor.IsSubscribedAsync("19:x@thread.v2", default));
+        Assert.False(await ingestor.IsSubscribedAsync("19:x@thread.v2", TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -86,6 +86,6 @@ public class MessageIngestorTests
         await AddConversationAsync(db, subscribed: true);
         var ingestor = new MessageIngestor(db, new GatewayEventBus());
 
-        Assert.True(await ingestor.IsSubscribedAsync("19:x@thread.v2", default));
+        Assert.True(await ingestor.IsSubscribedAsync("19:x@thread.v2", TestContext.Current.CancellationToken));
     }
 }
