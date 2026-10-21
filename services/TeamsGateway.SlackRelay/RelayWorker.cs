@@ -76,7 +76,6 @@ public sealed class RelayWorker(
         var who = string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName;
         var tag = message.Deleted ? "(deleted) " : message.Edited ? "(edited) " : "";
         var text = TeamsText.ToSlack(message.Content); // Teams RichText/Html → Slack 看得順的文字
-        var link = $"https://teams.live.com/l/message/{message.ConversationId}/{message.Id}?context=%7B%22contextType%22%3A%22chat%22%7D";
-        return $"*{who}*: {tag}{text}  <{link}|🔗>";
+        return $"*{who}*: {tag}{text}";
     }
 }
