@@ -37,6 +37,10 @@ public static class EventsApi
             // 先訂閱，斷線補收期間的即時訊息才不會漏；補收過的 id 記下來，live 階段去重
             using var subscription = bus.Subscribe();
 
+            // 立刻 flush header（SSE comment），訂閱者一連上就確定連線成立，不用等第一則訊息
+            await http.Response.WriteAsync(": ok\n\n", ct);
+            await http.Response.Body.FlushAsync(ct);
+
             var replayed = new HashSet<string>();
             var lastEventId = http.Request.Headers["Last-Event-ID"].ToString();
             if (!string.IsNullOrEmpty(lastEventId))
