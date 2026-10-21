@@ -2,7 +2,7 @@ using System.Text.Json;
 using TeamsGateway.Contracts;
 using TeamsGateway.Gateway.Teams;
 
-namespace TeamsGateway.Gateway.Tests;
+namespace TeamsGateway.Gateway.UnitTests;
 
 public class ChatsvcClientTests
 {

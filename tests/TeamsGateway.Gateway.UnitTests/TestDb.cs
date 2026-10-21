@@ -2,7 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using TeamsGateway.Gateway.Data;
 
-namespace TeamsGateway.Gateway.Tests;
+namespace TeamsGateway.Gateway.UnitTests;
 
 /// <summary>每個測試一個獨立的 in-memory SQLite DB（連線開著才活）；當 IDbContextFactory 用。</summary>
 public sealed class TestDb : IDbContextFactory<GatewayDbContext>, IDisposable

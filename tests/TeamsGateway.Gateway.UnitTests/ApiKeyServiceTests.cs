@@ -1,6 +1,6 @@
 using TeamsGateway.Gateway.Auth;
 
-namespace TeamsGateway.Gateway.Tests;
+namespace TeamsGateway.Gateway.UnitTests;
 
 public class ApiKeyServiceTests
 {

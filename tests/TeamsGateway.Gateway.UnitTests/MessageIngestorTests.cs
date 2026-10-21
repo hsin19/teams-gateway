@@ -3,7 +3,7 @@ using TeamsGateway.Gateway.Data;
 using TeamsGateway.Gateway.Events;
 using TeamsGateway.Gateway.Teams;
 
-namespace TeamsGateway.Gateway.Tests;
+namespace TeamsGateway.Gateway.UnitTests;
 
 public class MessageIngestorTests
 {

@@ -1,7 +1,7 @@
 using TeamsGateway.Gateway.Apis;
 using TeamsGateway.Gateway.Data;
 
-namespace TeamsGateway.Gateway.Tests;
+namespace TeamsGateway.Gateway.UnitTests;
 
 public class CatchUpTests
 {
