@@ -12,8 +12,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\shared\TeamsGateway.ServiceDefaults\TeamsGateway.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\..\shared\TeamsGateway.Contracts\TeamsGateway.Contracts.csproj" />
+    <ProjectReference Include="..\..\packages\TeamsGateway.ServiceDefaults\TeamsGateway.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\packages\TeamsGateway.Contracts\TeamsGateway.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

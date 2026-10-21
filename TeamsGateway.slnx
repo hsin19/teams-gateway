@@ -1,13 +1,13 @@
 <Solution>
-  <Folder Name="/apphost/">
-    <Project Path="apphost/TeamsGateway.AppHost/TeamsGateway.AppHost.csproj" />
+  <Folder Name="/tools/">
+    <Project Path="tools/TeamsGateway.AppHost/TeamsGateway.AppHost.csproj" />
   </Folder>
   <Folder Name="/services/">
     <Project Path="services/TeamsGateway.Gateway/TeamsGateway.Gateway.csproj" />
   </Folder>
-  <Folder Name="/shared/">
-    <Project Path="shared/TeamsGateway.Contracts/TeamsGateway.Contracts.csproj" />
-    <Project Path="shared/TeamsGateway.ServiceDefaults/TeamsGateway.ServiceDefaults.csproj" />
+  <Folder Name="/packages/">
+    <Project Path="packages/TeamsGateway.Contracts/TeamsGateway.Contracts.csproj" />
+    <Project Path="packages/TeamsGateway.ServiceDefaults/TeamsGateway.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TeamsGateway.Gateway.Tests/TeamsGateway.Gateway.Tests.csproj" />
