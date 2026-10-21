@@ -29,8 +29,7 @@ public class TeamsTextTests
         Assert.Contains("\"quoted\"", result);                 // &quot; → "
         Assert.Contains("hello & welcome", result);            // &amp; → &
         Assert.Contains("second line", result);                // <br> → 換行後仍在
-        Assert.StartsWith("> ", result);                       // blockquote → Slack 引用
-        Assert.Contains("Alice", result);                      // 引用的發話者
+        Assert.Contains("> *Alice*", result);                  // 引用：發話者粗體
     }
 
     [Theory]
@@ -57,8 +56,8 @@ public class TeamsTextTests
 
         Assert.DoesNotContain("\n\n", result);     // 收斂成單行距，無空行
         Assert.Contains("a reply line.", result);
-        Assert.Contains("> ", result);             // 引用
-        Assert.Contains("quoted text", result);
+        Assert.Contains("> *Bob*", result);        // 引用：發話者粗體
+        Assert.Contains("> quoted text", result);
     }
 
     // 引用在上、reply 在下：轉出來要以 "> " 開頭（Format 才會另起一行渲染成 blockquote）
@@ -73,8 +72,8 @@ public class TeamsTextTests
 
         var result = TeamsText.ToSlack(html);
 
-        Assert.StartsWith("> ", result);
-        Assert.Contains("earlier msg", result);
+        Assert.StartsWith("> *Carol*", result);
+        Assert.Contains("> earlier msg", result);
         Assert.Contains("my response.", result);
         Assert.DoesNotContain("\n\n", result);
     }

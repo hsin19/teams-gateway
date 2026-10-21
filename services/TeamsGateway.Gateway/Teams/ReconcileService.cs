@@ -54,7 +54,8 @@ public sealed class ReconcileService(
         {
             var history = await chatsvc.GetHistoryAsync(id, window, maxMessages: 1000, ct);
             var changed = 0;
-            foreach (var item in history)
+            // GetHistoryAsync 是新→舊；補回 / 重發要照時間由舊到新，Slack 才不會順序顛倒
+            foreach (var item in history.OrderBy(h => h.Dto.Time))
                 if (await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct) is IngestResult.Updated)
                     changed++;
             if (changed > 0)
