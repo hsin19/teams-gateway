@@ -14,6 +14,9 @@ public sealed class WebhookDeliveryService(
     IHttpClientFactory httpFactory,
     ILogger<WebhookDeliveryService> logger) : BackgroundService
 {
+    /// <summary>投遞用的 named HttpClient（連線時檢查目標 IP，見 <see cref="WebhookTargetGuard"/>）。</summary>
+    public const string HttpClientName = "webhook";
+
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -40,7 +43,7 @@ public sealed class WebhookDeliveryService(
 
         var body = JsonSerializer.Serialize(message, Web);
         var bytes = Encoding.UTF8.GetBytes(body);
-        var client = httpFactory.CreateClient("webhook");
+        var client = httpFactory.CreateClient(HttpClientName);
 
         foreach (var hook in hooks)
         {

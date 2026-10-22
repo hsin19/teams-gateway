@@ -1,6 +1,9 @@
+using System.Net;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using TeamsGateway.Gateway.Auth;
 using TeamsGateway.Gateway.Data;
+using TeamsGateway.Gateway.Events;
 
 namespace TeamsGateway.Gateway.Apis;
 
@@ -11,10 +14,13 @@ public static class WebhooksApi
     {
         var group = app.MapGroup("/v1/webhooks").AddEndpointFilter<ApiKeyFilter>().WithTags("Webhooks");
 
-        group.MapPost("", async (CreateWebhookRequest body, HttpContext http, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
+        group.MapPost("", async (CreateWebhookRequest body, HttpContext http, IDbContextFactory<GatewayDbContext> factory, IOptions<GatewayOptions> options, CancellationToken ct) =>
         {
-            if (!Uri.TryCreate(body.TargetUrl, UriKind.Absolute, out _))
-                return Results.BadRequest(new { error = "targetUrl 要是合法的絕對網址" });
+            if (!Uri.TryCreate(body.TargetUrl, UriKind.Absolute, out var target) || !WebhookTargetGuard.IsAllowedScheme(target))
+                return Results.BadRequest(new { error = "targetUrl 要是合法的 http(s) 絕對網址" });
+            // IP 直接寫在網址裡的先擋，早點回饋；主機名在投遞連線時才檢查（見 WebhookTargetGuard）
+            if (IPAddress.TryParse(target.IdnHost, out var ip) && !WebhookTargetGuard.IsAllowedAddress(ip, options.Value.WebhookAllowPrivateNetworks))
+                return Results.BadRequest(new { error = "targetUrl 不能指向內網 / loopback / link-local 位址" });
 
             var apiKey = (ApiKey)http.Items[nameof(ApiKey)]!;
             var hook = new WebhookSubscription

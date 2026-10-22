@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 using TeamsGateway.Gateway.Apis;
@@ -30,6 +31,18 @@ public static class Extensions
         builder.Services.AddSingleton<TrouterClient>();
         builder.Services.AddHostedService<TrouterBackgroundService>();
         builder.Services.AddHostedService<WebhookDeliveryService>();
+        // webhook 目標是訂閱者自己填的：連線時檢查 IP（擋內網 / metadata）、不走 proxy（不然檢查到的是 proxy）、不跟 redirect
+        builder.Services.AddHttpClient(WebhookDeliveryService.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(sp =>
+            {
+                var allowPrivate = sp.GetRequiredService<IOptions<GatewayOptions>>().Value.WebhookAllowPrivateNetworks;
+                return new SocketsHttpHandler
+                {
+                    UseProxy = false,
+                    AllowAutoRedirect = false,
+                    ConnectCallback = (context, ct) => WebhookTargetGuard.ConnectAsync(context, allowPrivate, ct),
+                };
+            });
         builder.Services.AddHostedService<PublishedEventPruner>();
 
         // 只追訂閱中的對話，並在訂閱 / 啟動時回補歷史（給 Elasticsearch 歷史搜尋留料）

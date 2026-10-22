@@ -82,7 +82,7 @@ curl -X DELETE -H "X-Admin-Token: $T"  $BASE/admin/subscriptions/<id>           
 | `GET /v1/media?url=<圖片網址>` | 代抓訊息內嵌圖片（`<img src>` 指向 `*.asm.skype.com`，要 Teams 登入才拿得到）；只接受這個網域 |
 | `GET /v1/events?chats=<id>,<id>` | **SSE** 即時新訊息串流（像 Slack Socket Mode）；`chats` 省略 = 全部。SSE `id` 是事件序號（不是訊息 id，編輯會沿用訊息 id）；重連帶 `Last-Event-ID`（上次收到的 `id`）會先補回斷線期間發過的事件（保留 `Gateway:EventRetentionDays`，預設 7 天） |
 | `POST /mcp` | **MCP** server（Streamable HTTP）：`list_chats` / `read_messages` / `send_message`，給 agent 用。接法見 `clients/mcp/` |
-| `POST/GET/DELETE /v1/webhooks` | 登記 / 列 / 刪 webhook；有符合的新訊息時 gateway POST 過去，帶 `X-TeamsGateway-Signature: sha256=<hmac>` |
+| `POST/GET/DELETE /v1/webhooks` | 登記 / 列 / 刪 webhook；有符合的新訊息時 gateway POST 過去，帶 `X-TeamsGateway-Signature: sha256=<hmac>`。目標只能是 http(s)，預設不能打 loopback / 私有網段（訂閱者在同機 / 同網段 / 同 docker 網路時設 `Gateway:WebhookAllowPrivateNetworks=true`），link-local（雲端 metadata）一律不行；不跟 redirect |
 
 即時推播由背景的 Trouter 連線收進來，寫進 `MessageEvents` 後 publish 給 SSE。自己發的訊息也會推回來（`from` 是自己）。
 
