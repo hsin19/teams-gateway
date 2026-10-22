@@ -108,7 +108,7 @@ public static class AdminApi
                 await db.SaveChangesAsync(ct);
             }
 
-            await backfiller.BackfillAsync(hit.Id, ct); // 回補歷史
+            await backfiller.BackfillAsync(hit.Id, publishGap: false, ct); // 回補歷史（只存不發）
             return Results.Ok(new { id = hit.Id, topic = hit.Topic });
         })
         .WithSummary("訂閱對話")

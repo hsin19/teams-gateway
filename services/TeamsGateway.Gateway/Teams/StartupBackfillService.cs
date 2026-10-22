@@ -3,14 +3,19 @@ using TeamsGateway.Gateway.Data;
 
 namespace TeamsGateway.Gateway.Teams;
 
-/// <summary>啟動時對每個訂閱中的對話回補一次，補上停機期間漏掉的訊息（也部分蓋掉 Trouter 重連空窗）。</summary>
+/// <summary>
+/// 啟動時對每個訂閱中的對話回補一次，補上停機期間漏掉的訊息並 publish 給訂閱者（也部分蓋掉 Trouter 重連空窗）。
+/// </summary>
 public sealed class StartupBackfillService(IServiceProvider services, ILogger<StartupBackfillService> logger) : BackgroundService
 {
+    // 補到的缺口要 publish：先等 SSE 訂閱者（relay 退避上限 30s）重連上來，不然發出去沒人收
+    private static readonly TimeSpan StartDelay = TimeSpan.FromSeconds(45);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken); // 等 app / token 就緒
+            await Task.Delay(StartDelay, stoppingToken);
         }
         catch (OperationCanceledException)
         {
@@ -29,7 +34,7 @@ public sealed class StartupBackfillService(IServiceProvider services, ILogger<St
         {
             try
             {
-                await backfiller.BackfillAsync(id, stoppingToken);
+                await backfiller.BackfillAsync(id, publishGap: true, stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

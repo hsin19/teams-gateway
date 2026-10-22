@@ -23,11 +23,16 @@ public sealed class TrouterClient(
     private static readonly string ClientInfo =
         JsonSerializer.Serialize(new { cv = "2026.39.01.1", ua = "TeamsCDL", hr = "", v = TeamsAuthConstants.ClientVersion });
 
+    // 推播註冊的 ttl 是 3600s：不續約一小時後 Teams 就不再推，而連線本身還活著，keepalive 抓不到
+    private static readonly TimeSpan RenewInterval = TimeSpan.FromMinutes(40);
+
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private int _seq;
+    private string? _surl;
 
     public async Task RunAsync(Func<IncomingMessage, CancellationToken, Task> onMessage, CancellationToken ct)
     {
+        _surl = null;
         var token = await tokens.GetAsync(ct);
         var epid = Guid.NewGuid().ToString();
         var query = $"?tc={Uri.EscapeDataString(ClientInfo)}&timeout=40&epid={epid}" +
@@ -43,6 +48,7 @@ public sealed class TrouterClient(
 
         using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var ping = PingLoopAsync(ws, pingCts.Token);
+        var renew = RenewRegistrationLoopAsync(ws, epid, pingCts.Token);
         try
         {
             await ReceiveLoopAsync(ws, token.Token, epid, onMessage, ct);
@@ -51,6 +57,44 @@ public sealed class TrouterClient(
         {
             await pingCts.CancelAsync();
             await ping.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await renew.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+    }
+
+    /// <summary>到期前定期續約推播註冊；續約失敗就 abort 連線，讓背景服務重連（重連會重新註冊）。</summary>
+    private async Task RenewRegistrationLoopAsync(ClientWebSocket ws, string epid, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(RenewInterval, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (_surl is not { } surl)
+                continue; // 還沒收到 trouter.connected
+
+            try
+            {
+                var token = await tokens.GetAsync(ct);
+                var status = await RegisterAsync(token.Token, epid, surl, ct);
+                if (status is >= 200 and < 300)
+                {
+                    logger.LogInformation("Trouter 推播註冊續約 HTTP {Status}", status);
+                    continue;
+                }
+                logger.LogWarning("Trouter 推播註冊續約 HTTP {Status}，重連", status);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Trouter 推播註冊續約失敗，重連");
+            }
+            ws.Abort();
+            return;
         }
     }
 
@@ -95,6 +139,7 @@ public sealed class TrouterClient(
             if (name == "trouter.connected")
             {
                 var surl = payload.RootElement.GetProperty("args")[0].GetProperty("surl").GetString()!;
+                _surl = surl;
                 var status = await RegisterAsync(skypeToken, epid, surl, ct);
                 logger.LogInformation("Trouter 註冊推播 HTTP {Status}", status);
             }
