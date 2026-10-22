@@ -34,10 +34,7 @@ public sealed class WebhookDeliveryService(
 
     private async Task DeliverAsync(MessageDto message, CancellationToken ct)
     {
-        await using var db = await factory.CreateDbContextAsync(ct);
-        var hooks = await db.WebhookSubscriptions
-            .Where(w => w.Active && (w.ConversationId == null || w.ConversationId == message.ConversationId))
-            .ToListAsync(ct);
+        var hooks = await HooksForAsync(factory, message.ConversationId, ct);
         if (hooks.Count == 0)
             return;
 
@@ -66,6 +63,17 @@ public sealed class WebhookDeliveryService(
                 logger.LogWarning(ex, "webhook {Id} 投遞失敗（{Url}）", hook.Id, hook.TargetUrl);
             }
         }
+    }
+
+    /// <summary>要收這個對話事件的 webhook：啟用中、訂了這個對話（或全部），而且登記它的 API key 沒被撤銷。</summary>
+    internal static async Task<List<WebhookSubscription>> HooksForAsync(
+        IDbContextFactory<GatewayDbContext> factory, string conversationId, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.WebhookSubscriptions
+            .Where(w => w.Active && w.ApiKey!.RevokedAt == null)
+            .Where(w => w.ConversationId == null || w.ConversationId == conversationId)
+            .ToListAsync(ct);
     }
 
     private static string Sign(string secret, byte[] body) =>
