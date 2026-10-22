@@ -51,6 +51,14 @@ public class TeamsTextTests
     }
 
     [Fact]
+    public void QuotedAuthorName_reads_trimmed_author()
+    {
+        Assert.Equal("Alice", TeamsText.QuotedAuthorName(ReplyHtml)); // 尾端 &nbsp; 要去掉
+        Assert.Null(TeamsText.QuotedAuthorName("<p>just a message</p>"));
+        Assert.Null(TeamsText.QuotedAuthorName(null));
+    }
+
+    [Fact]
     public void QuotedMessageId_null_when_not_a_reply()
     {
         Assert.Null(TeamsText.QuotedMessageId("<p>just a message</p>"));

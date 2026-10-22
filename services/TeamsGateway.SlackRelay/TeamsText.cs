@@ -64,6 +64,15 @@ public static partial class TeamsText
         return m.Success ? m.Groups[1].Value : null;
     }
 
+    /// <summary>若是回覆，回傳被引用那則的發話者名稱；不是回覆或沒帶名稱則 null。</summary>
+    public static string? QuotedAuthorName(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return null;
+        var m = BlockquoteRegex().Match(content);
+        return m.Success ? QuotedAuthor(m.Groups[1].Value) : null;
+    }
+
     /// <summary>引用的發話者（itemprop="mri" 元素的文字）。要完整 decode + trim，不然尾端空白會讓 Slack 粗體失效。</summary>
     private static string? QuotedAuthor(string inner)
     {

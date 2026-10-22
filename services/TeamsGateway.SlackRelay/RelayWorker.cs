@@ -126,17 +126,23 @@ public sealed class RelayWorker(
 
     private async Task<SlackContent> FormatAsync(MessageDto message, string channel, CancellationToken ct)
     {
-        // 若是回覆、且被引用那則我們轉過：用 Slack permalink（Slack 會 unfurl 成原生引用），不再畫 blockquote
-        string? permalink = null;
-        if (TeamsText.QuotedMessageId(message.Content) is { } quotedId && links.Lookup(quotedId) is { } slackRef)
-            permalink = await slack.GetPermalinkAsync(slackRef.Channel, slackRef.Ts, ct);
+        // 若是回覆、且被引用那則我們轉過：接一個指向它的 permalink（Slack 會 unfurl 成原生引用），不再畫 blockquote。
+        // 連結用文字標籤，不貼裸網址
+        string? replyLink = null;
+        if (TeamsText.QuotedMessageId(message.Content) is { } quotedId
+            && links.Lookup(quotedId) is { } slackRef
+            && await slack.GetPermalinkAsync(slackRef.Channel, slackRef.Ts, ct) is { } permalink)
+        {
+            var author = TeamsText.QuotedAuthorName(message.Content);
+            replyLink = $"<{permalink}|↪ 回覆{(author is null ? "" : $" {EscapeMrkdwn(author)}")}>";
+        }
 
-        var body = TeamsText.ToSlack(message.Content, includeQuote: permalink is null);
-        var content = permalink is null ? body : $"<{permalink}>\n{body}".TrimEnd();
+        var body = TeamsText.ToSlack(message.Content, includeQuote: replyLink is null);
+        var header = replyLink is null ? Header(message) : $"{Header(message)} {replyLink}";
 
-        // 多行、以引用開頭、或有 permalink 時，內容另起一行
-        var joiner = content.Length > 0 && (content.Contains('\n') || content.StartsWith('>') || content.StartsWith('<')) ? "\n" : " ";
-        var text = $"{Header(message)}{joiner}{content}".TrimEnd();
+        // 回覆、多行、或以引用開頭時，內容另起一行
+        var joiner = body.Length > 0 && (replyLink is not null || body.Contains('\n') || body.StartsWith('>')) ? "\n" : " ";
+        var text = $"{header}{joiner}{body}".TrimEnd();
 
         var (images, failed) = await UploadImagesAsync(message.Content, ct);
         if (failed > 0)
@@ -182,6 +188,10 @@ public sealed class RelayWorker(
             return null;
         }
     }
+
+    // 連結標籤裡的 < > & 會被 Slack 當成語法，名稱要跳脫
+    private static string EscapeMrkdwn(string s) =>
+        s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     // image block 的 slack_file 只支援 png / jpg / gif
     private static string? ImageExtension(string contentType) => contentType switch
