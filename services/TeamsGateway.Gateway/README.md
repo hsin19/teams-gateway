@@ -50,6 +50,19 @@ gateway **只追 / 存訂閱中的對話**（Trouter 會推帳號的所有對話
 
 **輪詢保險**：Trouter 推播是主路徑，但另外每 `Gateway:PollSeconds`（預設 20）秒抓一次各訂閱對話最近 15 分鐘的訊息，把漏推的新訊息照時間順序補發（最近 10 秒內的先留給推播，避免搶先誤判）。凡是靠輪詢 / 慢更新 / 啟動回補才抓到的新訊息都會記 warning（`Trouter 漏接，…補到`），可以拿來觀察推播可靠度。
 
+**Metrics**（meter `TeamsGateway.Gateway`，隨 ServiceDefaults 的 OpenTelemetry 匯出；設了 `OTEL_EXPORTER_OTLP_ENDPOINT` 才會送出去）：
+
+| 指標 | 說明 |
+|---|---|
+| `teams_gateway.messages.delivered` | 發給訂閱者的訊息數，tag `source`（trouter / poll / reconcile / backfill）、`change`（new / edit）、`sender`（self / others） |
+| `teams_gateway.push.latency` | Trouter 推到的新訊息從發送到收到的秒數，tag `sender` |
+
+推播健不健康看 `sender=others` 的 `source` 分布：正常幾乎都是 `trouter`，`poll` 變多就是推播壞了（自己帳號的訊息不管怎樣都會推來，不能拿來判斷）。沒有後端時直接看行程內的值（launchd 跑的行程名稱是 `dotnet`，用 PID 指定；counter 顯示的是每秒增量）：
+
+```
+dnx dotnet-counters monitor -p $(pgrep -f TeamsGateway.Gateway.dll) --counters TeamsGateway.Gateway
+```
+
 ```
 curl -X PUT    -H "X-Admin-Token: $T" -d '{"chat":"General Chat"}' $BASE/admin/subscriptions  # chat 可給 id 或群名
 curl           -H "X-Admin-Token: $T"                                        $BASE/admin/subscriptions  # 列訂閱

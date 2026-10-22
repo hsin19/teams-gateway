@@ -44,6 +44,7 @@ public sealed class ReconcileService(
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<GatewayDbContext>>();
         var chatsvc = scope.ServiceProvider.GetRequiredService<ChatsvcClient>();
         var ingestor = scope.ServiceProvider.GetRequiredService<MessageIngestor>();
+        var metrics = scope.ServiceProvider.GetRequiredService<GatewayMetrics>();
 
         var window = DateTimeOffset.UtcNow - TimeSpan.FromHours(options.Value.ReconcileWindowHours);
         List<string> ids;
@@ -58,6 +59,7 @@ public sealed class ReconcileService(
             foreach (var item in history.OrderBy(h => h.Dto.Time))
             {
                 var result = await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct);
+                metrics.Delivered(IngestSource.Reconcile, result, item.Dto);
                 if (result is IngestResult.Updated)
                     changed++;
                 else if (result is IngestResult.Inserted) // 新訊息要靠慢更新才抓到 = Trouter 跟輪詢都漏了

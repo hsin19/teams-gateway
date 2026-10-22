@@ -4,6 +4,7 @@ namespace TeamsGateway.Gateway.Teams;
 public sealed class TrouterBackgroundService(
     TrouterClient trouter,
     MessageIngestor ingestor,
+    GatewayMetrics metrics,
     ILogger<TrouterBackgroundService> logger) : BackgroundService
 {
     private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(5);
@@ -45,6 +46,7 @@ public sealed class TrouterBackgroundService(
         // 只收訂閱中的對話（Trouter 會推帳號所有對話）；其餘丟掉，不入庫
         if (!await ingestor.IsSubscribedAsync(incoming.Message.ConversationId, ct))
             return;
-        await ingestor.UpsertAsync(incoming.Message, incoming.RawJson, publish: true, ct);
+        var result = await ingestor.UpsertAsync(incoming.Message, incoming.RawJson, publish: true, ct);
+        metrics.Delivered(IngestSource.Trouter, result, incoming.Message);
     }
 }

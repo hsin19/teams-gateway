@@ -8,6 +8,7 @@ namespace TeamsGateway.Gateway.Teams;
 public sealed class Backfiller(
     ChatsvcClient chatsvc,
     MessageIngestor ingestor,
+    GatewayMetrics metrics,
     IDbContextFactory<GatewayDbContext> factory,
     IOptions<GatewayOptions> options,
     ILogger<Backfiller> logger)
@@ -46,6 +47,8 @@ public sealed class Backfiller(
             if (result is IngestResult.Unchanged)
                 continue;
             stored++;
+            if (publish) // 首次訂閱的歷史只存不發，不算進「送達」
+                metrics.Delivered(IngestSource.Backfill, result, item.Dto);
             if (publish && result is IngestResult.Inserted) // 補缺口抓到的新訊息 = 停機期間漏接
                 logger.LogWarning("停機期間漏接，啟動回補補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
                     conversationId, item.Dto.Id, item.Dto.Time, item.Dto.FromName);

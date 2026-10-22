@@ -54,6 +54,7 @@ public sealed class PollService(
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<GatewayDbContext>>();
         var chatsvc = scope.ServiceProvider.GetRequiredService<ChatsvcClient>();
         var ingestor = scope.ServiceProvider.GetRequiredService<MessageIngestor>();
+        var metrics = scope.ServiceProvider.GetRequiredService<GatewayMetrics>();
 
         List<string> ids;
         await using (var db = await factory.CreateDbContextAsync(ct))
@@ -65,7 +66,9 @@ public sealed class PollService(
             var recent = await chatsvc.GetHistoryAsync(id, now - Lookback, maxMessages: 100, ct, PageSize);
             foreach (var item in recent.Where(h => h.Dto.Time < now - Grace).OrderBy(h => h.Dto.Time))
             {
-                if (await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct) is IngestResult.Inserted)
+                var result = await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct);
+                metrics.Delivered(IngestSource.Poll, result, item.Dto);
+                if (result is IngestResult.Inserted)
                     logger.LogWarning("Trouter 漏接，輪詢補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
                         id, item.Dto.Id, item.Dto.Time, item.Dto.FromName);
             }

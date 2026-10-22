@@ -20,6 +20,10 @@ public static class Extensions
 
         builder.Services.AddSingleton<ApiKeyService>();
 
+        // 自訂 metrics（推播可靠度），跟 ServiceDefaults 的 OpenTelemetry 一起匯出
+        builder.Services.AddSingleton<GatewayMetrics>();
+        builder.Services.AddOpenTelemetry().WithMetrics(metrics => metrics.AddMeter(GatewayMetrics.MeterName));
+
         // 即時推播：Trouter 背景連線 → 行程內匯流排 → SSE
         builder.Services.AddSingleton<GatewayEventBus>();
         builder.Services.AddSingleton<MessageIngestor>();
