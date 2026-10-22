@@ -72,26 +72,41 @@ public sealed class PollService(
         var now = DateTimeOffset.UtcNow;
         foreach (var (id, syncedThrough) in convs)
         {
-            if (NeedsBackfill(syncedThrough, now))
+            // 一個對話壞掉（例如帳號被踢出群 → 403）不能讓排在後面的對話整輪都沒輪到
+            try
             {
-                logger.LogInformation("{Conversation} 上次同步到 {Synced:u}，超過輪詢回看範圍，整段回補", id, syncedThrough);
-                await backfiller.BackfillAsync(id, publishGap: true, ct);
-                continue;
+                await PollOneAsync(id, syncedThrough, now, factory, chatsvc, ingestor, backfiller, metrics, ct);
             }
-
-            var recent = await chatsvc.GetHistoryAsync(id, now - Lookback, MaxMessages, ct, PageSize);
-            foreach (var item in recent.Where(h => h.Dto.Time < now - Grace).OrderBy(h => h.Dto.Time))
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                var result = await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct);
-                metrics.Delivered(IngestSource.Poll, result, item.Dto);
-                if (result is IngestResult.Inserted)
-                    logger.LogWarning("Trouter 漏接，輪詢補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
-                        id, item.Dto.Id, item.Dto.Time, item.Dto.FromName);
+                logger.LogWarning(ex, "輪詢 {Conversation} 失敗", id);
             }
-
-            // 抓滿上限 = 回看範圍裡最舊那段可能沒抓到，水位線不動（落後超過回看時下一輪會整段回補）
-            if (recent.Count < MaxMessages)
-                await Backfiller.MarkSyncedAsync(factory, id, now - Grace, ct);
         }
+    }
+
+    private async Task PollOneAsync(
+        string id, DateTimeOffset? syncedThrough, DateTimeOffset now, IDbContextFactory<GatewayDbContext> factory,
+        ChatsvcClient chatsvc, MessageIngestor ingestor, Backfiller backfiller, GatewayMetrics metrics, CancellationToken ct)
+    {
+        if (NeedsBackfill(syncedThrough, now))
+        {
+            logger.LogInformation("{Conversation} 上次同步到 {Synced:u}，超過輪詢回看範圍，整段回補", id, syncedThrough);
+            await backfiller.BackfillAsync(id, publishGap: true, ct);
+            return;
+        }
+
+        var recent = await chatsvc.GetHistoryAsync(id, now - Lookback, MaxMessages, ct, PageSize);
+        foreach (var item in recent.Where(h => h.Dto.Time < now - Grace).OrderBy(h => h.Dto.Time))
+        {
+            var result = await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct);
+            metrics.Delivered(IngestSource.Poll, result, item.Dto);
+            if (result is IngestResult.Inserted)
+                logger.LogWarning("Trouter 漏接，輪詢補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
+                    id, item.Dto.Id, item.Dto.Time, item.Dto.FromName);
+        }
+
+        // 抓滿上限 = 回看範圍裡最舊那段可能沒抓到，水位線不動（落後超過回看時下一輪會整段回補）
+        if (recent.Count < MaxMessages)
+            await Backfiller.MarkSyncedAsync(factory, id, now - Grace, ct);
     }
 }

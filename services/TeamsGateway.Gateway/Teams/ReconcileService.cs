@@ -53,22 +53,36 @@ public sealed class ReconcileService(
 
         foreach (var id in ids)
         {
-            var history = await chatsvc.GetHistoryAsync(id, window, maxMessages: 1000, ct);
-            var changed = 0;
-            // GetHistoryAsync 是新→舊；補回 / 重發要照時間由舊到新，Slack 才不會順序顛倒
-            foreach (var item in history.OrderBy(h => h.Dto.Time))
+            // 一個對話壞掉（例如帳號被踢出群 → 403）不能讓排在後面的對話都沒輪到
+            try
             {
-                var result = await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct);
-                metrics.Delivered(IngestSource.Reconcile, result, item.Dto);
-                if (result is IngestResult.Updated)
-                    changed++;
-                else if (result is IngestResult.Inserted) // 新訊息要靠慢更新才抓到 = Trouter 跟輪詢都漏了
-                    logger.LogWarning("Trouter 漏接，慢更新補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
-                        id, item.Dto.Id, item.Dto.Time, item.Dto.FromName);
+                await ReconcileOneAsync(id, window, chatsvc, ingestor, metrics, ct);
             }
-            if (changed > 0)
-                logger.LogInformation("慢更新 {Conversation}：{Changed} 則編輯 / 刪除", id, changed);
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "慢更新 {Conversation} 失敗", id);
+            }
         }
+    }
+
+    private async Task ReconcileOneAsync(
+        string id, DateTimeOffset window, ChatsvcClient chatsvc, MessageIngestor ingestor, GatewayMetrics metrics, CancellationToken ct)
+    {
+        var history = await chatsvc.GetHistoryAsync(id, window, maxMessages: 1000, ct);
+        var changed = 0;
+        // GetHistoryAsync 是新→舊；補回 / 重發要照時間由舊到新，Slack 才不會順序顛倒
+        foreach (var item in history.OrderBy(h => h.Dto.Time))
+        {
+            var result = await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct);
+            metrics.Delivered(IngestSource.Reconcile, result, item.Dto);
+            if (result is IngestResult.Updated)
+                changed++;
+            else if (result is IngestResult.Inserted) // 新訊息要靠慢更新才抓到 = Trouter 跟輪詢都漏了
+                logger.LogWarning("Trouter 漏接，慢更新補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
+                    id, item.Dto.Id, item.Dto.Time, item.Dto.FromName);
+        }
+        if (changed > 0)
+            logger.LogInformation("慢更新 {Conversation}：{Changed} 則編輯 / 刪除", id, changed);
     }
 
     private static async Task<bool> DelayAsync(TimeSpan delay, CancellationToken ct)
