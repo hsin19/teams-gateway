@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
 using System.Text;
@@ -100,25 +101,35 @@ public sealed class TrouterClient(
 
     private async Task ReceiveLoopAsync(ClientWebSocket ws, string skypeToken, string epid, Func<IncomingMessage, CancellationToken, Task> onMessage, CancellationToken ct)
     {
-        var buffer = new ArraySegment<byte>(new byte[64 * 1024]);
-        var frame = new StringBuilder();
+        var buffer = new byte[64 * 1024];
+        var message = new ArrayBufferWriter<byte>();
         while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
         {
-            frame.Clear();
-            WebSocketReceiveResult result;
-            do
+            if (await ReceiveTextAsync(ws, buffer, message, ct) is not { } frame)
             {
-                result = await ws.ReceiveAsync(buffer, ct);
-                if (result.MessageType == WebSocketMessageType.Close)
-                {
-                    logger.LogInformation("Trouter 關閉連線：{Status}", ws.CloseStatus);
-                    return;
-                }
-                frame.Append(Encoding.UTF8.GetString(buffer.Array!, 0, result.Count));
-            } while (!result.EndOfMessage);
-
-            await HandleFrameAsync(ws, frame.ToString(), skypeToken, epid, onMessage, ct);
+                logger.LogInformation("Trouter 關閉連線：{Status}", ws.CloseStatus);
+                return;
+            }
+            await HandleFrameAsync(ws, frame, skypeToken, epid, onMessage, ct);
         }
+    }
+
+    /// <summary>
+    /// 收完一則完整的 WebSocket 訊息（可能分好幾段）再一次做 UTF-8 解碼；對方關閉回 null。
+    /// 不能每段各自解碼：ReceiveAsync 可能在任意 byte 邊界切開，中文字（3 bytes）被切到就會變成 U+FFFD 存進 DB。
+    /// </summary>
+    internal static async Task<string?> ReceiveTextAsync(WebSocket ws, byte[] buffer, ArrayBufferWriter<byte> message, CancellationToken ct)
+    {
+        message.ResetWrittenCount();
+        WebSocketReceiveResult result;
+        do
+        {
+            result = await ws.ReceiveAsync(buffer, ct);
+            if (result.MessageType == WebSocketMessageType.Close)
+                return null;
+            message.Write(buffer.AsSpan(0, result.Count));
+        } while (!result.EndOfMessage);
+        return Encoding.UTF8.GetString(message.WrittenSpan);
     }
 
     private async Task HandleFrameAsync(ClientWebSocket ws, string frame, string skypeToken, string epid, Func<IncomingMessage, CancellationToken, Task> onMessage, CancellationToken ct)
