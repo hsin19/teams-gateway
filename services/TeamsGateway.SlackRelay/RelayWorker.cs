@@ -10,12 +10,17 @@ namespace TeamsGateway.SlackRelay;
 public sealed class RelayWorker(
     GatewayEventStream stream,
     SlackClient slack,
+    GatewayMediaClient media,
     MessageLinks links,
     IOptions<RelayOptions> options,
     ILogger<RelayWorker> logger) : BackgroundService
 {
     private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
+    private const int MaxImagesPerMessage = 10;
+
+    // Teams 圖片網址 → 已上傳的 Slack file id：編輯時同一張圖不重傳（訊息是逐則處理，不用 concurrent）
+    private readonly Dictionary<string, string> _uploadedImages = new();
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -72,22 +77,22 @@ public sealed class RelayWorker(
         // 這則我們轉過 → 編輯 / 刪除：原地更新，舊版進 thread 留證（不加 (edited)，靠 Slack 原生標記）
         if (links.Lookup(message.Id) is { } prior)
         {
-            await slack.PostReplyAsync(prior.Channel, prior.Ts, $"_上一版_\n{prior.Text}", ct);
+            await slack.PostReplyAsync(prior.Channel, prior.Ts, $"_上一版_\n{prior.Text}", prior.Images, ct);
             var updated = message.Deleted
-                ? $"{Header(message)} _（訊息已刪除）_"
+                ? new SlackContent($"{Header(message)} _（訊息已刪除）_", [])
                 : await FormatAsync(message, prior.Channel, ct);
-            await slack.UpdateMessageAsync(prior.Channel, prior.Ts, updated, message.Id, ct);
-            links.Remember(message.Id, prior.Channel, prior.Ts, updated);
+            await slack.UpdateMessageAsync(prior.Channel, prior.Ts, updated.Text, message.Id, updated.Images, ct);
+            links.Remember(message.Id, prior.Channel, prior.Ts, updated.Text, updated.Images);
             return;
         }
 
         if (string.IsNullOrEmpty(message.Content))
             return; // 新訊息但無文字內容（純系統事件），不轉
 
-        var text = await FormatAsync(message, channel, ct);
-        var ts = await slack.PostMessageAsync(channel, text, message.Id, ct);
+        var content = await FormatAsync(message, channel, ct);
+        var ts = await slack.PostMessageAsync(channel, content.Text, message.Id, content.Images, ct);
         if (ts is not null)
-            links.Remember(message.Id, channel, ts, text); // 記住對應，給之後的回覆 / 編輯用
+            links.Remember(message.Id, channel, ts, content.Text, content.Images); // 記住對應，給之後的回覆 / 編輯用
     }
 
     /// <summary>加入各頻道並讀近 <paramref name="retentionHours"/> 的歷史，從 metadata 把 Teams id → Slack 訊息 撈回對應表。</summary>
@@ -119,7 +124,7 @@ public sealed class RelayWorker(
     private static string Header(MessageDto message) =>
         $"*{(string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName)}*:";
 
-    private async Task<string> FormatAsync(MessageDto message, string channel, CancellationToken ct)
+    private async Task<SlackContent> FormatAsync(MessageDto message, string channel, CancellationToken ct)
     {
         // 若是回覆、且被引用那則我們轉過：用 Slack permalink（Slack 會 unfurl 成原生引用），不再畫 blockquote
         string? permalink = null;
@@ -131,6 +136,62 @@ public sealed class RelayWorker(
 
         // 多行、以引用開頭、或有 permalink 時，內容另起一行
         var joiner = content.Length > 0 && (content.Contains('\n') || content.StartsWith('>') || content.StartsWith('<')) ? "\n" : " ";
-        return $"{Header(message)}{joiner}{content}";
+        var text = $"{Header(message)}{joiner}{content}".TrimEnd();
+
+        var (images, failed) = await UploadImagesAsync(message.Content, ct);
+        if (failed > 0)
+            text += $"\n_（{failed} 張圖片未能轉送）_";
+        return new SlackContent(text, images);
     }
+
+    /// <summary>訊息的內嵌圖片經 gateway 抓下來、上傳 Slack，回傳 file id 與失敗張數；同一張圖（編輯時）不重傳。</summary>
+    private async Task<(IReadOnlyList<string> FileIds, int Failed)> UploadImagesAsync(string? content, CancellationToken ct)
+    {
+        var urls = TeamsText.ImageUrls(content);
+        var fileIds = new List<string>();
+        foreach (var url in urls.Take(MaxImagesPerMessage))
+        {
+            if (!_uploadedImages.TryGetValue(url, out var fileId))
+            {
+                fileId = await UploadImageAsync(url, ct);
+                if (fileId is null)
+                    continue;
+                _uploadedImages[url] = fileId;
+            }
+            fileIds.Add(fileId);
+        }
+        return (fileIds, urls.Count - fileIds.Count);
+    }
+
+    private async Task<string?> UploadImageAsync(string url, CancellationToken ct)
+    {
+        try
+        {
+            if (await media.GetAsync(url, ct) is not { } image)
+                return null;
+            if (ImageExtension(image.ContentType) is not { } ext)
+            {
+                logger.LogWarning("圖片格式 {ContentType} 不能用 Slack image block 顯示，略過", image.ContentType);
+                return null;
+            }
+            return await slack.UploadFileAsync(image.Bytes, $"teams-image{ext}", ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "轉送圖片失敗：{Url}", url);
+            return null;
+        }
+    }
+
+    // image block 的 slack_file 只支援 png / jpg / gif
+    private static string? ImageExtension(string contentType) => contentType switch
+    {
+        "image/jpeg" => ".jpg",
+        "image/png" => ".png",
+        "image/gif" => ".gif",
+        _ => null,
+    };
+
+    /// <summary>要貼到 Slack 的內容：文字 + 已上傳圖片的 Slack file id。</summary>
+    private readonly record struct SlackContent(string Text, IReadOnlyList<string> Images);
 }

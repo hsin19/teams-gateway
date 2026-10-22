@@ -9,7 +9,9 @@
 
 ## Slack app
 
-bot 的 app 定義在 [`slack-app-manifest.yaml`](slack-app-manifest.yaml)。到 api.slack.com/apps → Create New App → From an app manifest 貼它建立，Install 後把 **Bot User OAuth Token**（`xoxb-…`）設成 `Relay__Slack__BotToken`。`chat:write.public` 讓 bot 不用被邀請就能貼公開頻道。
+bot 的 app 定義在 [`slack-app-manifest.yaml`](slack-app-manifest.yaml)。到 api.slack.com/apps → Create New App → From an app manifest 貼它建立，Install 後把 **Bot User OAuth Token**（`xoxb-…`）設成 `Relay__Slack__BotToken`。各 scope 的用途寫在 manifest 註解；改了 scope 要重新 Install 才生效。
+
+訊息裡的內嵌圖片：relay 經 gateway 的 `/v1/media` 抓下來，上傳成 Slack 檔案（不分享到頻道），再用 image block 貼在同一則訊息裡；抓不到或上傳失敗時文字照送，末尾註記幾張圖未能轉送。
 
 ## 設定
 
@@ -19,7 +21,7 @@ appsettings 放完整 default，secret 走 env（雙底線覆蓋）或 user-secr
 |---|---|---|
 | `Relay:Gateway:BaseUrl` | `Relay__Gateway__BaseUrl` | gateway 位址（預設 `http://localhost:5199`） |
 | `Relay:Gateway:ApiKey` | `Relay__Gateway__ApiKey` | gateway 的 API key（`ops/service.sh key <name>` 產） |
-| `Relay:Slack:BotToken` | `Relay__Slack__BotToken` | Slack bot token（`xoxb-…`，需 `chat:write`） |
+| `Relay:Slack:BotToken` | `Relay__Slack__BotToken` | Slack bot token（`xoxb-…`，scope 見 manifest） |
 | `Relay:Slack:DefaultChannel` | `Relay__Slack__DefaultChannel` | 沒對應到 ChannelMap 的對話落這個頻道；不設 = 不轉 |
 | `Relay:Slack:Routes` | — | `Teams 對話 → Slack 頻道` 路由（list） |
 

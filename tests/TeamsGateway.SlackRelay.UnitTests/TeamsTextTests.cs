@@ -106,4 +106,29 @@ public class TeamsTextTests
         Assert.Contains("my response.", result);
         Assert.DoesNotContain("\n\n", result);
     }
+
+    // 內嵌圖片：只取這則訊息自己的 Teams 媒體圖，引用裡的圖、表情 CDN 圖不算；圖本身不留文字
+    [Fact]
+    public void ImageUrls_returns_own_teams_media_only()
+    {
+        const string html =
+            "<blockquote itemscope=\"\" itemid=\"1\"><strong itemprop=\"mri\">Bob</strong>" +
+            "<p itemprop=\"preview\"><img src=\"https://us-api.asm.skype.com/v1/objects/0-quoted/views/imgo\"></p></blockquote>" +
+            "<p>look<img itemtype=\"http://schema.skype.com/AMSImage\" alt=\"image\" " +
+            "src=\"https://us-api.asm.skype.com/v1/objects/0-ea-d4-abc/views/imgo\" width=\"250\"></p>" +
+            "<p><img itemtype=\"http://schema.skype.com/Emoji\" src=\"https://statics.teams.cdn.live.net/evergreen-assets/emoji/smile.png\"></p>" +
+            "<p><img itemtype=\"http://schema.skype.com/AMSImage\" src=\"https://us-api.asm.skype.com/v1/objects/0-ea-d4-abc/views/imgo\"></p>";
+
+        var urls = TeamsText.ImageUrls(html);
+
+        Assert.Equal(["https://us-api.asm.skype.com/v1/objects/0-ea-d4-abc/views/imgo"], urls); // 重複的只算一次
+        Assert.Equal("look", TeamsText.ToSlack(html, includeQuote: false));
+    }
+
+    [Fact]
+    public void ImageUrls_empty_without_images()
+    {
+        Assert.Empty(TeamsText.ImageUrls("<p>no pictures</p>"));
+        Assert.Empty(TeamsText.ImageUrls(null));
+    }
 }

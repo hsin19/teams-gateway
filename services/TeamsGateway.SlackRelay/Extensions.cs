@@ -32,17 +32,20 @@ public static class Extensions
                 http.DefaultRequestHeaders.Authorization = new("Bearer", slack.BotToken);
         });
 
-        // 查 gateway /v1/status 的短請求，走 factory
-        builder.Services.AddHttpClient<GatewayStatusClient>((sp, http) =>
-        {
-            var gateway = sp.GetRequiredService<IOptions<RelayOptions>>().Value.Gateway;
-            http.BaseAddress = new Uri(gateway.BaseUrl);
-            if (!string.IsNullOrWhiteSpace(gateway.ApiKey))
-                http.DefaultRequestHeaders.Authorization = new("Bearer", gateway.ApiKey);
-        });
+        // 查 gateway /v1/status、代抓圖片 /v1/media 的短請求，走 factory
+        builder.Services.AddHttpClient<GatewayStatusClient>(ConfigureGateway);
+        builder.Services.AddHttpClient<GatewayMediaClient>(ConfigureGateway);
 
         builder.Services.AddSingleton<MessageLinks>();
         builder.Services.AddHostedService<RelayWorker>();
         builder.Services.AddHostedService<AuthMonitor>();
+    }
+
+    private static void ConfigureGateway(IServiceProvider sp, HttpClient http)
+    {
+        var gateway = sp.GetRequiredService<IOptions<RelayOptions>>().Value.Gateway;
+        http.BaseAddress = new Uri(gateway.BaseUrl);
+        if (!string.IsNullOrWhiteSpace(gateway.ApiKey))
+            http.DefaultRequestHeaders.Authorization = new("Bearer", gateway.ApiKey);
     }
 }

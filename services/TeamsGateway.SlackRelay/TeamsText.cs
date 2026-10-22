@@ -39,6 +39,22 @@ public static partial class TeamsText
         return text.Trim();
     }
 
+    /// <summary>
+    /// 這則訊息自己的內嵌圖片網址（Teams 媒體 <c>*.asm.skype.com</c>），照出現順序。
+    /// blockquote 裡被引用訊息的圖不算；表情符號那類 CDN 圖片也不算。
+    /// </summary>
+    public static IReadOnlyList<string> ImageUrls(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return [];
+        var own = BlockquoteRegex().Replace(content, "");
+        return ImgSrcRegex().Matches(own)
+            .Select(m => WebUtility.HtmlDecode(m.Groups[1].Value))
+            .Where(url => url.Contains(".asm.skype.com/", StringComparison.OrdinalIgnoreCase))
+            .Distinct()
+            .ToList();
+    }
+
     /// <summary>若是回覆，回傳被引用的那則 Teams 訊息 id（blockquote 的 itemid）；不是回覆則 null。</summary>
     public static string? QuotedMessageId(string? content)
     {
@@ -78,6 +94,9 @@ public static partial class TeamsText
 
     [GeneratedRegex(@"<blockquote\b[^>]*\bitemid=""(\d+)""", RegexOptions.IgnoreCase)]
     private static partial Regex QuoteIdRegex();
+
+    [GeneratedRegex(@"<img\b[^>]*\bsrc=""([^""]+)""", RegexOptions.IgnoreCase)]
+    private static partial Regex ImgSrcRegex();
 
     [GeneratedRegex(@"itemprop=""mri""[^>]*>([^<]*)", RegexOptions.IgnoreCase)]
     private static partial Regex MriRegex();
