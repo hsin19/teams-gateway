@@ -4,6 +4,7 @@ using TeamsGateway.Contracts;
 using TeamsGateway.Gateway.Auth;
 using TeamsGateway.Gateway.Data;
 using TeamsGateway.Gateway.Events;
+using TeamsGateway.Gateway.Teams;
 
 namespace TeamsGateway.Gateway.Apis;
 
@@ -86,7 +87,8 @@ public static class EventsApi
     }
 
     private static MessageDto ToDto(MessageEvent m) => new(
-        m.Id, m.ConversationId, m.SenderMri, m.SenderName, m.MessageType, m.Content, m.SequenceId, m.ComposeTime);
+        m.Id, m.ConversationId, m.SenderMri, m.SenderName, m.MessageType, m.Content, m.SequenceId, m.ComposeTime,
+        m.Version, m.Edited, m.Deleted, ChatsvcClient.ParseAttachments(m.RawJson));
 
     private static async Task WriteAsync(HttpContext http, MessageDto message, CancellationToken ct)
     {

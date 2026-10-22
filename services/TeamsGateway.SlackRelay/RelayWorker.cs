@@ -86,8 +86,8 @@ public sealed class RelayWorker(
             return;
         }
 
-        if (string.IsNullOrEmpty(message.Content))
-            return; // 新訊息但無文字內容（純系統事件），不轉
+        if (string.IsNullOrEmpty(message.Content) && message.Attachments is not { Count: > 0 })
+            return; // 新訊息但無文字也無附件（純系統事件），不轉
 
         var content = await FormatAsync(message, channel, ct);
         var ts = await slack.PostMessageAsync(channel, content.Text, message.Id, content.Images, ct);
@@ -144,16 +144,28 @@ public sealed class RelayWorker(
         var joiner = body.Length > 0 && (replyLink is not null || body.Contains('\n') || body.StartsWith('>')) ? "\n" : " ";
         var text = $"{header}{joiner}{body}".TrimEnd();
 
-        var (images, failed) = await UploadImagesAsync(message.Content, ct);
+        // 圖片（內嵌的 + 附件裡的）貼成 image block；其他附件列成連結
+        var attachments = message.Attachments ?? [];
+        var imageUrls = TeamsText.ImageUrls(message.Content)
+            .Concat(attachments.Where(TeamsText.IsImage).Select(a => a.PreviewUrl!))
+            .Distinct()
+            .ToList();
+        var files = attachments.Where(a => !TeamsText.IsImage(a)).ToList();
+        if (files.Count > 0)
+            text += "\n附件：" + string.Join("、", files.Select(FileLink));
+
+        var (images, failed) = await UploadImagesAsync(imageUrls, ct);
         if (failed > 0)
             text += $"\n_（{failed} 張圖片未能轉送）_";
         return new SlackContent(text, images);
     }
 
-    /// <summary>訊息的內嵌圖片經 gateway 抓下來、上傳 Slack，回傳 file id 與失敗張數；同一張圖（編輯時）不重傳。</summary>
-    private async Task<(IReadOnlyList<string> FileIds, int Failed)> UploadImagesAsync(string? content, CancellationToken ct)
+    private static string FileLink(AttachmentDto file) =>
+        file.ShareUrl is null ? EscapeMrkdwn(file.Name) : $"<{file.ShareUrl}|{EscapeMrkdwn(file.Name)}>";
+
+    /// <summary>圖片經 gateway 抓下來、上傳 Slack，回傳 file id 與失敗張數；同一張圖（編輯時）不重傳。</summary>
+    private async Task<(IReadOnlyList<string> FileIds, int Failed)> UploadImagesAsync(IReadOnlyList<string> urls, CancellationToken ct)
     {
-        var urls = TeamsText.ImageUrls(content);
         var fileIds = new List<string>();
         foreach (var url in urls.Take(MaxImagesPerMessage))
         {

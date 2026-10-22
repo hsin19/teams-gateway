@@ -151,7 +151,59 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
             ParseTime(GetString(m, "composetime")) ?? DateTimeOffset.UtcNow,
             version == 0 && long.TryParse(id, out var v) ? v : version,
             edited,
-            deleted);
+            deleted,
+            ParseAttachments(props));
+    }
+
+    /// <summary>從存下來的原始 JSON 取附件（DB 只存了內容欄位，附件留在 RawJson 裡）。</summary>
+    public static IReadOnlyList<AttachmentDto>? ParseAttachments(string rawJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            return ParseAttachments(Child(doc.RootElement, "properties"));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary><c>properties.files</c> → 附件。chatsvc 給的是「字串化的 JSON 陣列」，也接直接是陣列的情況。</summary>
+    private static IReadOnlyList<AttachmentDto>? ParseAttachments(JsonElement props)
+    {
+        var files = Child(props, "files");
+        if (files.ValueKind == JsonValueKind.String)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(files.GetString() ?? "[]");
+                return ParseFileArray(doc.RootElement);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+        return ParseFileArray(files);
+    }
+
+    private static IReadOnlyList<AttachmentDto>? ParseFileArray(JsonElement files)
+    {
+        if (files.ValueKind != JsonValueKind.Array)
+            return null;
+        var result = new List<AttachmentDto>();
+        foreach (var f in files.EnumerateArray())
+        {
+            if ((GetString(f, "fileName") ?? GetString(f, "title")) is not { } name)
+                continue;
+            result.Add(new AttachmentDto(
+                name,
+                GetString(f, "fileType") ?? GetString(f, "type"),
+                GetString(Child(f, "filePreview"), "previewUrl"),
+                GetString(Child(f, "fileInfo"), "shareUrl")));
+        }
+        return result.Count > 0 ? result : null;
     }
 
     private async Task<HttpResponseMessage> SendAsync(Func<HttpRequestMessage> make, CancellationToken ct)

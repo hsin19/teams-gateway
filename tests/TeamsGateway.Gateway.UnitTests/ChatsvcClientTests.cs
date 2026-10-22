@@ -34,6 +34,47 @@ public class ChatsvcClientTests
         Assert.Equal("hello", msg.Content);
     }
 
+    // 只附檔的訊息：content 空、檔案在 properties.files（字串化的 JSON 陣列），內容是合成的假資料
+    [Fact]
+    public void ParseMessage_reads_file_attachments()
+    {
+        var files = JsonSerializer.Serialize(new object[]
+        {
+            new
+            {
+                fileName = "photo.jpg", fileType = "jpg",
+                fileInfo = new { shareUrl = "https://1drv.ms/i/c/x/abc" },
+                filePreview = new { previewUrl = "https://us-api.asm.skype.com/v1/objects/0-ea-d7-abc/views/imgo" },
+            },
+            new { fileName = "report.pdf", fileType = "pdf", fileInfo = new { shareUrl = "https://1drv.ms/b/c/x/def" } },
+        });
+        var resource = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            id = "1792641131222",
+            content = "",
+            messagetype = "RichText/Html",
+            properties = new { files },
+        })).RootElement;
+
+        var msg = ChatsvcClient.ParseMessage(resource, "19:abc@thread.v2");
+
+        Assert.NotNull(msg?.Attachments);
+        Assert.Equal(
+            [
+                new AttachmentDto("photo.jpg", "jpg", "https://us-api.asm.skype.com/v1/objects/0-ea-d7-abc/views/imgo", "https://1drv.ms/i/c/x/abc"),
+                new AttachmentDto("report.pdf", "pdf", null, "https://1drv.ms/b/c/x/def"),
+            ],
+            msg.Attachments);
+        Assert.Equal(msg.Attachments, ChatsvcClient.ParseAttachments(resource.GetRawText())); // 從 DB 的 RawJson 讀回來也一樣
+    }
+
+    [Fact]
+    public void ParseMessage_without_files_has_no_attachments()
+    {
+        var resource = JsonDocument.Parse("""{"id":"1","content":"hi","properties":{"files":"[]"}}""").RootElement;
+        Assert.Null(ChatsvcClient.ParseMessage(resource, "19:abc@thread.v2")!.Attachments);
+    }
+
     [Fact]
     public void ParseMessage_returns_null_without_id()
     {

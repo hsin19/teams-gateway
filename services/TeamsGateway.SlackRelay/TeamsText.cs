@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.RegularExpressions;
+using TeamsGateway.Contracts;
 
 namespace TeamsGateway.SlackRelay;
 
@@ -54,6 +55,16 @@ public static partial class TeamsText
             .Distinct()
             .ToList();
     }
+
+    /// <summary>
+    /// 附件是不是圖片：圖片類型且有 Teams 預覽圖（預覽圖放在 Teams 媒體，跟內嵌圖片一樣能代抓）。
+    /// 影片等其他類型就算有預覽縮圖也當一般檔案。
+    /// </summary>
+    public static bool IsImage(AttachmentDto attachment) =>
+        attachment.PreviewUrl is not null && attachment.Type is not null && ImageFileTypes.Contains(attachment.Type);
+
+    private static readonly HashSet<string> ImageFileTypes =
+        new(["jpg", "jpeg", "png", "gif", "bmp", "webp", "heic", "heif", "tif", "tiff"], StringComparer.OrdinalIgnoreCase);
 
     /// <summary>若是回覆，回傳被引用的那則 Teams 訊息 id（blockquote 的 itemid）；不是回覆則 null。</summary>
     public static string? QuotedMessageId(string? content)

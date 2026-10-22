@@ -1,3 +1,4 @@
+using TeamsGateway.Contracts;
 using TeamsGateway.SlackRelay;
 
 namespace TeamsGateway.SlackRelay.UnitTests;
@@ -132,6 +133,16 @@ public class TeamsTextTests
         Assert.Equal(["https://us-api.asm.skype.com/v1/objects/0-ea-d4-abc/views/imgo"], urls); // 重複的只算一次
         Assert.Equal("look", TeamsText.ToSlack(html, includeQuote: false));
     }
+
+    // 附件：圖片類型 + 有預覽圖才當圖片；影片有縮圖也算一般檔案、沒預覽圖的圖也轉不了
+    [Theory]
+    [InlineData("jpg", "https://us-api.asm.skype.com/v1/objects/0-a/views/imgo", true)]
+    [InlineData("PNG", "https://us-api.asm.skype.com/v1/objects/0-b/views/imgo", true)]
+    [InlineData("mp4", "https://us-api.asm.skype.com/v1/objects/0-c/views/imgo", false)]
+    [InlineData("jpg", null, false)]
+    [InlineData("pdf", null, false)]
+    public void IsImage_needs_image_type_and_preview(string type, string? previewUrl, bool expected) =>
+        Assert.Equal(expected, TeamsText.IsImage(new AttachmentDto("f", type, previewUrl, null)));
 
     [Fact]
     public void ImageUrls_empty_without_images()
