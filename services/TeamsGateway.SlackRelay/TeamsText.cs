@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 using TeamsGateway.Contracts;
 
@@ -7,7 +8,9 @@ namespace TeamsGateway.SlackRelay;
 /// <summary>
 /// Teams 的 RichText/Html 訊息內容轉成 Slack 看得順的文字：
 /// 回覆引用（blockquote）→ <c>&gt; *發話者*</c> + <c>&gt; 內容</c>、區塊標籤 → 換行、去標籤、decode HTML entity。
-/// 純文字訊息沒有標籤 / entity，等於原樣通過。
+/// decode 完的內容一律再跳脫 Slack 的控制字元（<c>&amp; &lt; &gt;</c>），不然 Teams 那端打的
+/// <c>&lt;!channel&gt;</c>、<c>&lt;https://釣魚|看起來正常的網址&gt;</c> 到 Slack 會變成真的 @channel / 偽裝連結。
+/// 純文字訊息沒有標籤 / entity，只會被跳脫。
 /// </summary>
 public static partial class TeamsText
 {
@@ -17,27 +20,46 @@ public static partial class TeamsText
         if (string.IsNullOrWhiteSpace(content))
             return content ?? "";
 
-        // 回覆引用：抽出「發話者 + 被引用內容」，渲染成兩行 Slack blockquote（或整個拿掉）
-        var text = BlockquoteRegex().Replace(content, match =>
+        // 引用跟其餘內文分開轉：各自只 decode 一次、各自跳脫，只有我們加的引用前綴 ">" 保留成 Slack 語法
+        var text = new StringBuilder();
+        var last = 0;
+        foreach (Match match in BlockquoteRegex().Matches(content))
         {
-            if (!includeQuote)
-                return "";
-            var inner = match.Groups[1].Value;
-            var author = QuotedAuthor(inner);
-            var quoted = QuotedText(inner) ?? Decode(CollapseTags(inner));
-            if (quoted.Length == 0 && author is null)
-                return "";
-            var block = author is null ? $"> {quoted}" : $"> *{author}*\n> {quoted}";
-            return $"\n{block}\n";
-        });
+            text.Append(PlainText(content[last..match.Index]));
+            if (includeQuote)
+                text.Append(Quote(match.Groups[1].Value));
+            last = match.Index + match.Length;
+        }
+        text.Append(PlainText(content[last..]));
 
-        text = BlockBreakRegex().Replace(text, "\n"); // <br> / </p> / </div> / </li> → 換行
-        text = TagRegex().Replace(text, "");          // 其餘標籤去掉
-        text = Decode(text);                          // &nbsp; &quot; &#128640; 之類
+        var result = TrailingSpaceRegex().Replace(text.ToString(), "\n");
+        result = ExtraBlankRegex().Replace(result, "\n"); // 連續換行收成一個，不留大塊空行
+        return result.Trim();
+    }
 
-        text = TrailingSpaceRegex().Replace(text, "\n");
-        text = ExtraBlankRegex().Replace(text, "\n"); // 連續換行收成一個，不留大塊空行
-        return text.Trim();
+    /// <summary>Slack mrkdwn 的控制字元跳脫（Slack 顯示時會還原成原字元）。</summary>
+    public static string EscapeMrkdwn(string s) =>
+        s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+
+    /// <summary>一段非引用的 HTML → Slack 文字。</summary>
+    private static string PlainText(string html)
+    {
+        var text = BlockBreakRegex().Replace(html, "\n"); // <br> / </p> / </div> / </li> → 換行
+        text = TagRegex().Replace(text, "");              // 其餘標籤去掉
+        return EscapeMrkdwn(Decode(text));                // &nbsp; &quot; &#128640; 之類，再跳脫
+    }
+
+    /// <summary>回覆引用：抽出「發話者 + 被引用內容」，渲染成兩行 Slack blockquote。</summary>
+    private static string Quote(string inner)
+    {
+        var author = QuotedAuthor(inner);
+        var quoted = QuotedText(inner) ?? Decode(CollapseTags(inner));
+        if (quoted.Length == 0 && author is null)
+            return "";
+        var block = author is null
+            ? $"> {EscapeMrkdwn(quoted)}"
+            : $"> *{EscapeMrkdwn(author)}*\n> {EscapeMrkdwn(quoted)}";
+        return $"\n{block}\n";
     }
 
     /// <summary>

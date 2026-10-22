@@ -19,16 +19,15 @@ public class TeamsTextTests
     {
         var result = TeamsText.ToSlack(ReplyHtml);
 
-        // 標籤都去掉、entity 都 decode
+        // 標籤都去掉、entity 都 decode（& < > 再跳脫給 Slack）
         Assert.DoesNotContain("<", result);
         Assert.DoesNotContain("&nbsp;", result);
         Assert.DoesNotContain("&quot;", result);
         Assert.DoesNotContain("&#128640;", result);
-        Assert.DoesNotContain("&amp;", result);
 
         Assert.Contains("🚀", result);                        // &#128640; → emoji
         Assert.Contains("\"quoted\"", result);                 // &quot; → "
-        Assert.Contains("hello & welcome", result);            // &amp; → &
+        Assert.Contains("hello &amp; welcome", result);        // decode 成 & 再跳脫，Slack 顯示成 &
         Assert.Contains("second line", result);                // <br> → 換行後仍在
         Assert.Contains("> *Alice*", result);                  // 引用：發話者粗體
     }
@@ -41,6 +40,30 @@ public class TeamsTextTests
 
     [Fact]
     public void Null_is_safe() => Assert.Equal("", TeamsText.ToSlack(null));
+
+    // Teams 那端打的 Slack 語法不能在 Slack 生效：@channel、偽裝連結、使用者提及
+    [Theory]
+    [InlineData("<p>&lt;!channel&gt; urgent</p>", "&lt;!channel&gt; urgent")]
+    [InlineData("<p>&lt;https://evil.example|https://bank.example&gt;</p>", "&lt;https://evil.example|https://bank.example&gt;")]
+    [InlineData("<p>hi &lt;@U012345&gt;</p>", "hi &lt;@U012345&gt;")]
+    [InlineData("a & b", "a &amp; b")]
+    [InlineData("<p>literally &amp;lt;</p>", "literally &amp;lt;")] // 只 decode 一次：打的是字面上的 &lt;
+    public void Slack_control_characters_are_escaped(string input, string expected) =>
+        Assert.Equal(expected, TeamsText.ToSlack(input));
+
+    [Fact]
+    public void Quote_author_and_text_are_escaped()
+    {
+        const string html =
+            "<blockquote itemscope=\"\" itemid=\"1\"><strong itemprop=\"mri\">&lt;!here&gt;</strong>" +
+            "<p itemprop=\"preview\">&lt;!channel&gt; &amp; more</p></blockquote><p>reply</p>";
+
+        var result = TeamsText.ToSlack(html);
+
+        Assert.Contains("> *&lt;!here&gt;*", result);
+        Assert.Contains("> &lt;!channel&gt; &amp; more", result);
+        Assert.DoesNotContain("<!", result);
+    }
 
     [Fact]
     public void QuotedMessageId_reads_blockquote_itemid()

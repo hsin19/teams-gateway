@@ -146,8 +146,9 @@ public sealed class RelayWorker(
         logger.LogInformation("從 Slack 回補 {Count} 筆訊息對應（近 {Hours}h）", links.Count, retentionHours);
     }
 
+    // 顯示名稱是對方自己取的，要跳脫，不然名稱裡的 <!channel> 之類會變成 Slack 語法
     private static string Header(MessageDto message) =>
-        $"*{(string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName)}*:";
+        $"*{TeamsText.EscapeMrkdwn(string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName)}*:";
 
     private async Task<SlackContent> FormatAsync(MessageDto message, string channel, CancellationToken ct)
     {
@@ -159,7 +160,7 @@ public sealed class RelayWorker(
             && await slack.GetPermalinkAsync(slackRef.Channel, slackRef.Ts, ct) is { } permalink)
         {
             var author = TeamsText.QuotedAuthorName(message.Content);
-            replyLink = $"<{permalink}|Reply{(author is null ? "" : $" {EscapeMrkdwn(author)}")}>";
+            replyLink = $"<{permalink}|Reply{(author is null ? "" : $" {TeamsText.EscapeMrkdwn(author)}")}>";
         }
 
         var body = TeamsText.ToSlack(message.Content, includeQuote: replyLink is null);
@@ -186,7 +187,7 @@ public sealed class RelayWorker(
     }
 
     private static string FileLink(AttachmentDto file) =>
-        file.ShareUrl is null ? EscapeMrkdwn(file.Name) : $"<{file.ShareUrl}|{EscapeMrkdwn(file.Name)}>";
+        file.ShareUrl is null ? TeamsText.EscapeMrkdwn(file.Name) : $"<{file.ShareUrl}|{TeamsText.EscapeMrkdwn(file.Name)}>";
 
     /// <summary>圖片經 gateway 抓下來、上傳 Slack，回傳 file id 與失敗張數；同一張圖（編輯時）不重傳。</summary>
     private async Task<(IReadOnlyList<string> FileIds, int Failed)> UploadImagesAsync(IReadOnlyList<string> urls, CancellationToken ct)
@@ -225,10 +226,6 @@ public sealed class RelayWorker(
             return null;
         }
     }
-
-    // 連結標籤裡的 < > & 會被 Slack 當成語法，名稱要跳脫
-    private static string EscapeMrkdwn(string s) =>
-        s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     // image block 的 slack_file 只支援 png / jpg / gif
     private static string? ImageExtension(string contentType) => contentType switch
