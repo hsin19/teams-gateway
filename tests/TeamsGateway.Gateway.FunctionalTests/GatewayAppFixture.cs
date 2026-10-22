@@ -29,6 +29,7 @@ public sealed class GatewayAppFixture : WebApplicationFactory<Program>
             RemoveHostedService<TrouterBackgroundService>(services);
             RemoveHostedService<StartupBackfillService>(services);
             RemoveHostedService<ReconcileService>(services);
+            RemoveHostedService<PollService>(services);
         });
     }
 

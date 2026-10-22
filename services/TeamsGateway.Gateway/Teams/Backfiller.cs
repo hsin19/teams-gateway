@@ -41,8 +41,15 @@ public sealed class Backfiller(
         var stored = 0;
         // GetHistoryAsync 是新→舊；照時間由舊到新寫入 / 發出，訂閱者那邊才不會順序顛倒
         foreach (var item in history.OrderBy(h => h.Dto.Time))
-            if (await ingestor.UpsertAsync(item.Dto, item.Raw, publish, ct) is not IngestResult.Unchanged)
-                stored++;
+        {
+            var result = await ingestor.UpsertAsync(item.Dto, item.Raw, publish, ct);
+            if (result is IngestResult.Unchanged)
+                continue;
+            stored++;
+            if (publish && result is IngestResult.Inserted) // 補缺口抓到的新訊息 = 停機期間漏接
+                logger.LogWarning("停機期間漏接，啟動回補補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
+                    conversationId, item.Dto.Id, item.Dto.Time, item.Dto.FromName);
+        }
 
         logger.LogInformation("回補 {Conversation}：抓到 {Fetched} 則、新增 / 更新 {Stored} 則（{Since:u} 起）",
             conversationId, history.Count, stored, window);

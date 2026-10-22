@@ -56,8 +56,14 @@ public sealed class ReconcileService(
             var changed = 0;
             // GetHistoryAsync 是新→舊；補回 / 重發要照時間由舊到新，Slack 才不會順序顛倒
             foreach (var item in history.OrderBy(h => h.Dto.Time))
-                if (await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct) is IngestResult.Updated)
+            {
+                var result = await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct);
+                if (result is IngestResult.Updated)
                     changed++;
+                else if (result is IngestResult.Inserted) // 新訊息要靠慢更新才抓到 = Trouter 跟輪詢都漏了
+                    logger.LogWarning("Trouter 漏接，慢更新補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
+                        id, item.Dto.Id, item.Dto.Time, item.Dto.FromName);
+            }
             if (changed > 0)
                 logger.LogInformation("慢更新 {Conversation}：{Changed} 則編輯 / 刪除", id, changed);
         }

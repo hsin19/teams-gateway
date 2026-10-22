@@ -20,4 +20,7 @@ public sealed class GatewayOptions
 
     /// <summary>慢更新每次回看幾小時內的訊息。</summary>
     public int ReconcileWindowHours { get; set; } = 24;
+
+    /// <summary>輪詢保險：每隔幾秒抓一次訂閱對話最近的訊息，補上 Trouter 漏推的新訊息。0 = 關閉。</summary>
+    public int PollSeconds { get; set; } = 60;
 }

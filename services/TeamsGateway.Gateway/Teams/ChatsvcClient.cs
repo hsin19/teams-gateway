@@ -69,13 +69,13 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
     }
 
     /// <summary>往回翻頁抓歷史，直到訊息比 <paramref name="cutoff"/> 舊或到頂（或到 <paramref name="maxMessages"/> 上限）。給回補用。</summary>
-    public async Task<IReadOnlyList<RawMessage>> GetHistoryAsync(string threadId, DateTimeOffset cutoff, int maxMessages, CancellationToken ct = default)
+    public async Task<IReadOnlyList<RawMessage>> GetHistoryAsync(string threadId, DateTimeOffset cutoff, int maxMessages, CancellationToken ct = default, int pageSize = 200)
     {
         var result = new List<RawMessage>();
         string? cursor = null;
         for (var page = 0; page < 40 && result.Count < maxMessages; page++)
         {
-            var (items, next) = await FetchPageAsync(threadId, 200, cursor, ct);
+            var (items, next) = await FetchPageAsync(threadId, pageSize, cursor, ct);
             if (items.Count == 0)
                 break;
             var reachedCutoff = false;

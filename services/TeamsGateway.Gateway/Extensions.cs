@@ -31,6 +31,7 @@ public static class Extensions
         builder.Services.AddScoped<Backfiller>();
         builder.Services.AddHostedService<StartupBackfillService>();
         builder.Services.AddHostedService<ReconcileService>(); // 慢更新：定期補編輯 / 刪除
+        builder.Services.AddHostedService<PollService>();      // 輪詢保險：補 Trouter 漏推的新訊息
 
         // MCP：讀 / 發是純 function，開成 MCP tool 給任何 MCP client 用（見 Mcp/TeamsTools）
         builder.Services.AddMcpServer().WithHttpTransport().WithToolsFromAssembly();
