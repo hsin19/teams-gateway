@@ -35,6 +35,9 @@ public static class ChatsApi
 
         v1.MapGet("/chats/{id}/messages", async (string id, ChatsvcClient chatsvc, CancellationToken ct, int? limit = null, string? cursor = null) =>
         {
+            cursor = string.IsNullOrEmpty(cursor) ? null : cursor;
+            if (cursor is not null && !chatsvc.IsValidCursor(id, cursor))
+                return Results.BadRequest(new { error = "cursor 要帶同一個對話上一頁回的 nextCursor" });
             var page = await chatsvc.GetMessagesAsync(id, Math.Clamp(limit ?? 30, 1, 200), cursor, ct);
             return Results.Ok(page);
         })

@@ -1,3 +1,6 @@
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -31,6 +34,20 @@ public sealed class GatewayAppFixture : WebApplicationFactory<Program>
             RemoveHostedService<ReconcileService>(services);
             RemoveHostedService<PollService>(services);
         });
+    }
+
+    /// <summary>走 admin 端點真的建一把 key，回帶著它的 client（順便驗 admin happy path 回得到明文 apiKey）。</summary>
+    public async Task<HttpClient> CreateApiClientAsync(CancellationToken ct)
+    {
+        var admin = CreateClient();
+        admin.DefaultRequestHeaders.Add("X-Admin-Token", AdminToken);
+        var resp = await admin.PostAsJsonAsync("/admin/api-keys", new { name = "func" }, ct);
+        resp.EnsureSuccessStatusCode();
+        var created = await resp.Content.ReadFromJsonAsync<JsonElement>(ct);
+
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", created.GetProperty("apiKey").GetString());
+        return client;
     }
 
     private static void RemoveHostedService<T>(IServiceCollection services) where T : IHostedService

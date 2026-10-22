@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -28,8 +27,7 @@ public sealed class RevisionsEndpointTests(GatewayAppFixture fx) : IClassFixture
         var messageId = "func-" + Guid.NewGuid().ToString("N");
         await SeedEditedMessageAsync(messageId, ct);
 
-        var client = fx.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await CreateApiKeyAsync(ct));
+        var client = await fx.CreateApiClientAsync(ct);
 
         var doc = await client.GetFromJsonAsync<JsonElement>($"/v1/messages/{messageId}/revisions", ct);
 
@@ -44,8 +42,7 @@ public sealed class RevisionsEndpointTests(GatewayAppFixture fx) : IClassFixture
     public async Task Unknown_message_is_404()
     {
         var ct = TestContext.Current.CancellationToken;
-        var client = fx.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await CreateApiKeyAsync(ct));
+        var client = await fx.CreateApiClientAsync(ct);
 
         var resp = await client.GetAsync("/v1/messages/does-not-exist/revisions", ct);
 
@@ -69,16 +66,5 @@ public sealed class RevisionsEndpointTests(GatewayAppFixture fx) : IClassFixture
         var ingestor = scope.ServiceProvider.GetRequiredService<MessageIngestor>();
         await ingestor.UpsertAsync(Msg(messageId, 100, "原文"), "{}", publish: false, ct);
         await ingestor.UpsertAsync(Msg(messageId, 200, "改過", edited: true), "{}", publish: false, ct);
-    }
-
-    /// <summary>走 admin 端點真的建一把 key，順便驗 admin happy path 回得到明文 apiKey。</summary>
-    private async Task<string> CreateApiKeyAsync(CancellationToken ct)
-    {
-        var admin = fx.CreateClient();
-        admin.DefaultRequestHeaders.Add("X-Admin-Token", fx.AdminToken);
-        var resp = await admin.PostAsJsonAsync("/admin/api-keys", new { name = "func" }, ct);
-        resp.EnsureSuccessStatusCode();
-        var created = await resp.Content.ReadFromJsonAsync<JsonElement>(ct);
-        return created.GetProperty("apiKey").GetString()!;
     }
 }

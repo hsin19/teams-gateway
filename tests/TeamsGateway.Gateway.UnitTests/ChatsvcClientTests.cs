@@ -93,6 +93,22 @@ public class ChatsvcClientTests
     [InlineData("teams-gateway test")]
     public void IsThreadId_false_for_names(string spec) => Assert.False(ChatsvcClient.IsThreadId(spec));
 
+    // 游標會帶著 skypetoken 原樣打出去：只能是同一個對話、Teams / Skype 主機的 messages 端點
+    [Theory]
+    [InlineData("https://teams.live.com/api/chatsvc/consumer/v1/users/ME/conversations/19:abc@thread.v2/messages?startTime=1&syncState=x", true)]
+    [InlineData("https://teams.live.com/api/chatsvc/consumer/v1/users/ME/conversations/19%3Aabc%40thread.v2/messages?syncState=x", true)]
+    [InlineData("https://apac.ng.msg.teams.microsoft.com/v1/users/ME/conversations/19:abc@thread.v2/messages?syncState=x", true)]
+    [InlineData("https://attacker.example/api/chatsvc/consumer/v1/users/ME/conversations/19:abc@thread.v2/messages", false)]
+    [InlineData("https://teams.live.com.attacker.example/api/chatsvc/consumer/v1/users/ME/conversations/19:abc@thread.v2/messages", false)]
+    [InlineData("https://user@teams.live.com/api/chatsvc/consumer/v1/users/ME/conversations/19:abc@thread.v2/messages", false)]
+    [InlineData("https://teams.live.com:8443/api/chatsvc/consumer/v1/users/ME/conversations/19:abc@thread.v2/messages", false)]
+    [InlineData("http://teams.live.com/api/chatsvc/consumer/v1/users/ME/conversations/19:abc@thread.v2/messages", false)]
+    [InlineData("https://teams.live.com/api/chatsvc/consumer/v1/users/ME/conversations/19:other@thread.v2/messages", false)]
+    [InlineData("https://teams.live.com/api/chatsvc/consumer/v1/users/ME/properties", false)]
+    [InlineData("/api/chatsvc/consumer/v1/users/ME/conversations/19:abc@thread.v2/messages", false)]
+    public void IsCursorFor_only_accepts_same_conversation_on_teams_hosts(string cursor, bool expected) =>
+        Assert.Equal(expected, ChatsvcClient.IsCursorFor("teams.live.com", "19:abc@thread.v2", cursor));
+
     [Fact]
     public void MatchByName_prefers_prefix_then_contains_case_insensitive()
     {

@@ -62,11 +62,33 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
     /// <summary>一則訊息連同原始 JSON（給持久化留存）。</summary>
     public readonly record struct RawMessage(MessageDto Dto, string Raw);
 
+    /// <param name="cursor">上一頁回的 <c>NextCursor</c>；外部傳進來的，必須先過 <see cref="IsValidCursor"/>。</param>
     public async Task<MessagePage> GetMessagesAsync(string threadId, int pageSize, string? cursor, CancellationToken ct = default)
     {
+        if (cursor is not null && !IsValidCursor(threadId, cursor))
+            throw new ArgumentException("cursor 不是這個對話的翻頁游標", nameof(cursor));
         var (items, next) = await FetchPageAsync(threadId, pageSize, cursor, ct);
         return new MessagePage(items.Select(i => i.Dto).ToList(), next);
     }
+
+    // backwardLink 沒抓過非 base 主機的樣本；保險起見也收 Teams / Skype 的訊息主機（skypetoken 本來就會送去那些地方）
+    private static readonly string[] CursorHostSuffixes = [".teams.microsoft.com", ".skype.com"];
+
+    /// <summary>
+    /// 翻頁游標就是 chatsvc 回的 backwardLink（絕對網址），會帶著 skypetoken 原樣打出去。
+    /// 所以只收「同一個對話的 messages 端點、主機是 Teams / Skype」的網址——不然任何 API key 持有者
+    /// 都能叫 gateway 把 token 送到自己的主機，或拿它打內網。
+    /// </summary>
+    public bool IsValidCursor(string threadId, string cursor) => IsCursorFor(http.BaseAddress!.Host, threadId, cursor);
+
+    internal static bool IsCursorFor(string baseHost, string threadId, string cursor) =>
+        Uri.TryCreate(cursor, UriKind.Absolute, out var uri)
+        && uri.Scheme == Uri.UriSchemeHttps
+        && uri.IsDefaultPort
+        && uri.UserInfo.Length == 0
+        && (uri.Host.Equals(baseHost, StringComparison.OrdinalIgnoreCase)
+            || CursorHostSuffixes.Any(s => uri.Host.EndsWith(s, StringComparison.OrdinalIgnoreCase)))
+        && Uri.UnescapeDataString(uri.AbsolutePath).EndsWith($"/users/ME/conversations/{threadId}/messages", StringComparison.Ordinal);
 
     /// <summary>往回翻頁抓歷史，直到訊息比 <paramref name="cutoff"/> 舊或到頂（或到 <paramref name="maxMessages"/> 上限）。給回補用。</summary>
     public async Task<IReadOnlyList<RawMessage>> GetHistoryAsync(string threadId, DateTimeOffset cutoff, int maxMessages, CancellationToken ct = default, int pageSize = 200)
