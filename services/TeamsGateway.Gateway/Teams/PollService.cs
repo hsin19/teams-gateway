@@ -15,7 +15,7 @@ public sealed class PollService(
     ILogger<PollService> logger) : BackgroundService
 {
     private static readonly TimeSpan Lookback = TimeSpan.FromMinutes(15);
-    private static readonly TimeSpan Grace = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Grace = TimeSpan.FromSeconds(10);
     private const int PageSize = 30;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
