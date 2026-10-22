@@ -56,6 +56,9 @@ namespace TeamsGateway.Gateway.Data.Migrations
                     b.Property<bool>("Subscribed")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("SyncedThrough")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ThreadType")
                         .HasColumnType("TEXT");
 

@@ -101,6 +101,9 @@ public static class AdminApi
                     db.Conversations.Add(new Conversation { Id = hit.Id, Topic = hit.Topic, Subscribed = true, UpdatedAt = DateTimeOffset.UtcNow });
                 else
                 {
+                    // 重新訂閱：沒追的那段期間不該當成「漏接」發給訂閱者，水位線歸零 → 回補只存不發
+                    if (!conv.Subscribed)
+                        conv.SyncedThrough = null;
                     conv.Subscribed = true;
                     conv.Topic = hit.Topic ?? conv.Topic;
                     conv.UpdatedAt = DateTimeOffset.UtcNow;

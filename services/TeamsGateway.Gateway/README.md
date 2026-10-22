@@ -44,11 +44,11 @@ cookie 與 token 以 DataProtection 加密後存進 SQLite（`SecureValues` 表�
 ## 訂閱哪些對話（範圍）
 
 gateway **只追 / 存訂閱中的對話**（Trouter 會推帳號的所有對話，但只有訂閱的會入庫、才會進 SSE / webhook）。
-訂閱時會同步回補一段歷史（預設 7 天，`Gateway:BackfillDays`）；重啟時也會補停機期間的缺口——給之後接 Elasticsearch 歷史搜尋留料。
+訂閱時會同步回補一段歷史（預設 7 天，`Gateway:BackfillDays`，只存不發）；重啟 / 睡眠後也會補停機期間的缺口並發出——給之後接 Elasticsearch 歷史搜尋留料。缺口從每個對話的水位線（`SyncedThrough`，最後一次完整同步到的時間）算起，只有回補 / 輪詢這種整段抓的會推進它；重新訂閱時歸零，沒追的那段不會被當成漏接發出。
 
 **編輯 / 刪除**：訊息 `version` 在編輯時遞增。同 id 但 version 更大 = 被編輯 / 刪除，gateway 會更新 DB 的內容與 `Edited` / `Deleted` 標記並重發事件。覆蓋前先把舊版本存進 `MessageRevisions` 表（`MessageEvents` 永遠是最新版，`MessageRevisions` 是編輯歷史），所以改過的訊息也看得到被改掉前的內容，給之後 ES 歷史搜尋與稽核留料。推播不一定帶每個編輯，所以還有「慢更新」：每 `Gateway:ReconcileMinutes`（預設 15）分重掃訂閱對話近 `ReconcileWindowHours`（預設 24）小時的訊息，把漏接的編輯 / 刪除補上。
 
-**輪詢保險**：Trouter 推播是主路徑，但另外每 `Gateway:PollSeconds`（預設 20）秒抓一次各訂閱對話最近 15 分鐘的訊息，把漏推的新訊息照時間順序補發（最近 10 秒內的先留給推播，避免搶先誤判）。凡是靠輪詢 / 慢更新 / 啟動回補才抓到的新訊息都會記 warning（`Trouter 漏接，…補到`），可以拿來觀察推播可靠度。
+**輪詢保險**：Trouter 推播是主路徑，但另外每 `Gateway:PollSeconds`（預設 20）秒抓一次各訂閱對話最近 15 分鐘的訊息，把漏推的新訊息照時間順序補發（最近 10 秒內的先留給推播，避免搶先誤判）。水位線落後超過 15 分鐘（停機、Mac 睡眠）時，輪詢改成從水位線整段回補。凡是靠輪詢 / 慢更新 / 啟動回補才抓到的新訊息都會記 warning（`Trouter 漏接，…補到`），可以拿來觀察推播可靠度。
 
 **Metrics**（meter `TeamsGateway.Gateway`，隨 ServiceDefaults 的 OpenTelemetry 匯出；設了 `OTEL_EXPORTER_OTLP_ENDPOINT` 才會送出去）：
 

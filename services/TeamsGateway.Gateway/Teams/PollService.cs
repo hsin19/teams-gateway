@@ -8,6 +8,8 @@ namespace TeamsGateway.Gateway.Teams;
 /// 輪詢保險：每 <c>PollSeconds</c> 抓一次各訂閱對話最近的訊息，把 Trouter 沒推到的新訊息補進來並 publish。
 /// 補到新訊息就代表 Trouter 漏接，記 warning。最近 <see cref="Grace"/> 內的訊息先留給 Trouter，
 /// 不然輪詢可能比推播早一步抓到、造成誤報；真的漏了下一輪會補到。
+/// 對話的水位線（<see cref="Conversation.SyncedThrough"/>）落後超過 <see cref="Lookback"/>（停機 / 睡眠 / 剛訂閱失敗）時，
+/// 這輪抓不到那段，改成整段回補並 publish。
 /// </summary>
 public sealed class PollService(
     IServiceProvider services,
@@ -17,6 +19,7 @@ public sealed class PollService(
     private static readonly TimeSpan Lookback = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan Grace = TimeSpan.FromSeconds(10);
     private const int PageSize = 30;
+    private const int MaxMessages = 100;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -48,22 +51,35 @@ public sealed class PollService(
         }
     }
 
+    /// <summary>水位線沒有、或比輪詢回看的範圍還舊：輪詢補不到中間那段，要整段回補。</summary>
+    internal static bool NeedsBackfill(DateTimeOffset? syncedThrough, DateTimeOffset now) =>
+        syncedThrough is not { } synced || synced < now - Lookback;
+
     private async Task PollAllAsync(CancellationToken ct)
     {
         await using var scope = services.CreateAsyncScope();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<GatewayDbContext>>();
         var chatsvc = scope.ServiceProvider.GetRequiredService<ChatsvcClient>();
         var ingestor = scope.ServiceProvider.GetRequiredService<MessageIngestor>();
+        var backfiller = scope.ServiceProvider.GetRequiredService<Backfiller>();
         var metrics = scope.ServiceProvider.GetRequiredService<GatewayMetrics>();
 
-        List<string> ids;
+        List<(string Id, DateTimeOffset? SyncedThrough)> convs;
         await using (var db = await factory.CreateDbContextAsync(ct))
-            ids = await db.Conversations.Where(c => c.Subscribed).Select(c => c.Id).ToListAsync(ct);
+            convs = (await db.Conversations.Where(c => c.Subscribed).Select(c => new { c.Id, c.SyncedThrough }).ToListAsync(ct))
+                .Select(c => (c.Id, c.SyncedThrough)).ToList();
 
         var now = DateTimeOffset.UtcNow;
-        foreach (var id in ids)
+        foreach (var (id, syncedThrough) in convs)
         {
-            var recent = await chatsvc.GetHistoryAsync(id, now - Lookback, maxMessages: 100, ct, PageSize);
+            if (NeedsBackfill(syncedThrough, now))
+            {
+                logger.LogInformation("{Conversation} 上次同步到 {Synced:u}，超過輪詢回看範圍，整段回補", id, syncedThrough);
+                await backfiller.BackfillAsync(id, publishGap: true, ct);
+                continue;
+            }
+
+            var recent = await chatsvc.GetHistoryAsync(id, now - Lookback, MaxMessages, ct, PageSize);
             foreach (var item in recent.Where(h => h.Dto.Time < now - Grace).OrderBy(h => h.Dto.Time))
             {
                 var result = await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct);
@@ -72,6 +88,10 @@ public sealed class PollService(
                     logger.LogWarning("Trouter 漏接，輪詢補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
                         id, item.Dto.Id, item.Dto.Time, item.Dto.FromName);
             }
+
+            // 抓滿上限 = 回看範圍裡最舊那段可能沒抓到，水位線不動（落後超過回看時下一輪會整段回補）
+            if (recent.Count < MaxMessages)
+                await Backfiller.MarkSyncedAsync(factory, id, now - Grace, ct);
         }
     }
 }

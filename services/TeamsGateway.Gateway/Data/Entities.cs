@@ -11,6 +11,11 @@ public class Conversation
     public string? LastMessageId { get; set; }
     /// <summary>gateway 是否要收這個對話的推播。</summary>
     public bool Subscribed { get; set; }
+    /// <summary>
+    /// 已完整同步到的時間（這之前的訊息都入庫了）。只有回補 / 輪詢這種「整段抓」的才推進；
+    /// Trouter 推來的單則不算，所以重啟 / 睡眠後從這裡補缺口，不會被先到的新訊息跳過。
+    /// </summary>
+    public DateTimeOffset? SyncedThrough { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
     public ICollection<MessageEvent> Messages { get; set; } = [];
