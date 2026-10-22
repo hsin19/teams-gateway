@@ -148,6 +148,34 @@ namespace TeamsGateway.Gateway.Data.Migrations
                     b.ToTable("MessageRevisions");
                 });
 
+            modelBuilder.Entity("TeamsGateway.Gateway.Data.PublishedEvent", b =>
+                {
+                    b.Property<long>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ConversationId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MessageId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("PublishedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Seq");
+
+                    b.HasIndex("PublishedAt");
+
+                    b.ToTable("PublishedEvents");
+                });
+
             modelBuilder.Entity("TeamsGateway.Gateway.Data.SecureValue", b =>
                 {
                     b.Property<string>("Key")

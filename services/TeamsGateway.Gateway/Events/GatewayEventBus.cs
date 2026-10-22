@@ -3,6 +3,9 @@ using TeamsGateway.Contracts;
 
 namespace TeamsGateway.Gateway.Events;
 
+/// <summary>發給訂閱者的一個事件。<see cref="Seq"/> 對應 <c>PublishedEvents</c> 表，也是 SSE 的 event id。</summary>
+public sealed record GatewayEvent(long Seq, MessageDto Message);
+
 /// <summary>
 /// 行程內的新訊息 pub/sub。Trouter 背景工作 publish，SSE 連線與 webhook 投遞各自 subscribe。
 /// 單一行程夠用；要拆多實例時再換成真的 broker（見 ADR 0002）。
@@ -10,12 +13,12 @@ namespace TeamsGateway.Gateway.Events;
 public sealed class GatewayEventBus
 {
     private readonly Lock _lock = new();
-    private readonly List<Channel<MessageDto>> _subscribers = [];
+    private readonly List<Channel<GatewayEvent>> _subscribers = [];
 
     public Subscription Subscribe()
     {
-        // 慢的訂閱者滿了就丟最舊的，不要卡住 publish
-        var channel = Channel.CreateBounded<MessageDto>(new BoundedChannelOptions(500)
+        // 慢的訂閱者滿了就丟最舊的，不要卡住 publish（SSE 看得出序號斷洞，會從 DB 補回）
+        var channel = Channel.CreateBounded<GatewayEvent>(new BoundedChannelOptions(500)
         {
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
@@ -25,22 +28,22 @@ public sealed class GatewayEventBus
         return new Subscription(this, channel);
     }
 
-    public void Publish(MessageDto message)
+    public void Publish(GatewayEvent evt)
     {
         lock (_lock)
             foreach (var channel in _subscribers)
-                channel.Writer.TryWrite(message);
+                channel.Writer.TryWrite(evt);
     }
 
-    private void Remove(Channel<MessageDto> channel)
+    private void Remove(Channel<GatewayEvent> channel)
     {
         lock (_lock)
             _subscribers.Remove(channel);
     }
 
-    public sealed class Subscription(GatewayEventBus bus, Channel<MessageDto> channel) : IDisposable
+    public sealed class Subscription(GatewayEventBus bus, Channel<GatewayEvent> channel) : IDisposable
     {
-        public ChannelReader<MessageDto> Reader => channel.Reader;
+        public ChannelReader<GatewayEvent> Reader => channel.Reader;
 
         public void Dispose()
         {

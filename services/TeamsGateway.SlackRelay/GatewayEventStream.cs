@@ -5,15 +5,18 @@ using TeamsGateway.Contracts;
 
 namespace TeamsGateway.SlackRelay;
 
+/// <summary>SSE 的一個 message 事件。<see cref="Id"/> 是 gateway 的事件序號，重連時當 <c>Last-Event-ID</c> 帶回去。</summary>
+public readonly record struct StreamEvent(string? Id, MessageDto Message);
+
 /// <summary>
-/// 連 gateway 的 <c>GET /v1/events</c>（SSE），解析出 <see cref="MessageDto"/>。
+/// 連 gateway 的 <c>GET /v1/events</c>（SSE），解析出 <see cref="StreamEvent"/>。
 /// 一次連線 yield 到斷為止；重連與 <c>Last-Event-ID</c> 的續接由呼叫端（worker）掌控。
 /// </summary>
 public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStream> logger)
 {
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 
-    public async IAsyncEnumerable<MessageDto> ConnectAsync(
+    public async IAsyncEnumerable<StreamEvent> ConnectAsync(
         string? chats, string? lastEventId, [EnumeratorCancellation] CancellationToken ct)
     {
         var url = "/v1/events";
@@ -34,6 +37,7 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
         logger.LogInformation("已連上 gateway SSE（chats={Chats}）", chats ?? "全部");
 
         string? eventType = null;
+        string? eventId = null;
         var data = new StringBuilder();
 
         while (!ct.IsCancellationRequested)
@@ -46,10 +50,12 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
             {
                 // 事件邊界：收完一個事件
                 var message = eventType == "message" && data.Length > 0 ? TryParse(data.ToString()) : null;
+                var id = eventId;
                 eventType = null;
+                eventId = null;
                 data.Clear();
                 if (message is not null)
-                    yield return message;
+                    yield return new StreamEvent(id, message);
                 continue;
             }
 
@@ -57,7 +63,8 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
                 eventType = line["event:".Length..].Trim();
             else if (line.StartsWith("data:", StringComparison.Ordinal))
                 data.Append(line["data:".Length..].TrimStart());
-            // id: 行不另外存，我們用 message.Id 當 Last-Event-ID
+            else if (line.StartsWith("id:", StringComparison.Ordinal))
+                eventId = line["id:".Length..].Trim(); // 事件序號，不是訊息 id（編輯會沿用訊息 id）
         }
     }
 

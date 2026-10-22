@@ -23,4 +23,7 @@ public sealed class GatewayOptions
 
     /// <summary>輪詢保險：每隔幾秒抓一次訂閱對話最近的訊息，補上 Trouter 漏推的新訊息。0 = 關閉。</summary>
     public int PollSeconds { get; set; } = 20;
+
+    /// <summary>已發事件（SSE 斷線補收用）留幾天；斷線比這還久的訂閱者重連時就從現在開始收。</summary>
+    public int EventRetentionDays { get; set; } = 7;
 }

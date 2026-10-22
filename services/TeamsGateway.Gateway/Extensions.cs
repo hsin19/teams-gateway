@@ -30,6 +30,7 @@ public static class Extensions
         builder.Services.AddSingleton<TrouterClient>();
         builder.Services.AddHostedService<TrouterBackgroundService>();
         builder.Services.AddHostedService<WebhookDeliveryService>();
+        builder.Services.AddHostedService<PublishedEventPruner>();
 
         // 只追訂閱中的對話，並在訂閱 / 啟動時回補歷史（給 Elasticsearch 歷史搜尋留料）
         builder.Services.AddScoped<Backfiller>();

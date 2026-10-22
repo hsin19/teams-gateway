@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using TeamsGateway.Contracts;
 using TeamsGateway.Gateway.Data;
@@ -10,9 +11,12 @@ public enum IngestResult { Inserted, Updated, Unchanged }
 /// <summary>
 /// 把一則訊息 upsert 進 DB（Trouter 即時、回補、慢更新共用）。
 /// 以 Teams 訊息 id 為主鍵；同 id 但 version 更大 = 被編輯 / 刪除 → 更新內容與標記。live 才 publish。
+/// publish 的事件跟訊息同一個交易記進 <see cref="PublishedEvent"/>，SSE 斷線補收靠它。
 /// </summary>
 public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory, GatewayEventBus bus)
 {
+    private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
+
     public async Task<bool> IsSubscribedAsync(string conversationId, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
@@ -43,6 +47,7 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
                 UpdatedAt = DateTimeOffset.UtcNow,
                 RawJson = rawJson,
             });
+            PublishedEvent? inserted = null;
             if (publish)
             {
                 var conv = await db.Conversations.FindAsync([dto.ConversationId], ct);
@@ -51,10 +56,11 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
                     conv.LastMessageId = dto.Id;
                     conv.UpdatedAt = DateTimeOffset.UtcNow;
                 }
+                inserted = Record(db, dto);
             }
             await db.SaveChangesAsync(ct);
-            if (publish)
-                bus.Publish(dto);
+            if (inserted is not null)
+                bus.Publish(new GatewayEvent(inserted.Seq, dto));
             return IngestResult.Inserted;
         }
 
@@ -77,9 +83,24 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
         existing.Deleted = dto.Deleted;
         existing.UpdatedAt = DateTimeOffset.UtcNow;
         existing.RawJson = rawJson;
+        var updated = publish ? Record(db, dto) : null;
         await db.SaveChangesAsync(ct);
-        if (publish)
-            bus.Publish(dto);
+        if (updated is not null)
+            bus.Publish(new GatewayEvent(updated.Seq, dto));
         return IngestResult.Updated;
+    }
+
+    /// <summary>把要發的事件加進流水帳；SaveChanges 之後 <see cref="PublishedEvent.Seq"/> 才有值。</summary>
+    private static PublishedEvent Record(GatewayDbContext db, MessageDto dto)
+    {
+        var evt = new PublishedEvent
+        {
+            MessageId = dto.Id,
+            ConversationId = dto.ConversationId,
+            Payload = JsonSerializer.Serialize(dto, Web),
+            PublishedAt = DateTimeOffset.UtcNow,
+        };
+        db.PublishedEvents.Add(evt);
+        return evt;
     }
 }

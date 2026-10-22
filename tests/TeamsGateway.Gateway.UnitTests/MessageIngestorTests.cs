@@ -69,6 +69,40 @@ public class MessageIngestorTests
     }
 
     [Fact]
+    public async Task Publish_records_event_and_sends_its_sequence()
+    {
+        using var db = new TestDb();
+        await AddConversationAsync(db, subscribed: true);
+        var bus = new GatewayEventBus();
+        using var sub = bus.Subscribe();
+        var ingestor = new MessageIngestor(db, bus);
+        var ct = TestContext.Current.CancellationToken;
+
+        await ingestor.UpsertAsync(Msg("100", version: 100), "{}", publish: true, ct);
+        await ingestor.UpsertAsync(Msg("100", version: 200, content: "改過", edited: true), "{}", publish: true, ct);
+
+        Assert.True(sub.Reader.TryRead(out var inserted));
+        Assert.True(sub.Reader.TryRead(out var edited));
+        Assert.True(edited!.Seq > inserted!.Seq); // 編輯同訊息 id，但是新的事件序號
+        await using var ctx = db.CreateDbContext();
+        Assert.Equal([inserted.Seq, edited.Seq], ctx.PublishedEvents.OrderBy(e => e.Seq).Select(e => e.Seq));
+    }
+
+    [Fact]
+    public async Task Store_only_backfill_records_no_event()
+    {
+        // 首次訂閱的歷史回補只存不發：也不能進事件流水帳，不然重連補收會把歷史洗給訂閱者
+        using var db = new TestDb();
+        await AddConversationAsync(db, subscribed: true);
+        var ingestor = new MessageIngestor(db, new GatewayEventBus());
+
+        await ingestor.UpsertAsync(Msg("100", version: 100), "{}", publish: false, TestContext.Current.CancellationToken);
+
+        await using var ctx = db.CreateDbContext();
+        Assert.Empty(ctx.PublishedEvents);
+    }
+
+    [Fact]
     public async Task IsSubscribed_reflects_conversation_flag()
     {
         using var db = new TestDb();

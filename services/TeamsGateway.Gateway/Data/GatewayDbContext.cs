@@ -14,6 +14,7 @@ public class GatewayDbContext(DbContextOptions<GatewayDbContext> options) : DbCo
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<MessageEvent> MessageEvents => Set<MessageEvent>();
     public DbSet<MessageRevision> MessageRevisions => Set<MessageRevision>();
+    public DbSet<PublishedEvent> PublishedEvents => Set<PublishedEvent>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<WebhookSubscription> WebhookSubscriptions => Set<WebhookSubscription>();
     public DbSet<SecureValue> SecureValues => Set<SecureValue>();
@@ -34,6 +35,12 @@ public class GatewayDbContext(DbContextOptions<GatewayDbContext> options) : DbCo
         {
             e.HasKey(r => new { r.MessageId, r.Version });
             e.HasOne(r => r.Message).WithMany(m => m.Revisions).HasForeignKey(r => r.MessageId);
+        });
+
+        b.Entity<PublishedEvent>(e =>
+        {
+            e.HasKey(p => p.Seq);
+            e.HasIndex(p => p.PublishedAt); // 定期清舊事件用
         });
 
         b.Entity<ApiKey>(e =>

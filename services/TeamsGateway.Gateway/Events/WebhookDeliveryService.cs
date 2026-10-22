@@ -19,11 +19,11 @@ public sealed class WebhookDeliveryService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var subscription = bus.Subscribe();
-        await foreach (var message in subscription.Reader.ReadAllAsync(stoppingToken))
+        await foreach (var evt in subscription.Reader.ReadAllAsync(stoppingToken))
         {
             try
             {
-                await DeliverAsync(message, stoppingToken);
+                await DeliverAsync(evt.Message, stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

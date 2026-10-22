@@ -1,56 +1,86 @@
+using TeamsGateway.Contracts;
 using TeamsGateway.Gateway.Apis;
 using TeamsGateway.Gateway.Data;
+using TeamsGateway.Gateway.Events;
+using TeamsGateway.Gateway.Teams;
 
 namespace TeamsGateway.Gateway.UnitTests;
 
+/// <summary>SSE 斷線補收：照事件序號，不是訊息 id。</summary>
 public class CatchUpTests
 {
+    private const string Conv = "19:x@thread.v2";
+
+    private static MessageDto Msg(string id, long version, string content) =>
+        new(id, Conv, "8:me", "me", "Text", content, 1, DateTimeOffset.UtcNow, version);
+
+    /// <summary>A、B 兩則新訊息 + A 被編輯，都 publish → 序號 1、2、3。</summary>
     private static async Task SeedAsync(TestDb db)
     {
-        await using var ctx = db.CreateDbContext();
-        var baseTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        ctx.Conversations.Add(new Conversation { Id = "19:x@thread.v2", UpdatedAt = baseTime });
-        foreach (var (id, offset) in new[] { ("A", 0), ("B", 1), ("C", 2) })
+        var ct = TestContext.Current.CancellationToken;
+        await using (var ctx = db.CreateDbContext())
         {
-            ctx.MessageEvents.Add(new MessageEvent
-            {
-                Id = id,
-                ConversationId = "19:x@thread.v2",
-                Content = id,
-                ReceivedAt = baseTime.AddSeconds(offset),
-                ComposeTime = baseTime.AddSeconds(offset),
-                RawJson = "{}",
-            });
+            ctx.Conversations.Add(new Conversation { Id = Conv, Subscribed = true, UpdatedAt = DateTimeOffset.UtcNow });
+            await ctx.SaveChangesAsync(ct);
         }
-        await ctx.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var ingestor = new MessageIngestor(db, new GatewayEventBus());
+        await ingestor.UpsertAsync(Msg("100", 100, "A"), "{}", publish: true, ct);
+        await ingestor.UpsertAsync(Msg("200", 200, "B"), "{}", publish: true, ct);
+        await ingestor.UpsertAsync(Msg("100", 300, "A 改過"), "{}", publish: true, ct);
     }
 
     [Fact]
-    public async Task Replays_messages_after_the_anchor()
+    public async Task Replays_events_after_the_sequence()
     {
         using var db = new TestDb();
         await SeedAsync(db);
 
-        var missed = await EventsApi.CatchUpAsync(db, "A", TestContext.Current.CancellationToken);
+        var missed = await EventsApi.ReadAfterAsync(db, 1, upTo: null, limit: 500, TestContext.Current.CancellationToken);
 
-        Assert.Equal(["B", "C"], missed.Select(m => m.Id));
+        Assert.Equal([2L, 3L], missed.Select(e => e.Seq));
+        Assert.Equal(["200", "100"], missed.Select(e => e.MessageId)); // 編輯是新事件，排在後面
     }
 
     [Fact]
-    public async Task Newest_anchor_replays_nothing()
+    public async Task Edit_as_last_event_replays_nothing_older()
+    {
+        // 舊做法用訊息 id 當錨點：最後收到的是「舊訊息的編輯」時會退回那則的時間、把之後的全部重送
+        using var db = new TestDb();
+        await SeedAsync(db);
+
+        Assert.Empty(await EventsApi.ReadAfterAsync(db, 3, upTo: null, limit: 500, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task UpTo_bounds_the_replay()
     {
         using var db = new TestDb();
         await SeedAsync(db);
 
-        Assert.Empty(await EventsApi.CatchUpAsync(db, "C", TestContext.Current.CancellationToken));
+        var gap = await EventsApi.ReadAfterAsync(db, 0, upTo: 2, limit: 500, TestContext.Current.CancellationToken);
+
+        Assert.Equal([1L, 2L], gap.Select(e => e.Seq));
     }
 
-    [Fact]
-    public async Task Unknown_anchor_replays_nothing()
+    [Theory]
+    [InlineData("2", 2)]
+    [InlineData(null, 3)]            // 沒帶 → 從現在開始
+    [InlineData("", 3)]
+    [InlineData("garbage", 3)]
+    [InlineData("-1", 3)]
+    [InlineData("1792527319389", 3)] // 舊 client 帶的訊息 id：比最大序號大，不能當游標（不然之後的事件全被當成送過）
+    public async Task Start_cursor_falls_back_to_now_unless_valid(string? lastEventId, long expected)
     {
         using var db = new TestDb();
         await SeedAsync(db);
 
-        Assert.Empty(await EventsApi.CatchUpAsync(db, "does-not-exist", TestContext.Current.CancellationToken));
+        Assert.Equal(expected, await EventsApi.StartCursorAsync(db, lastEventId, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Start_cursor_is_zero_on_empty_log()
+    {
+        using var db = new TestDb();
+        Assert.Equal(0, await EventsApi.StartCursorAsync(db, null, TestContext.Current.CancellationToken));
     }
 }

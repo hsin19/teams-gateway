@@ -96,14 +96,14 @@ class TeamsGatewayClient:
         return self._post(f"/v1/chats/{chat_id}/messages", {"text": text})["clientMessageId"]
 
     def events(self, *, chats: list[str] | None = None, reconnect: bool = True) -> Iterator[Message]:
-        """SSE 新訊息串流。斷線自動重連（backoff），用 Last-Event-ID 接續（SSE id == 訊息 id）。"""
+        """SSE 新訊息串流。斷線自動重連（backoff），用 Last-Event-ID 接續（SSE id = gateway 的事件序號，不是訊息 id）。"""
         params = {"chats": ",".join(chats)} if chats else None
         last_id: str | None = None
         backoff = 1.0
         while True:
             try:
-                for msg in self._stream(params, last_id):
-                    last_id = msg.id
+                for event_id, msg in self._stream(params, last_id):
+                    last_id = event_id or last_id
                     yield msg
                 backoff = 1.0
                 if not reconnect:
@@ -114,13 +114,19 @@ class TeamsGatewayClient:
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 30.0)
 
-    def _stream(self, params: dict | None, last_id: str | None) -> Iterator[Message]:
+    def _stream(self, params: dict | None, last_id: str | None) -> Iterator[tuple[str | None, Message]]:
+        """yield (事件序號, 訊息)。"""
         headers = {"Last-Event-ID": last_id} if last_id else {}
         with self._http.stream("GET", "/v1/events", params=params, headers=headers, timeout=None) as resp:
             self._raise(resp)
+            event_id: str | None = None
             for line in resp.iter_lines():
-                if line.startswith("data:"):
-                    yield Message._parse(json.loads(line[5:].strip()))
+                if line.startswith("id:"):
+                    event_id = line[3:].strip()
+                elif line.startswith("data:"):
+                    yield event_id, Message._parse(json.loads(line[5:].strip()))
+                elif not line:
+                    event_id = None
 
     def _get(self, path: str, params: dict | None = None):
         resp = self._http.get(path, params=params)

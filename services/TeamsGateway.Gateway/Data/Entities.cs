@@ -57,6 +57,21 @@ public class MessageRevision
     public MessageEvent? Message { get; set; }
 }
 
+/// <summary>
+/// 發給訂閱者的每一個事件（新訊息 / 編輯 / 刪除）的流水帳。<see cref="Seq"/> 就是 SSE 的 event id：
+/// 斷線重連帶 <c>Last-Event-ID</c> 時照它補收，不受「編輯沿用同一個訊息 id」影響；只存不發的歷史回補不會進來。
+/// </summary>
+public class PublishedEvent
+{
+    /// <summary>自增序號（SQLite AUTOINCREMENT，不重用）。</summary>
+    public long Seq { get; set; }
+    public required string MessageId { get; set; }
+    public required string ConversationId { get; set; }
+    /// <summary>發出去的 <c>MessageDto</c> JSON，補收時原樣重送。</summary>
+    public required string Payload { get; set; }
+    public DateTimeOffset PublishedAt { get; set; }
+}
+
 /// <summary>訂閱者的 API key。只存 hash。</summary>
 public class ApiKey
 {

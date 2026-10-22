@@ -6,7 +6,7 @@ namespace TeamsGateway.SlackRelay;
 
 /// <summary>
 /// Phase 1：訂閱 gateway SSE，把 Teams 訊息轉貼進對應 Slack 頻道。
-/// 斷線用 <c>Last-Event-ID</c>（= 最後收到的訊息 id）續接，指數退避重連。
+/// 斷線用 <c>Last-Event-ID</c>（= 最後收到的事件序號）續接，指數退避重連。
 /// </summary>
 public sealed class RelayWorker(
     GatewayEventStream stream,
@@ -48,10 +48,10 @@ public sealed class RelayWorker(
         {
             try
             {
-                await foreach (var message in stream.ConnectAsync(chats, lastId, ct))
+                await foreach (var evt in stream.ConnectAsync(chats, lastId, ct))
                 {
-                    lastId = message.Id;
-                    await RelayAsync(message, routes, opts.Slack.DefaultChannel, ct);
+                    lastId = evt.Id ?? lastId;
+                    await RelayAsync(evt.Message, routes, opts.Slack.DefaultChannel, ct);
                     backoff = MinBackoff; // 收得到就重置退避
                 }
             }
@@ -80,6 +80,8 @@ public sealed class RelayWorker(
         // 這則我們轉過 → 編輯 / 刪除：原地更新，舊版進 thread 留證（不加 (edited)，靠 Slack 原生標記）
         if (links.Lookup(message.Id) is { } prior)
         {
+            if (!IsNewer(message, prior.Version))
+                return; // 重送（斷線補收等），Slack 上已經是這一版：不要再留證一次
             await slack.PostReplyAsync(prior.Channel, prior.Ts, $"{VersionLabel(message.Id, prior.Version)}\n{prior.Text}", prior.Images, ct);
             var updated = message.Deleted
                 ? new SlackContent($"{Header(message)} _(message deleted)_", [])
@@ -97,6 +99,13 @@ public sealed class RelayWorker(
         if (ts is not null)
             links.Remember(message.Id, channel, ts, content.Text, version, content.Images); // 記住對應，給之後的回覆 / 編輯用
     }
+
+    /// <summary>
+    /// 轉過的訊息又來一次時，是真的有新版（編輯 / 刪除）還是重送。
+    /// Slack 上那則沒記版本（這功能上線前轉的）時，只有帶編輯 / 刪除標記才當新版。
+    /// </summary>
+    public static bool IsNewer(MessageDto message, long? shownVersion) =>
+        shownVersion is { } shown ? message.Version > shown : message.Edited || message.Deleted;
 
     /// <summary>
     /// thread 留證的標題：那一版是原文還是編輯、什麼時候寫的。連續編輯時一眼看出新舊。
