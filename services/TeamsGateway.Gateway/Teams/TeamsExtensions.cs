@@ -18,6 +18,7 @@ public static class TeamsExtensions
         builder.Services.AddSingleton<SkypeTokenProvider>();
         builder.Services.AddHttpClient<ChatsvcClient>(client =>
             client.BaseAddress = new Uri("https://teams.live.com/api/chatsvc/consumer/v1/users/ME/"));
+        builder.Services.AddHttpClient<MediaClient>();
         return builder;
     }
 }

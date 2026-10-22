@@ -75,6 +75,24 @@ public static class ChatsApi
         .WithDescription("`current`（目前版本）+ `revisions`（被取代的舊版本，由舊到新）。只有訂閱對話、已入庫的訊息才有。")
         .WithTags("Messages");
 
+        v1.MapGet("/media", async (string url, MediaClient media, CancellationToken ct) =>
+        {
+            if (!MediaClient.IsAllowed(url, out var uri))
+                return Results.BadRequest(new { error = "只代理 Teams 媒體網址（https://*.asm.skype.com）" });
+            try
+            {
+                var (bytes, contentType) = await media.GetAsync(uri, ct);
+                return Results.File(bytes, contentType);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway);
+            }
+        })
+        .WithSummary("代抓訊息內嵌圖片")
+        .WithDescription("用 gateway 的 Teams 登入抓訊息裡的內嵌圖片（`<img src>` 指向 `*.asm.skype.com`，外部直接拿不到）。只接受這個網域。")
+        .WithTags("Media");
+
         return v1;
     }
 }
