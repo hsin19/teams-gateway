@@ -141,7 +141,10 @@ public sealed class TrouterClient(
                 var surl = payload.RootElement.GetProperty("args")[0].GetProperty("surl").GetString()!;
                 _surl = surl;
                 var status = await RegisterAsync(skypeToken, epid, surl, ct);
-                logger.LogInformation("Trouter 註冊推播 HTTP {Status}", status);
+                if (status is >= 200 and < 300)
+                    logger.LogInformation("Trouter 註冊推播 HTTP {Status}", status);
+                else
+                    logger.LogWarning("Trouter 註冊推播 HTTP {Status}，收不到推播，靠輪詢補", status);
             }
             else if (name == "trouter.message_loss")
             {
@@ -207,29 +210,52 @@ public sealed class TrouterClient(
         }
     }
 
+    /// <summary>
+    /// 跟網頁版 worker 一樣註冊兩筆：一般的 <c>TeamsCDLWebWorker_2.7</c>，再加 GoldenGate 雙重註冊
+    /// （<c>_2.3</c>、registrationId 加 <c>_GG</c>、productContext 空、path 無結尾斜線）。
+    /// 只有前者時只收得到自己帳號發的訊息（跨裝置同步），別人的訊息不會推來。
+    /// 回傳兩筆中較差的 HTTP 狀態（都 2xx 才算成功）。
+    /// </summary>
     private async Task<int> RegisterAsync(string skypeToken, string epid, string surl, CancellationToken ct)
+    {
+        var main = await PostRegistrationAsync(skypeToken, new
+        {
+            appId = "TeamsCDLWebWorker",
+            aesKey = "",
+            languageId = "en-US",
+            platform = "chrome",
+            templateKey = "TeamsCDLWebWorker_2.7",
+            platformUIVersion = TeamsAuthConstants.ClientVersion,
+            productContext = "TFL",
+        }, epid, surl, ct);
+        var goldenGate = await PostRegistrationAsync(skypeToken, new
+        {
+            appId = "TeamsCDLWebWorker",
+            aesKey = "",
+            languageId = "",
+            platform = "chrome",
+            templateKey = "TeamsCDLWebWorker_2.3",
+            platformUIVersion = TeamsAuthConstants.ClientVersion,
+            productContext = "",
+        }, $"{epid}_GG", surl.TrimEnd('/'), ct);
+        return main is >= 200 and < 300 ? goldenGate : main;
+    }
+
+    private async Task<int> PostRegistrationAsync(string skypeToken, object clientDescription, string registrationId, string path, CancellationToken ct)
     {
         var body = new
         {
-            clientDescription = new
-            {
-                appId = "TeamsCDLWebWorker",
-                aesKey = "",
-                languageId = "en-US",
-                platform = "chrome",
-                templateKey = "TeamsCDLWebWorker_2.7",
-                platformUIVersion = TeamsAuthConstants.ClientVersion,
-                productContext = "TFL",
-            },
-            registrationId = epid,
+            clientDescription,
+            registrationId,
             nodeId = "",
-            transports = new { TROUTER = new[] { new { context = "", path = surl, ttl = 3600 } } },
+            transports = new { TROUTER = new[] { new { context = "", path, ttl = 3600 } } },
         };
         using var request = new HttpRequestMessage(HttpMethod.Post, RegistrarUrl)
         {
             Content = JsonContent.Create(body),
         };
         request.Headers.TryAddWithoutValidation("X-Skypetoken", skypeToken);
+        request.Headers.TryAddWithoutValidation("X-MS-Migration", "True");
         using var resp = await httpFactory.CreateClient().SendAsync(request, ct);
         return (int)resp.StatusCode;
     }

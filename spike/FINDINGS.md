@@ -72,8 +72,12 @@
    - 收 `5:N::{"name":"trouter.connected","args":[{"surl":"https://pub-...trouter.skype.com:3443/v4/f/<id>/", ...}]}`
    - 收 `trouter.message_loss` 要回 `trouter.processed_message_loss`（同 args）
    - 每 30～40 秒送 `5:N+::{"name":"ping"}`，收 `6:::N+["pong"]`
-2. **註冊推播**：`POST https://edge.skype.com/registrar/prod/v2/registrations`（`X-Skypetoken`）
-   `{"clientDescription":{"appId":"TeamsCDLWebWorker","templateKey":"TeamsCDLWebWorker_2.7","productContext":"TFL","platform":"chrome",...},"registrationId":"<epid>","transports":{"TROUTER":[{"path":"<surl>","ttl":3600}]}}` → 202。
+2. **註冊推播**：`POST https://edge.skype.com/registrar/prod/v2/registrations`（`X-Skypetoken`），**要兩筆**：
+   - `{"clientDescription":{"appId":"TeamsCDLWebWorker","templateKey":"TeamsCDLWebWorker_2.7","productContext":"TFL","platform":"chrome",...},"registrationId":"<epid>","transports":{"TROUTER":[{"path":"<surl>","ttl":3600}]}}` → 202
+   - GoldenGate 雙重註冊：`templateKey` `TeamsCDLWebWorker_2.3`、`productContext` 空、`languageId` 空、`registrationId` `<epid>_GG`、`path` 是 surl **去掉結尾斜線** → 202
+
+   只有第一筆時**只收得到自己帳號發的訊息**（跨裝置同步），別人的訊息完全不推；加上第二筆別人的訊息約 0.6 秒到
+   （2026-10-22 實驗：同時開多條連線，別人的一則訊息只有帶 `_GG` 註冊的收到）。
    `ttl` 3600 秒，要每小時重新註冊。
 3. **收事件**：`3:::{"id":N,"method":"POST","url":"/v4/f/<id>/messaging","headers":{...,"trouter-request":"..."},"body":"<JSON 字串>"}`
    body：`{"type":"EventMessage","resourceType":"NewMessage","resource":{"id","clientmessageid","content","messagetype","from","imdisplayname","to","threadtopic","composetime","conversationLink",...}}`
@@ -81,6 +85,10 @@
 
 注意：
 - 網頁版的訊息功能跑在 Web Worker 裡（`TeamsCDLWebWorker`），用 CDP 錄流量要 `Target.setAutoAttach` 連 Worker 才看得到 chatsvc 與這條 Trouter。
-  主頁面另一條 `go.trouter.teams.microsoft.com`（`SkypeSpacesWeb`）收不到訊息推播。
-- 自己發的訊息也會推回來，訂閱端要能分辨（`from` 是自己）。
+  主頁面另一條 `go.trouter.teams.microsoft.com`（`SkypeSpacesWeb` 範本）收不到訊息推播（連自己發的都沒有）。
+  worker 的 registrar body 錄在 `worker_capture.jsonl` 的 `post_for` 列（不在 `Network.requestWillBeSent` 的 `postData` 裡）。
+- 自己發的訊息也會推回來，訂閱端要能分辨（`from` 是自己）。**只拿自己發的訊息驗推播會誤判**，要等別人的訊息才算數。
+- 不需要的：chatsvc 的 `PUT v1|v2/users/ME/endpoints/<epid>`（訂閱 API，已回 410 Gone）、UPS presence 回報、
+  socket 上的 `user.activity`——實驗中都不影響收不收得到別人的訊息。
+- 社群實作可對照：mautrix-teams（`pkg/msteams/trouter.go`，個人帳號同樣註冊 `_2.6 TFL` + `_2.3 _GG`）、purple-teams。
 - 推播漏掉時（斷線、`message_loss`）要用 chatsvc 的訊息 API 補，訊息 id 是遞增的時間戳，可以拿來當游標。
