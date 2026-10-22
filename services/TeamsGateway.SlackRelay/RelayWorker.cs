@@ -77,9 +77,9 @@ public sealed class RelayWorker(
         // 這則我們轉過 → 編輯 / 刪除：原地更新，舊版進 thread 留證（不加 (edited)，靠 Slack 原生標記）
         if (links.Lookup(message.Id) is { } prior)
         {
-            await slack.PostReplyAsync(prior.Channel, prior.Ts, $"_上一版_\n{prior.Text}", prior.Images, ct);
+            await slack.PostReplyAsync(prior.Channel, prior.Ts, $"_Previous version_\n{prior.Text}", prior.Images, ct);
             var updated = message.Deleted
-                ? new SlackContent($"{Header(message)} _（訊息已刪除）_", [])
+                ? new SlackContent($"{Header(message)} _(message deleted)_", [])
                 : await FormatAsync(message, prior.Channel, ct);
             await slack.UpdateMessageAsync(prior.Channel, prior.Ts, updated.Text, message.Id, updated.Images, ct);
             links.Remember(message.Id, prior.Channel, prior.Ts, updated.Text, updated.Images);
@@ -152,11 +152,11 @@ public sealed class RelayWorker(
             .ToList();
         var files = attachments.Where(a => !TeamsText.IsImage(a)).ToList();
         if (files.Count > 0)
-            text += "\n附件：" + string.Join("、", files.Select(FileLink));
+            text += $"\n{(files.Count == 1 ? "Attachment" : "Attachments")}: " + string.Join(", ", files.Select(FileLink));
 
         var (images, failed) = await UploadImagesAsync(imageUrls, ct);
         if (failed > 0)
-            text += $"\n_（{failed} 張圖片未能轉送）_";
+            text += $"\n_({failed} image{(failed == 1 ? "" : "s")} could not be forwarded)_";
         return new SlackContent(text, images);
     }
 

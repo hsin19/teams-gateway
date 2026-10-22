@@ -161,7 +161,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
                 }
                 logger.LogWarning("Slack {Method} 帶圖一直 invalid_blocks（channel={Channel}），改送純文字", method, channel);
                 withImages = false;
-                text += $"\n_（{images.Count} 張圖片未能顯示）_";
+                text += $"\n_({images.Count} image{(images.Count == 1 ? "" : "s")} could not be displayed)_";
                 continue;
             }
             if (result is { Ok: true })
