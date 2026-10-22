@@ -134,7 +134,7 @@ public sealed class RelayWorker(
             && await slack.GetPermalinkAsync(slackRef.Channel, slackRef.Ts, ct) is { } permalink)
         {
             var author = TeamsText.QuotedAuthorName(message.Content);
-            replyLink = $"<{permalink}|↪ 回覆{(author is null ? "" : $" {EscapeMrkdwn(author)}")}>";
+            replyLink = $"<{permalink}|Reply{(author is null ? "" : $" {EscapeMrkdwn(author)}")}>";
         }
 
         var body = TeamsText.ToSlack(message.Content, includeQuote: replyLink is null);
