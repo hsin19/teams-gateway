@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Options;
 using TeamsGateway.Contracts;
 
@@ -74,15 +75,17 @@ public sealed class RelayWorker(
         if (channel is null)
             return; // 沒對應頻道、也沒 default
 
+        var version = message.Version > 0 ? message.Version : (long?)null;
+
         // 這則我們轉過 → 編輯 / 刪除：原地更新，舊版進 thread 留證（不加 (edited)，靠 Slack 原生標記）
         if (links.Lookup(message.Id) is { } prior)
         {
-            await slack.PostReplyAsync(prior.Channel, prior.Ts, $"_Previous version_\n{prior.Text}", prior.Images, ct);
+            await slack.PostReplyAsync(prior.Channel, prior.Ts, $"{VersionLabel(message.Id, prior.Version)}\n{prior.Text}", prior.Images, ct);
             var updated = message.Deleted
                 ? new SlackContent($"{Header(message)} _(message deleted)_", [])
                 : await FormatAsync(message, prior.Channel, ct);
-            await slack.UpdateMessageAsync(prior.Channel, prior.Ts, updated.Text, message.Id, updated.Images, ct);
-            links.Remember(message.Id, prior.Channel, prior.Ts, updated.Text, updated.Images);
+            await slack.UpdateMessageAsync(prior.Channel, prior.Ts, updated.Text, message.Id, version, updated.Images, ct);
+            links.Remember(message.Id, prior.Channel, prior.Ts, updated.Text, version, updated.Images);
             return;
         }
 
@@ -90,9 +93,22 @@ public sealed class RelayWorker(
             return; // 新訊息但無文字也無附件（純系統事件），不轉
 
         var content = await FormatAsync(message, channel, ct);
-        var ts = await slack.PostMessageAsync(channel, content.Text, message.Id, content.Images, ct);
+        var ts = await slack.PostMessageAsync(channel, content.Text, message.Id, version, content.Images, ct);
         if (ts is not null)
-            links.Remember(message.Id, channel, ts, content.Text, content.Images); // 記住對應，給之後的回覆 / 編輯用
+            links.Remember(message.Id, channel, ts, content.Text, version, content.Images); // 記住對應，給之後的回覆 / 編輯用
+    }
+
+    /// <summary>
+    /// thread 留證的標題：那一版是原文還是編輯、什麼時候寫的。連續編輯時一眼看出新舊。
+    /// 時間用 Slack 的 <c>&lt;!date&gt;</c>，依看的人的時區顯示、精確到秒（同一分鐘內連改也分得出）。
+    /// </summary>
+    public static string VersionLabel(string messageId, long? version)
+    {
+        if (version is not { } v)
+            return "_Previous version_";
+        var kind = v.ToString(CultureInfo.InvariantCulture) == messageId ? "Original" : "Edited";
+        var fallback = DateTimeOffset.FromUnixTimeMilliseconds(v).ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
+        return $"_{kind}_ · <!date^{v / 1000}^{{date_short_pretty}} {{time_secs}}|{fallback}>";
     }
 
     /// <summary>加入各頻道並讀近 <paramref name="retentionHours"/> 的歷史，從 metadata 把 Teams id → Slack 訊息 撈回對應表。</summary>
@@ -111,7 +127,7 @@ public sealed class RelayWorker(
             {
                 await slack.JoinChannelAsync(channel, ct); // 要是成員才讀得到歷史
                 foreach (var m in await slack.ReadRelayedAsync(channel, oldest, ct))
-                    links.Remember(m.TeamsId, channel, m.Ts, m.Text);
+                    links.Remember(m.TeamsId, channel, m.Ts, m.Text, m.Version);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

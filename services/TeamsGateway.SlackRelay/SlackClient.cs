@@ -23,21 +23,22 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    private static object? Meta(string? teamsId) =>
-        teamsId is null ? null : new { event_type = MetaEventType, event_payload = new { teams_id = teamsId } };
+    // version：目前顯示的是 Teams 哪一版（毫秒時間戳，原文 = 訊息 id、編輯後 = 編輯時間），重啟回補後留證才標得出時間
+    private static object? Meta(string? teamsId, long? version) =>
+        teamsId is null ? null : new { event_type = MetaEventType, event_payload = new { teams_id = teamsId, version } };
 
-    /// <summary>發訊息（<paramref name="teamsId"/> 夾進 metadata、<paramref name="images"/> 是已上傳的 Slack file id）；回傳貼成的 ts，失敗 null。</summary>
-    public async Task<string?> PostMessageAsync(string channel, string text, string? teamsId, IReadOnlyList<string> images, CancellationToken ct)
+    /// <summary>發訊息（<paramref name="teamsId"/> / <paramref name="version"/> 夾進 metadata、<paramref name="images"/> 是已上傳的 Slack file id）；回傳貼成的 ts，失敗 null。</summary>
+    public async Task<string?> PostMessageAsync(string channel, string text, string? teamsId, long? version, IReadOnlyList<string> images, CancellationToken ct)
     {
         var result = await SendAsync("chat.postMessage", channel, text, images, clearBlocks: false,
-            (t, blocks) => new { channel, text = t, blocks, metadata = Meta(teamsId) }, ct);
+            (t, blocks) => new { channel, text = t, blocks, metadata = Meta(teamsId, version) }, ct);
         return result?.Ts;
     }
 
     /// <summary>原地更新一則訊息（編輯用；Slack 自帶 "edited"）。metadata 要一起帶，不然更新後會掉。</summary>
-    public async Task UpdateMessageAsync(string channel, string ts, string text, string teamsId, IReadOnlyList<string> images, CancellationToken ct) =>
+    public async Task UpdateMessageAsync(string channel, string ts, string text, string teamsId, long? version, IReadOnlyList<string> images, CancellationToken ct) =>
         await SendAsync("chat.update", channel, text, images, clearBlocks: true,
-            (t, blocks) => new { channel, ts, text = t, blocks, metadata = Meta(teamsId) }, ct);
+            (t, blocks) => new { channel, ts, text = t, blocks, metadata = Meta(teamsId, version) }, ct);
 
     /// <summary>在某則訊息的 thread 底下回一則（舊版留證用）。</summary>
     public async Task PostReplyAsync(string channel, string threadTs, string text, IReadOnlyList<string> images, CancellationToken ct) =>
@@ -101,7 +102,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
             logger.LogWarning("Slack conversations.join 失敗（channel={Channel}）：{Error}", channel, result?.Error ?? ((int)resp.StatusCode).ToString());
     }
 
-    /// <summary>讀頻道歷史，撈出我們轉過（帶 metadata）的訊息：(Teams id, ts, 當前文字)。往回翻到 <paramref name="oldestUnixSeconds"/>。</summary>
+    /// <summary>讀頻道歷史，撈出我們轉過（帶 metadata）的訊息：(Teams id, ts, 當前文字, 版本)。往回翻到 <paramref name="oldestUnixSeconds"/>。</summary>
     public async Task<IReadOnlyList<RelayedMessage>> ReadRelayedAsync(string channel, long oldestUnixSeconds, CancellationToken ct)
     {
         var found = new List<RelayedMessage>();
@@ -119,7 +120,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
             }
             foreach (var m in body.Messages ?? [])
                 if (m.Metadata?.EventType == MetaEventType && m.Metadata.EventPayload?.TeamsId is { } tid && m.Ts is { } ts)
-                    found.Add(new RelayedMessage(tid, ts, m.Text ?? ""));
+                    found.Add(new RelayedMessage(tid, ts, m.Text ?? "", m.Metadata.EventPayload.Version));
             cursor = body.ResponseMetadata?.NextCursor;
             if (string.IsNullOrEmpty(cursor))
                 break;
@@ -171,7 +172,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         }
     }
 
-    public readonly record struct RelayedMessage(string TeamsId, string Ts, string Text);
+    public readonly record struct RelayedMessage(string TeamsId, string Ts, string Text, long? Version);
 
     private sealed record PostResponse(
         [property: JsonPropertyName("ok")] bool Ok,
@@ -205,7 +206,8 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         [property: JsonPropertyName("event_payload")] MetadataPayload? EventPayload);
 
     private sealed record MetadataPayload(
-        [property: JsonPropertyName("teams_id")] string? TeamsId);
+        [property: JsonPropertyName("teams_id")] string? TeamsId,
+        [property: JsonPropertyName("version")] long? Version);
 
     private sealed record ResponseMetadata(
         [property: JsonPropertyName("next_cursor")] string? NextCursor);
