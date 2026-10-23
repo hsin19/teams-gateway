@@ -75,6 +75,20 @@ public class ChatsvcClientTests
         Assert.Null(ChatsvcClient.ParseMessage(resource, "19:abc@thread.v2")!.Attachments);
     }
 
+    // 實際資料：edittime / deletetime 大多是數字（毫秒時間戳），偶爾是字串，兩種都要認得
+    [Theory]
+    [InlineData("""{"id":"100","version":300,"properties":{"edittime":1792656539873}}""", true, false)]
+    [InlineData("""{"id":"100","version":"300","properties":{"edittime":"1792656539873"}}""", true, false)]
+    [InlineData("""{"id":"100","version":300,"content":"","properties":{"deletetime":1792656539873}}""", false, true)]
+    // 有人按表情：version 往上跳，但沒有 edittime——不是編輯
+    [InlineData("""{"id":"100","version":200,"properties":{"emotions":[{"key":"1f440_eyes","users":[]}]}}""", false, false)]
+    [InlineData("""{"id":"100","version":100}""", false, false)]
+    public void ParseMessage_detects_edits_and_deletes_by_timestamps(string json, bool edited, bool deleted)
+    {
+        var msg = ChatsvcClient.ParseMessage(JsonDocument.Parse(json).RootElement, "19:abc@thread.v2")!;
+        Assert.Equal((edited, deleted), (msg.Edited, msg.Deleted));
+    }
+
     [Fact]
     public void ParseMessage_returns_null_without_id()
     {

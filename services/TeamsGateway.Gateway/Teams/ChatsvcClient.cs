@@ -168,7 +168,10 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
     internal static ChatsvcSendRequest SendBody(string text, string clientMessageId, string displayName) =>
         new(text, MessageType: "Text", ContentType: "text", clientMessageId, displayName);
 
-    /// <summary>static 版的訊息解析，給 Trouter 推播事件共用。編輯會讓 version &gt; id、properties 多 edittime；刪除有 deletetime。</summary>
+    /// <summary>
+    /// static 版的訊息解析，給 Trouter 推播事件共用。編輯看 properties.edittime、刪除看 properties.deletetime
+    /// （實際資料是數字，偶爾是字串）。version 不能拿來判斷編輯：訊息有任何變動（例如有人按表情）都會往上跳。
+    /// </summary>
     public static MessageDto? ParseMessage(JsonElement m, string conversationId)
     {
         var id = GetString(m, "id");
@@ -176,8 +179,8 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
             return null;
         var version = GetInt64(m, "version");
         var props = Child(m, "properties");
-        var edited = (long.TryParse(id, out var idNum) && version > idNum) || GetString(props, "edittime") is not null;
-        var deleted = GetString(props, "deletetime") is not null;
+        var edited = HasValue(props, "edittime");
+        var deleted = HasValue(props, "deletetime");
         return new MessageDto(
             id,
             conversationId,
@@ -282,6 +285,10 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
 
     private static string? GetString(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    /// <summary>有這個欄位而且不是 null（數字、字串都算）。</summary>
+    private static bool HasValue(JsonElement e, string name) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined);
 
     private static long GetInt64(JsonElement e, string name)
     {
