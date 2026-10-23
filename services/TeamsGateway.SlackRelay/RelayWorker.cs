@@ -140,7 +140,7 @@ public sealed class RelayWorker(
                 return; // 重送（斷線補收等），Slack 上已經是這一版：不要再留證一次
             await slack.PostReplyAsync(prior.Channel, prior.Ts, $"{VersionLabel(message.Id, prior.Version)}\n{prior.Text}", prior.Images, ct);
             var updated = message.Deleted
-                ? new SlackContent($"{Header(message)} _(message deleted)_", [])
+                ? new SlackContent("_(message deleted)_", []) // 誰說的、原本寫什麼，在上面那則 thread 留證裡
                 : await FormatAsync(message, prior.Channel, ct);
             await slack.UpdateMessageAsync(prior.Channel, prior.Ts, updated.Text, message.Id, version, updated.Images, ct);
             links.Remember(message.Id, prior.Channel, prior.Ts, updated.Text, version, updated.Images);
@@ -206,6 +206,9 @@ public sealed class RelayWorker(
     private static string Header(MessageDto message) =>
         $"*{TeamsText.EscapeMrkdwn(string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName)}*:";
 
+    /// <summary>發話者那行 + 內文：內文一律另起一行（單行、多行、回覆看起來都一致）；沒內文（只有圖 / 附件）就只有發話者。</summary>
+    internal static string Compose(string header, string body) => body.Length > 0 ? $"{header}\n{body}" : header;
+
     private async Task<SlackContent> FormatAsync(MessageDto message, string channel, CancellationToken ct)
     {
         // 若是回覆、且被引用那則我們轉過：接一個指向它的 permalink（Slack 會 unfurl 成原生引用），不再畫 blockquote。
@@ -222,9 +225,7 @@ public sealed class RelayWorker(
         var body = TeamsText.ToSlack(message.Content, includeQuote: replyLink is null);
         var header = replyLink is null ? Header(message) : $"{Header(message)} {replyLink}";
 
-        // 回覆、多行、或以引用開頭時，內容另起一行
-        var joiner = body.Length > 0 && (replyLink is not null || body.Contains('\n') || body.StartsWith('>')) ? "\n" : " ";
-        var text = $"{header}{joiner}{body}".TrimEnd();
+        var text = Compose(header, body).TrimEnd();
 
         // 圖片（內嵌的 + 附件裡的）貼成 image block；其他附件列成連結
         var attachments = message.Attachments ?? [];
