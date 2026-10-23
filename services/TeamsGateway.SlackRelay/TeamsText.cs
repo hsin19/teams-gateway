@@ -19,6 +19,8 @@ public static partial class TeamsText
     {
         if (string.IsNullOrWhiteSpace(content))
             return content ?? "";
+        // Teams 的 HTML 段落之間是 \r\n：\r 夾在中間的話下面收不掉連續換行，Slack 上會多出空行
+        content = content.ReplaceLineEndings("\n");
 
         // 引用跟其餘內文分開轉：各自只 decode 一次、各自跳脫，只有我們加的引用前綴 ">" 保留成 Slack 語法
         var text = new StringBuilder();

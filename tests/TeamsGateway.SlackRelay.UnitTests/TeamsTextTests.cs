@@ -55,6 +55,13 @@ public class TeamsTextTests
     public void Mentions_are_bold_with_at_sign(string html, string expected) =>
         Assert.Equal(expected, TeamsText.ToSlack(html));
 
+    // Teams 的 HTML 段落之間是 \r\n（中間夾一段只有圖片的段落）：轉出來不能有空行
+    [Fact]
+    public void Crlf_between_paragraphs_leaves_no_blank_lines() =>
+        Assert.Equal(
+            "first line\nsecond line",
+            TeamsText.ToSlack("<p>first line</p>\r\n<p><img src=\"https://us-api.asm.skype.com/v1/objects/0-x/views/imgo\"></p>\r\n<p>second line</p>\n"));
+
     // Teams 那端打的 Slack 語法不能在 Slack 生效：@channel、偽裝連結、使用者提及
     [Theory]
     [InlineData("<p>&lt;!channel&gt; urgent</p>", "&lt;!channel&gt; urgent")]
