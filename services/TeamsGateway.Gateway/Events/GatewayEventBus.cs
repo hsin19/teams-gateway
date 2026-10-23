@@ -23,7 +23,7 @@ public sealed record GatewayEvent(long Seq, MessageDto? Message = null, Reaction
 }
 
 /// <summary>
-/// 行程內的新訊息 pub/sub。Trouter 背景工作 publish，SSE 連線與 webhook 投遞各自 subscribe。
+/// 行程內的事件 pub/sub。<c>MessageIngestor</c> 寫進 DB 之後 publish（每條收訊息的路都經過它），SSE 連線與 webhook 投遞各自 subscribe。
 /// 單一行程夠用；要拆多實例時再換成真的 broker（見 ADR 0002）。
 /// </summary>
 public sealed class GatewayEventBus

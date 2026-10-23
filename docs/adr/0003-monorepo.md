@@ -20,6 +20,8 @@ spike/        逆向用的拋棄式 Python 腳本
 docs/
 ```
 
+（現況：Python client 已實作，CLI 沒做；slack-relay 的 Phase 1 已完成，見 `services/TeamsGateway.SlackRelay/README.md`。）
+
 ## 為什麼
 
 - **一個帳號、一組非官方 API，散在多個 repo 難維護**：gateway、relay、client 對同一組契約，放一起改契約一次到位。

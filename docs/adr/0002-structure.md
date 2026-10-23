@@ -9,7 +9,7 @@
 | `Apis/` | `Apis/` | Minimal API 端點模組，每個 `Map<Feature>(this IEndpointRouteBuilder)` |
 | `Services/` | `Teams/` | 對 Teams 的 protocol client（auth / chatsvc / trouter） |
 | `Infrastructure/` | `Data/` | EF Core DbContext、schema 建立（部署前不做 migration）、health check |
-| `Model/` | `Model/` | DTO（對外契約）；EF 實體留在 `Data/` |
+| `Model/` | `Model/` | DTO（對外契約）；EF 實體留在 `Data/`（實作時沒開這個資料夾：對外 DTO 放 `packages/TeamsGateway.Contracts`，admin 專用的在 `Apis/AdminDtos.cs`） |
 | `IntegrationEvents/` | `Events/` | 內部事件（收到新訊息）+ 分派到 sink |
 | `Extensions/`（`AddApplicationServices`） | `Extensions.cs` | 一個聚合器把所有服務註冊起來，`Program.cs` 只呼叫它 |
 | `CatalogOptions.cs` | `GatewayOptions.cs` | options pattern |
@@ -24,4 +24,4 @@
 
 - `/v1/*`：REST，帶 API key（`Authorization: Bearer tgw_...`）。列對話、讀訊息、發話。
 - `/v1/events`：SSE 事件串流，訂閱者用 `chats=` 篩選、`Last-Event-ID` 補收。
-- `/admin/*`：管理（匯入 cookie、建 API key、建 webhook 訂閱），帶 `X-Admin-Token`。
+- `/admin/*`：管理（匯入 cookie、建 API key、建 webhook 訂閱），帶 `X-Admin-Token`。（實作時 webhook 改由 API key 持有者在 `/v1/webhooks` 自己建、只看得到自己的。）

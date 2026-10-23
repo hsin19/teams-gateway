@@ -6,7 +6,6 @@ using TeamsGateway.Contracts;
 
 namespace TeamsGateway.SlackRelay;
 
-/// <summary>SSE 的一個 message 事件。<see cref="Id"/> 是 gateway 的事件序號，重連時當 <c>Last-Event-ID</c> 帶回去。</summary>
 /// <summary>SSE 的一個事件：訊息或表情變動擇一。<see cref="Id"/> 是 gateway 的事件序號，重連時當 <c>Last-Event-ID</c> 帶回去。</summary>
 public readonly record struct StreamEvent(string? Id, MessageDto? Message = null, ReactionDto? Reaction = null);
 

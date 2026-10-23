@@ -81,7 +81,7 @@ public static class EventsApi
                     {
                         if (evt.Seq <= cursor)
                             continue; // 補收時送過了
-                        // 序號斷洞：匯流排滿了丟掉舊的、或兩個寫入交錯 publish。洞裡的都已入庫，從 DB 補
+                        // 序號斷洞：匯流排滿了丟掉舊的（publish 在寫入鎖裡依序發，不會因寫入交錯而亂序）。洞裡的都已入庫，從 DB 補
                         if (evt.Seq > cursor + 1)
                             cursor = await ReplayAsync(http, factory, cursor, upTo: evt.Seq - 1, Wanted, ct);
                         if (Wanted(evt.ConversationId))

@@ -4,7 +4,7 @@ namespace TeamsGateway.Contracts;
 public sealed record ConversationDto(string Id, string? Topic, string? ThreadType, DateTimeOffset? LastMessageTime);
 
 /// <summary>
-/// 對外的一則訊息。<c>Version</c> 在編輯時遞增（新訊息 = Id）；<c>Edited</c> / <c>Deleted</c> 標記編輯 / 刪除。
+/// 對外的一則訊息。<c>Version</c> 在訊息有任何變動時遞增（新訊息 = Id，有人按表情也會）；內容有沒有改看 <c>Edited</c> / <c>Deleted</c>。
 /// <c>Attachments</c> 是用「附加檔案」傳的檔（不在 <c>Content</c> 裡；只附檔時 <c>Content</c> 是空的）。
 /// </summary>
 public sealed record MessageDto(

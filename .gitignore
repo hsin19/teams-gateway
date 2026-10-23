@@ -18,6 +18,6 @@ obj/
 dist/
 *.egg-info/
 
-# 本機 / 部署專屬設定（ChannelMap 等），不進 repo
+# 本機 / 部署專屬設定（relay 的 Routes、AppHost 的 secret 等），不進 repo
 appsettings.Local.json
 **/appsettings.Local.json

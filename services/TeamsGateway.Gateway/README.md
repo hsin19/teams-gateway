@@ -36,7 +36,7 @@ curl -X POST -H "X-Admin-Token: $TOKEN"                                     $BAS
 curl -X POST -H "X-Admin-Token: $TOKEN" -H "Content-Type: application/json" -d '{"name":"client"}' $BASE/admin/api-keys       # 建 API key，回的 apiKey 只出現一次
 ```
 
-cookie 與 token 以 DataProtection 加密後存進 SQLite（`SecureValues` 表），key 在 `.data/keys/`。
+登入 cookie 以 DataProtection 加密後存進 SQLite（`SecureValues` 表），key 在 `.data/keys/`；skypetoken 只放記憶體，重啟後用 cookie 重換。
 
 ## 訂閱哪些對話（範圍）
 

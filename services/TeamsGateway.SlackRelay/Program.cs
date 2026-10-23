@@ -2,7 +2,7 @@ using TeamsGateway.SlackRelay;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-// 本機 / 部署專屬設定（ChannelMap 等不進 repo 的對照）；gitignored，可選
+// 部署專屬設定（Routes 等不進 repo 的對照）；gitignored，可選
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
 builder.AddServiceDefaults();

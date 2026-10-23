@@ -1,13 +1,13 @@
 namespace TeamsGateway.Gateway.Data;
 
-/// <summary>Teams 對話（群組 / 1:1）。也當推播補收的游標來源。</summary>
+/// <summary>Teams 對話（群組 / 1:1）：gateway 的訂閱清單，加上每個對話的同步進度（<see cref="SyncedThrough"/>）。</summary>
 public class Conversation
 {
     /// <summary>Teams thread id，例如 <c>19:...@thread.v2</c>。</summary>
     public required string Id { get; set; }
     public string? Topic { get; set; }
     public string? ThreadType { get; set; }
-    /// <summary>收到的最後一則訊息 id；斷線補收時當游標。</summary>
+    /// <summary>最後一則發出事件的新訊息 id，只給 <c>/admin/subscriptions</c> 顯示；補收看的是 <see cref="SyncedThrough"/>，不是它。</summary>
     public string? LastMessageId { get; set; }
     /// <summary>gateway 是否要收這個對話的推播。</summary>
     public bool Subscribed { get; set; }
@@ -33,7 +33,10 @@ public class MessageEvent
     public string? MessageType { get; set; }
     public string? Content { get; set; }
     public long SequenceId { get; set; }
-    /// <summary>訊息版本；編輯時遞增（新訊息 = Id）。用來判斷「同 id 但被編輯」要更新。</summary>
+    /// <summary>
+    /// 訊息版本（新訊息 = Id）；任何變動都會遞增，有人按表情也會。版本變大時要比對看得到的內容，
+    /// 有變才是編輯 / 刪除，沒變就只是表情（見 <c>MessageIngestor</c>）。
+    /// </summary>
     public long Version { get; set; }
     public bool Edited { get; set; }
     public bool Deleted { get; set; }
@@ -106,10 +109,10 @@ public class WebhookSubscription
     public ApiKey? ApiKey { get; set; }
 }
 
-/// <summary>加密後的機敏資料（登入 cookie、skypetoken 快取）。值用 ASP.NET DataProtection 加密後再存。</summary>
+/// <summary>加密後的機敏資料，值用 ASP.NET DataProtection 加密後再存。目前只有登入 cookie；skypetoken 只放記憶體，重啟後用 cookie 重換。</summary>
 public class SecureValue
 {
-    /// <summary>例如 <c>login-cookies</c>、<c>skypetoken</c>。</summary>
+    /// <summary>目前只有 <c>login-cookies</c>。</summary>
     public required string Key { get; set; }
     public required string Protected { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
