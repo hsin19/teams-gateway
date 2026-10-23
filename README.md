@@ -26,16 +26,30 @@
 |---|---|---|
 | `packages/TeamsGateway.Contracts` | 對外 wire DTO，服務與 .NET client 共用 | ✅ |
 | `packages/TeamsGateway.ServiceDefaults` | Aspire 共用（OTel / health / resilience） | ✅ |
-| `tools/TeamsGateway.AppHost` | Aspire 編排（只在 dev，不部署） | ✅ |
+| `tools/TeamsGateway.AppHost` | Aspire 編排：本機開發一次起 gateway + relay（不部署） | ✅ |
 | `spike/` | 逆向非官方 API 的拋棄式 Python 腳本；結論在 [`spike/FINDINGS.md`](spike/FINDINGS.md) | — |
 
-技術選型、結構等決策的理由見 [`docs/adr/`](docs/adr/)（0001 選型、0002 服務內部結構、0003 monorepo、0004 先跑在本機、0005 agent 介面用 MCP、0006 事件出入口抽象化）。
+技術選型、結構等決策的理由見 [`docs/adr/`](docs/adr/)（0001 選型、0002 服務內部結構、0003 monorepo、0004 先跑在本機、0005 agent 介面用 MCP、0006 事件出入口抽象化、0007 本機只當開發環境）。
 
 ## 開始
 
+本機只當開發環境（ADR 0007），正式部署見 [`DEPLOY.md`](DEPLOY.md)。全域 `aspire` CLI 要跟 `global.json` 的 `Aspire.AppHost.Sdk` 同版（`dotnet tool update -g Aspire.Cli`）。
+
 ```
 dotnet build        # 建整個 solution
-aspire run          # 起 Aspire dashboard + gateway
+aspire run          # 起 dashboard + gateway（localhost:5199）+ slack-relay；aspire start 則在背景跑
+```
+
+本機的 secret 與設定放 `tools/TeamsGateway.AppHost/appsettings.Local.json`（gitignored），key 是服務吃的環境變數名稱，AppHost 原樣帶給對應的服務（哪個給誰見 `AppHost.cs`）：
+
+```jsonc
+{
+  "Gateway__AdminToken": "…",            // 自己產，例如 openssl rand -hex 24
+  "Relay__Gateway__ApiKey": "tgw_…",      // gateway bootstrap 後 POST /admin/api-keys 建
+  "Relay__Slack__BotToken": "xoxb-…",
+  "Relay__Slack__Routes__0__Chat": "19:…@thread.v2",   // Teams 對話 → Slack 頻道；list 攤平成 __<i>__
+  "Relay__Slack__Routes__0__Channel": "C…"            // 本機只指 Slack 測試頻道（ADR 0007）
+}
 ```
 
 gateway 的 bootstrap（綁定 Teams 帳號）與 API 見 [`services/TeamsGateway.Gateway/README.md`](services/TeamsGateway.Gateway/README.md)。

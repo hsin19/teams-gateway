@@ -22,7 +22,7 @@ appsettings 放完整 default，secret 走 env（雙底線覆蓋）或 user-secr
 | 設定 | env | 說明 |
 |---|---|---|
 | `Relay:Gateway:BaseUrl` | `Relay__Gateway__BaseUrl` | gateway 位址（預設 `http://localhost:5199`） |
-| `Relay:Gateway:ApiKey` | `Relay__Gateway__ApiKey` | gateway 的 API key（`ops/service.sh key <name>` 產） |
+| `Relay:Gateway:ApiKey` | `Relay__Gateway__ApiKey` | gateway 的 API key（gateway 的 `POST /admin/api-keys` 建） |
 | `Relay:Slack:BotToken` | `Relay__Slack__BotToken` | Slack bot token（`xoxb-…`，scope 見 manifest） |
 | `Relay:Slack:DefaultChannel` | `Relay__Slack__DefaultChannel` | 沒對應到 ChannelMap 的對話落這個頻道；不設 = 不轉 |
 | `Relay:Slack:Routes` | — | `Teams 對話 → Slack 頻道` 路由（list） |
@@ -46,15 +46,15 @@ Routes 刻意用 **list** 而非 dict：Teams 對話 id 含 `:`，當 config dic
 
 ## 跑
 
+開發用 AppHost 跟 gateway 一起起（`aspire start` / `aspire run`，見根目錄 README）。`Relay__Gateway__BaseUrl` 由 AppHost 指到 gateway 的 endpoint，其餘（`Relay__Gateway__ApiKey`、`Relay__Slack__BotToken`、`Relay__Slack__DefaultChannel`、Routes）從 `tools/TeamsGateway.AppHost/appsettings.Local.json` 同名的 key 原樣帶進來；Routes 攤平成 `Relay__Slack__Routes__<i>__Chat` / `Relay__Slack__Routes__<i>__Channel`。relay 等 gateway 的 `/health` 過了才起。
+
+本機只轉進 Slack 測試頻道，正式環境不綁測試頻道（`docs/adr/0007`）。relay 目錄下的 `appsettings.Local.json` 是部署那台用的，本機不要放：它最後載入，會蓋掉 AppHost 帶進來的 env。
+
+單獨跑（不經 AppHost）就自己給 env：
+
 ```
 Relay__Gateway__ApiKey=tgw_… Relay__Slack__BotToken=xoxb-… Relay__Slack__DefaultChannel=C0ABC \
   dotnet run --project services/TeamsGateway.SlackRelay
-```
-
-或把 env 放在 relay 目錄下的 `.env`（gitignored）：
-
-```
-cd services/TeamsGateway.SlackRelay && (set -a; source ./.env; set +a; exec dotnet run)
 ```
 
 log 等級同 gateway：`Microsoft.*` / `System.*` / `Polly` 只記 warning 以上。沒設 BotToken 或任何頻道時，worker 會記一筆 error 然後不啟動（不會空轉）。

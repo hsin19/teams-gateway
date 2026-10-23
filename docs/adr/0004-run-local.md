@@ -1,5 +1,7 @@
 # ADR 0004：先跑在本機（不容器化、不對外）
 
+> 已被 ADR 0007 取代：本機只當開發環境、用 Aspire 跑，不再用 launchd 常駐（`ops/` 已移除）。
+
 ## 決定
 
 gateway 先以 macOS LaunchAgent 跑在本機 `localhost`，**不**裝 Docker、**不**開對外網域 / tunnel。客戶端與 skills 同一台機器，走 `127.0.0.1` 連。

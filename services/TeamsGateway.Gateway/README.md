@@ -7,27 +7,20 @@ gateway 用一個專用帳號登入，對外提供 REST（列群組/讀/發）�
 
 ## 開發
 
-```
-aspire run                                        # AppHost：dashboard + gateway
-dotnet run --project services/TeamsGateway.Gateway   # 只跑 gateway
-```
-
-DB schema：正式部署前不做 migration，啟動時照 EF model 直接建（`EnsureCreated`）。改了 model 之後啟動會擋下來並提示——把 `.data/gateway.db` 刪掉重啟就會重建，裡面的登入 cookie 與 API key 會一起清掉，要重新 bootstrap（`ops/service.sh bootstrap …`）、relay 也要換新 key。
-
-## 本機常駐（launchd）
-
-掛在本機 `localhost:5199`，不用 Docker（見 `docs/adr/0004`）：
+本機只當開發環境（`docs/adr/0007`），用 AppHost 跑，聽 `localhost:5199`：
 
 ```
-ops/service.sh install                                   # 發佈 + launchd 啟動（首次產生 .env 的 admin token）
-ops/service.sh bootstrap spike/.local/login_cookies.json client   # 匯入 cookie + 建一把 API key
-ops/service.sh key <name>                                # 再建 API key（明文只出現一次）
-ops/service.sh status | logs | restart | uninstall
+aspire start                          # 背景起 dashboard + gateway + slack-relay（aspire run 則掛在前景）
+aspire logs gateway -t -f             # 看 log（帶時間）
+aspire resource gateway rebuild       # 改了程式後重新編譯再起（restart 不會重新編譯）
+aspire stop
 ```
 
-資料（cookie / token / SQLite）在 repo `.data/`、admin token 在 `.env`（都 gitignored）。約 150–170MB RSS。
+AppHost 把 `Gateway:DataDir` 指到 repo 根目錄的 `.data/`（cookie / DataProtection key / SQLite，gitignored），admin token 從 `tools/TeamsGateway.AppHost/appsettings.Local.json` 的 `Gateway__AdminToken` 帶進來。單獨 `dotnet run --project services/TeamsGateway.Gateway` 也能跑，但這兩個要自己用 env 給，不然資料會落在專案目錄底下的 `.data/`。
 
-log 在 `.state/gateway.log`（`ops/service.sh logs`）。`Microsoft.*` / `System.*` / `Polly` 只記 warning 以上（`appsettings.json` 的 `Logging:LogLevel`）；要看 HTTP / EF 細節時，在 `.env` 加例如 `Logging__LogLevel__System=Information` 再 `restart`。
+`Microsoft.*` / `System.*` / `Polly` 只記 warning 以上（`appsettings.json` 的 `Logging:LogLevel`）；要看 HTTP / EF 細節時，暫時把 `appsettings.Development.json` 的等級調成 `Information` 再重啟。
+
+DB schema：正式部署前不做 migration，啟動時照 EF model 直接建（`EnsureCreated`）。改了 model 之後啟動會擋下來並提示——把 `.data/gateway.db` 刪掉重啟就會重建，裡面的登入 cookie 與 API key 會一起清掉，要重新 bootstrap（見下）、relay 的 `Relay__Gateway__ApiKey` 也要換新的。
 
 Mac 睡眠時 gateway 跟著暫停，醒來後輪詢 / 回補會把缺口補上並照樣發出，只是晚到。關掉「閒置自動睡眠」擋不住闔上螢幕的睡眠（`pmset -g log` 會看到 `Clamshell Sleep`）；要闔著也繼續跑，用 `sudo pmset -a disablesleep 1`（用電池時也不睡，帶出門前改回 `0`）。
 
@@ -63,10 +56,10 @@ gateway **只追 / 存訂閱中的對話**（Trouter 會推帳號的所有對話
 | `teams_gateway.messages.delivered` | 發給訂閱者的訊息數，tag `source`（trouter / poll / reconcile / backfill）、`change`（new / edit）、`sender`（self / others） |
 | `teams_gateway.push.latency` | Trouter 推到的新訊息從發送到收到的秒數，tag `sender` |
 
-推播健不健康看 `sender=others` 的 `source` 分布：正常幾乎都是 `trouter`，`poll` 變多（扣掉睡眠醒來補的）就是推播壞了（自己帳號的訊息不管怎樣都會推來，不能拿來判斷）。沒有後端時直接看行程內的值（launchd 跑的行程名稱是 `dotnet`，用 PID 指定；counter 顯示的是每秒增量）：
+推播健不健康看 `sender=others` 的 `source` 分布：正常幾乎都是 `trouter`，`poll` 變多（扣掉睡眠醒來補的）就是推播壞了（自己帳號的訊息不管怎樣都會推來，不能拿來判斷）。開發時 dashboard 的 Metrics 頁就看得到。沒有後端時直接看行程內的值（`dnx dotnet-counters ps` 找 PID；counter 顯示的是每秒增量）：
 
 ```
-dnx dotnet-counters monitor -p $(pgrep -f TeamsGateway.Gateway.dll) --counters TeamsGateway.Gateway
+dnx dotnet-counters monitor -p <pid> --counters TeamsGateway.Gateway
 ```
 
 ```

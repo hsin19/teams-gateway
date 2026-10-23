@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\services\TeamsGateway.Gateway\TeamsGateway.Gateway.csproj" />
+    <ProjectReference Include="..\..\services\TeamsGateway.SlackRelay\TeamsGateway.SlackRelay.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -15,7 +15,6 @@
 | `tests/` | UnitTests / FunctionalTests / E2E |
 | `spike/` | 逆向非官方 API 的拋棄式 Python 腳本，結論在 `spike/FINDINGS.md` |
 | `docs/adr/` | 設計決策 |
-| `ops/` | 本機常駐（launchd）的腳本 |
 
 ## 建置與測試
 
@@ -56,19 +55,20 @@ dotnet test --project tests/TeamsGateway.Gateway.UnitTests -- --filter-method '*
 
 ## 機密與本機狀態
 
-下面都 gitignored：不要進版控，也不要把內容印出來。
+下面都不在版控裡：不要加進去，也不要把內容印出來。
 
 | 路徑 | 內容 |
 |---|---|
-| `.env` | gateway 的 admin token |
+| `tools/TeamsGateway.AppHost/appsettings.Local.json` | 本機開發的 secret 與設定（admin token、relay 的 API key、Slack bot token、Routes），key 是服務吃的環境變數名稱。要確認有沒有設只看鍵名（`jq keys`） |
 | `.data/` | SQLite（訊息、API key、加密過的登入 cookie）與解密用的 DataProtection key |
-| `services/TeamsGateway.SlackRelay/.env` | relay 的 Slack token、gateway API key |
-| `services/TeamsGateway.SlackRelay/appsettings.Local.json` | Teams 對話 → Slack 頻道的路由 |
+| `services/TeamsGateway.SlackRelay/appsettings.Local.json` | 部署那台用的 Teams 對話 → Slack 頻道路由。本機不放：relay 最後載入它，會蓋掉 AppHost 帶的 env |
 | `spike/.local/` | 抓到的流量、token、瀏覽器 profile |
 
 ## 本機運作與除錯
 
-- gateway 由 LaunchAgent 跑 `.publish/` 的發佈版（`ops/service.sh install | restart | status | logs`）。改了程式或 `appsettings.json` 要 `ops/service.sh restart`（會重新 publish）才會生效。
-- relay 用 `dotnet run`，env 從它目錄下的 `.env` 帶（見 relay README）。
-- gateway 的 log 在 `.state/gateway.log`；`Microsoft.*` / `System.*` / `Polly` 只記 warning 以上。console log 沒有時間戳，要查「什麼時候發生」看 DB 的時間欄位（`MessageEvents.ComposeTime` / `ReceivedAt`、`PublishedEvents.PublishedAt`，Unix 毫秒），用唯讀模式開：`sqlite3 'file:.data/gateway.db?mode=ro'`。
+本機只當開發環境（ADR 0007），沒有常駐服務。
+
+- `aspire start` 在背景起 gateway（`localhost:5199`）+ slack-relay + dashboard，`aspire stop` 停；`aspire ps` 看有沒有在跑。改了程式要 `aspire resource <gateway|slack-relay> rebuild`（`restart` 不會重新編譯）才會生效；改了 `AppHost.cs` 或它的 `appsettings.Local.json` 要 `aspire stop` 再 `aspire start`。
+- 全域 `aspire` CLI 要跟 `global.json` 的 `Aspire.AppHost.Sdk` 同一個 minor（現在 13.6）。CLI 比較舊時會經 `dnx` 轉給新版跑、外層連不上 backchannel，`aspire start` 剛好 120 秒後整組被砍（log 有 `Timed out waiting 120s for AppHost to start`）；`dotnet tool update -g Aspire.Cli` 升上去。
+- log：`aspire logs <resource> -t`（帶時間）、`aspire otel logs <resource>`（structured）。`Microsoft.*` / `System.*` / `Polly` 只記 warning 以上。dashboard 不留歷史，要查更早「什麼時候發生」看 DB 的時間欄位（`MessageEvents.ComposeTime` / `ReceivedAt`、`PublishedEvents.PublishedAt`，Unix 毫秒），用唯讀模式開：`sqlite3 'file:.data/gateway.db?mode=ro'`。
 - 訊息晚到先查 Mac 有沒有睡眠（`pmset -g log`）：睡眠時 gateway 跟著暫停，醒來後由輪詢補上並記 `Trouter 漏接` warning，不一定是推播壞了。
