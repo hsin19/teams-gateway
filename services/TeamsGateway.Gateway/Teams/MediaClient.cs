@@ -33,15 +33,32 @@ public sealed class MediaClient(HttpClient http, SkypeTokenProvider tokens)
                 throw new InvalidOperationException($"抓媒體失敗 HTTP {(int)resp.StatusCode}");
             if (resp.Content.Headers.ContentLength > MaxBytes)
                 throw new InvalidOperationException($"媒體太大（{resp.Content.Headers.ContentLength} bytes）");
-            var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+            var bytes = await ReadBoundedAsync(resp.Content, MaxBytes, ct);
             return (bytes, resp.Content.Headers.ContentType?.MediaType ?? "application/octet-stream");
         }
     }
 
+    /// <summary>邊讀邊數，超過上限就停（沒有 Content-Length、或它說謊時，上面的檢查擋不住）。</summary>
+    internal static async Task<byte[]> ReadBoundedAsync(HttpContent content, long maxBytes, CancellationToken ct)
+    {
+        await using var stream = await content.ReadAsStreamAsync(ct);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, ct)) > 0)
+        {
+            if (buffer.Length + read > maxBytes)
+                throw new InvalidOperationException($"媒體太大（超過 {maxBytes} bytes）");
+            buffer.Write(chunk, 0, read);
+        }
+        return buffer.ToArray();
+    }
+
+    // 只讀 header 就回來：預設會先把整個 body 讀進記憶體，上限檢查就來不及了
     private Task<HttpResponseMessage> SendAsync(Uri uri, string skypeToken, CancellationToken ct)
     {
         var req = new HttpRequestMessage(HttpMethod.Get, uri);
         req.Headers.TryAddWithoutValidation("Authorization", $"skype_token {skypeToken}");
-        return http.SendAsync(req, ct);
+        return http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
     }
 }
