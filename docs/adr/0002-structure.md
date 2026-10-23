@@ -8,7 +8,7 @@
 |---|---|---|
 | `Apis/` | `Apis/` | Minimal API 端點模組，每個 `Map<Feature>(this IEndpointRouteBuilder)` |
 | `Services/` | `Teams/` | 對 Teams 的 protocol client（auth / chatsvc / trouter） |
-| `Infrastructure/` | `Data/` | EF Core DbContext、schema 建立（部署前不做 migration）、health check |
+| `Infrastructure/` | `Data/` | EF Core DbContext、schema 建立（部署前不做 migration；後來導入了，見 ADR 0009）、health check |
 | `Model/` | `Model/` | DTO（對外契約）；EF 實體留在 `Data/`（實作時沒開這個資料夾：對外 DTO 放 `packages/TeamsGateway.Contracts`，admin 專用的在 `Apis/AdminDtos.cs`） |
 | `IntegrationEvents/` | `Events/` | 內部事件（收到新訊息）+ 分派到 sink |
 | `Extensions/`（`AddApplicationServices`） | `Extensions.cs` | 一個聚合器把所有服務註冊起來，`Program.cs` 只呼叫它 |

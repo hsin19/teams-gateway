@@ -132,7 +132,7 @@ public static class Extensions
 
     public static async Task UseApplicationAsync(this WebApplication app)
     {
-        await app.Services.EnsureGatewayDatabaseAsync();
+        await app.Services.MigrateGatewayDatabaseAsync();
 
         // /mcp 跟 /v1 一樣要 API key（MCP client 以 header 帶）
         app.UseWhen(

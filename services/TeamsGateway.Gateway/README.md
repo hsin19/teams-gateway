@@ -22,7 +22,7 @@ AppHost 把 `Gateway:DataDir` 指到 repo 根目錄的 `.data/`（cookie / DataP
 
 DB 用 `Gateway:Database:Provider` 切換（`docs/adr/0008`）：`Sqlite`（預設，`Gateway:DataDir` 裡的 `gateway.db`）或 `Postgres`（要給 `ConnectionStrings:gateway`，而且要 gateway 專用的資料庫）。本機要試 Postgres，就在 AppHost 的 `appsettings.Local.json` 設 `Gateway__Database__Provider=Postgres`，AppHost 會起一個 Postgres container。
 
-DB schema：正式部署前不做 migration，啟動時照 EF model 直接建（`EnsureCreated`）。改了 model 之後啟動會擋下來並提示——把 `.data/gateway.db` 刪掉重啟就會重建，裡面的登入 cookie 與 API key 會一起清掉，要重新 bootstrap（見下）、relay 的 `Relay__Gateway__ApiKey` 也要換新的。
+DB schema 走 EF migration（`docs/adr/0009`），SQLite / Postgres 各一套（`Data/Migrations/`）：改了 model 就跑 `tools/db-migration.sh add <名稱>`，啟動時自動套用，DB 原地升級，登入 cookie 與 API key 都留著。
 
 Mac 睡眠時 gateway 跟著暫停，醒來後輪詢 / 回補會把缺口補上並照樣發出，只是晚到。關掉「閒置自動睡眠」擋不住闔上螢幕的睡眠（`pmset -g log` 會看到 `Clamshell Sleep`）；要闔著也繼續跑，用 `sudo pmset -a disablesleep 1`（用電池時也不睡，帶出門前改回 `0`）。
 

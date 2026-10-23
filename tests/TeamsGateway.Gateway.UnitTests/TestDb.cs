@@ -4,21 +4,22 @@ using TeamsGateway.Gateway.Data;
 
 namespace TeamsGateway.Gateway.UnitTests;
 
-/// <summary>每個測試一個獨立的 in-memory SQLite DB（連線開著才活）；當 IDbContextFactory 用。schema 走正式的建立流程。</summary>
+/// <summary>每個測試一個獨立的 in-memory SQLite DB（連線開著才活）；當 IDbContextFactory 用。schema 走正式的 migration。</summary>
 public sealed class TestDb : IDbContextFactory<GatewayDbContext>, IDisposable
 {
     private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<GatewayDbContext> _options;
+    private readonly DbContextOptions<SqliteGatewayDbContext> _options;
 
-    public TestDb()
+    public TestDb(bool migrate = true)
     {
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
-        _options = new DbContextOptionsBuilder<GatewayDbContext>().UseSqlite(_connection).Options;
-        DataExtensions.EnsureSchemaAsync(this, CancellationToken.None).GetAwaiter().GetResult();
+        _options = new DbContextOptionsBuilder<SqliteGatewayDbContext>().UseSqlite(_connection).Options;
+        if (migrate)
+            DataExtensions.MigrateAsync(this, CancellationToken.None).GetAwaiter().GetResult();
     }
 
-    public GatewayDbContext CreateDbContext() => new(_options);
+    public GatewayDbContext CreateDbContext() => new SqliteGatewayDbContext(_options);
 
     public void Dispose() => _connection.Dispose();
 }

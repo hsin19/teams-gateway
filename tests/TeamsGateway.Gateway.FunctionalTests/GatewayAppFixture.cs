@@ -29,7 +29,7 @@ public sealed class GatewayAppFixture : WebApplicationFactory<Program>
         builder.UseSetting("Gateway:DataDir", _dataDir);
         if (TestDatabase.PostgresConnectionString is { } server)
         {
-            // GATEWAY_TEST_DB=postgres：共用的 Postgres server 上每個 fixture 一個資料庫（EnsureCreated 會建），平行跑也互不干擾
+            // GATEWAY_TEST_DB=postgres：共用的 Postgres server 上每個 fixture 一個資料庫（migration 會建），平行跑也互不干擾
             var database = new NpgsqlConnectionStringBuilder(server) { Database = "tgw_func_" + Guid.NewGuid().ToString("N") };
             builder.UseSetting("Gateway:Database:Provider", "Postgres");
             builder.UseSetting("ConnectionStrings:gateway", database.ConnectionString);
