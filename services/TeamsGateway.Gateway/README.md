@@ -27,6 +27,10 @@ ops/service.sh status | logs | restart | uninstall
 
 資料（cookie / token / SQLite）在 repo `.data/`、admin token 在 `.env`（都 gitignored）。約 150–170MB RSS。
 
+log 在 `.state/gateway.log`（`ops/service.sh logs`）。`Microsoft.*` / `System.*` / `Polly` 只記 warning 以上（`appsettings.json` 的 `Logging:LogLevel`）；要看 HTTP / EF 細節時，在 `.env` 加例如 `Logging__LogLevel__System=Information` 再 `restart`。
+
+Mac 睡眠時 gateway 跟著暫停，醒來後輪詢 / 回補會把缺口補上並照樣發出，只是晚到。關掉「閒置自動睡眠」擋不住闔上螢幕的睡眠（`pmset -g log` 會看到 `Clamshell Sleep`）；要闔著也繼續跑，用 `sudo pmset -a disablesleep 1`（用電池時也不睡，帶出門前改回 `0`）。
+
 ## Bootstrap：綁定 Teams 帳號
 
 第一次要把專用帳號的登入 cookie 匯進來（之後 gateway 自己換 token）。cookie 用 `spike/http_refresh.py export` 從已登入的瀏覽器 profile 匯出。
@@ -46,9 +50,11 @@ cookie 與 token 以 DataProtection 加密後存進 SQLite（`SecureValues` 表�
 gateway **只追 / 存訂閱中的對話**（Trouter 會推帳號的所有對話，但只有訂閱的會入庫、才會進 SSE / webhook）。
 訂閱時會同步回補一段歷史（預設 7 天，`Gateway:BackfillDays`，只存不發）；重啟 / 睡眠後也會補停機期間的缺口並發出——給之後接 Elasticsearch 歷史搜尋留料。缺口從每個對話的水位線（`SyncedThrough`，最後一次完整同步到的時間）算起，只有回補 / 輪詢這種整段抓的會推進它；重新訂閱時歸零，沒追的那段不會被當成漏接發出。
 
-**編輯 / 刪除**：訊息 `version` 在編輯時遞增。同 id 但 version 更大 = 被編輯 / 刪除，gateway 會更新 DB 的內容與 `Edited` / `Deleted` 標記並重發事件。覆蓋前先把舊版本存進 `MessageRevisions` 表（`MessageEvents` 永遠是最新版，`MessageRevisions` 是編輯歷史），所以改過的訊息也看得到被改掉前的內容，給之後 ES 歷史搜尋與稽核留料。推播不一定帶每個編輯，所以還有「慢更新」：每 `Gateway:ReconcileMinutes`（預設 15）分重掃訂閱對話近 `ReconcileWindowHours`（預設 24）小時的訊息，把漏接的編輯 / 刪除補上。
+**編輯 / 刪除**：訊息 `version` 在編輯時遞增。同 id、version 更大而且看得到的內容（文字 / 附件 / 刪除標記）有變 = 被編輯 / 刪除，gateway 會更新 DB 的內容與 `Edited` / `Deleted` 標記並重發事件。覆蓋前先把舊版本存進 `MessageRevisions` 表（`MessageEvents` 永遠是最新版，`MessageRevisions` 是編輯歷史），所以改過的訊息也看得到被改掉前的內容，給之後 ES 歷史搜尋與稽核留料。推播不一定帶每個編輯，所以還有「慢更新」：每 `Gateway:ReconcileMinutes`（預設 15）分重掃訂閱對話近 `ReconcileWindowHours`（預設 24）小時的訊息，把漏接的編輯 / 刪除補上。
 
-**輪詢保險**：Trouter 推播是主路徑，但另外每 `Gateway:PollSeconds`（預設 20）秒抓一次各訂閱對話最近 15 分鐘的訊息，把漏推的新訊息照時間順序補發（最近 10 秒內的先留給推播，避免搶先誤判）。水位線落後超過 15 分鐘（停機、Mac 睡眠）時，輪詢改成從水位線整段回補。凡是靠輪詢 / 慢更新 / 啟動回補才抓到的新訊息都會記 warning（`Trouter 漏接，…補到`），可以拿來觀察推播可靠度。
+**表情**：有人按 / 收回表情時 Teams 也會讓 `version` 往上跳，但內容沒變，不當編輯（不留 revision、不重發 `message`），改比對前後兩版發 `reaction` 事件。晚到的訊息（例如睡眠後才被輪詢 / 回補抓到）第一次看到時就已經掛著的表情，會接在那則 `message` 之後一起發出，不會因為沒有前一版可比而漏掉。
+
+**輪詢保險**：Trouter 推播是主路徑，但另外每 `Gateway:PollSeconds`（預設 20）秒抓一次各訂閱對話最近 15 分鐘的訊息，把漏推的新訊息照時間順序補發（最近 10 秒內的先留給推播，避免搶先誤判）。水位線落後超過 15 分鐘（停機、Mac 睡眠）時，輪詢改成從水位線整段回補。凡是靠輪詢 / 慢更新 / 啟動回補才抓到的新訊息都會記 warning（`Trouter 漏接，…補到`），可以拿來觀察推播可靠度。Mac 睡眠期間發的訊息醒來後也是輪詢補到、記同一個 warning，不代表推播壞了——對照 `pmset -g log` 的睡眠時間判斷。
 
 **Metrics**（meter `TeamsGateway.Gateway`，隨 ServiceDefaults 的 OpenTelemetry 匯出；設了 `OTEL_EXPORTER_OTLP_ENDPOINT` 才會送出去）：
 
@@ -57,7 +63,7 @@ gateway **只追 / 存訂閱中的對話**（Trouter 會推帳號的所有對話
 | `teams_gateway.messages.delivered` | 發給訂閱者的訊息數，tag `source`（trouter / poll / reconcile / backfill）、`change`（new / edit）、`sender`（self / others） |
 | `teams_gateway.push.latency` | Trouter 推到的新訊息從發送到收到的秒數，tag `sender` |
 
-推播健不健康看 `sender=others` 的 `source` 分布：正常幾乎都是 `trouter`，`poll` 變多就是推播壞了（自己帳號的訊息不管怎樣都會推來，不能拿來判斷）。沒有後端時直接看行程內的值（launchd 跑的行程名稱是 `dotnet`，用 PID 指定；counter 顯示的是每秒增量）：
+推播健不健康看 `sender=others` 的 `source` 分布：正常幾乎都是 `trouter`，`poll` 變多（扣掉睡眠醒來補的）就是推播壞了（自己帳號的訊息不管怎樣都會推來，不能拿來判斷）。沒有後端時直接看行程內的值（launchd 跑的行程名稱是 `dotnet`，用 PID 指定；counter 顯示的是每秒增量）：
 
 ```
 dnx dotnet-counters monitor -p $(pgrep -f TeamsGateway.Gateway.dll) --counters TeamsGateway.Gateway
