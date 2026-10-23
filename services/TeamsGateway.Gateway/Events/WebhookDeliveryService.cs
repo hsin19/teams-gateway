@@ -12,6 +12,7 @@ public sealed class WebhookDeliveryService(
     GatewayEventBus bus,
     IDbContextFactory<GatewayDbContext> factory,
     IHttpClientFactory httpFactory,
+    WebhookSecretProtector secrets,
     ILogger<WebhookDeliveryService> logger) : BackgroundService
 {
     /// <summary>投遞用的 named HttpClient（連線時檢查目標 IP，見 <see cref="WebhookTargetGuard"/>）。</summary>
@@ -54,8 +55,8 @@ public sealed class WebhookDeliveryService(
                     Content = new ByteArrayContent(bytes) { Headers = { ContentType = new("application/json") } },
                 };
                 request.Headers.TryAddWithoutValidation("X-TeamsGateway-Event", "message");
-                if (!string.IsNullOrEmpty(hook.Secret))
-                    request.Headers.TryAddWithoutValidation("X-TeamsGateway-Signature", "sha256=" + Sign(hook.Secret, bytes));
+                if (secrets.Unprotect(hook.Secret) is { Length: > 0 } secret)
+                    request.Headers.TryAddWithoutValidation("X-TeamsGateway-Signature", "sha256=" + Sign(secret, bytes));
 
                 using var response = await client.SendAsync(request, ct);
                 if (!response.IsSuccessStatusCode)

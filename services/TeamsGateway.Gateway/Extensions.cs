@@ -31,6 +31,7 @@ public static class Extensions
         builder.Services.AddSingleton<TrouterClient>();
         builder.Services.AddHostedService<TrouterBackgroundService>();
         builder.Services.AddHostedService<WebhookDeliveryService>();
+        builder.Services.AddSingleton<WebhookSecretProtector>();
         // webhook 目標是訂閱者自己填的：連線時檢查 IP（擋內網 / metadata）、不走 proxy（不然檢查到的是 proxy）、不跟 redirect
         builder.Services.AddHttpClient(WebhookDeliveryService.HttpClientName)
             .ConfigurePrimaryHttpMessageHandler(sp =>

@@ -14,7 +14,7 @@ public static class WebhooksApi
     {
         var group = app.MapGroup("/v1/webhooks").AddEndpointFilter<ApiKeyFilter>().WithTags("Webhooks");
 
-        group.MapPost("", async (CreateWebhookRequest body, HttpContext http, IDbContextFactory<GatewayDbContext> factory, IOptions<GatewayOptions> options, CancellationToken ct) =>
+        group.MapPost("", async (CreateWebhookRequest body, HttpContext http, IDbContextFactory<GatewayDbContext> factory, IOptions<GatewayOptions> options, WebhookSecretProtector secrets, CancellationToken ct) =>
         {
             if (!Uri.TryCreate(body.TargetUrl, UriKind.Absolute, out var target) || !WebhookTargetGuard.IsAllowedScheme(target))
                 return Results.BadRequest(new { error = "targetUrl 要是合法的 http(s) 絕對網址" });
@@ -29,7 +29,7 @@ public static class WebhooksApi
                 ApiKeyId = apiKey.Id,
                 ConversationId = string.IsNullOrWhiteSpace(body.ConversationId) ? null : body.ConversationId,
                 TargetUrl = body.TargetUrl,
-                Secret = body.Secret,
+                Secret = secrets.Protect(body.Secret), // 加密後才存
                 Active = true,
                 CreatedAt = DateTimeOffset.UtcNow,
             };

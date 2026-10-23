@@ -1,5 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using TeamsGateway.Gateway.Data;
+using TeamsGateway.Gateway.Events;
 
 namespace TeamsGateway.Gateway.FunctionalTests;
 
@@ -25,13 +30,20 @@ public sealed class WebhooksEndpointTests(GatewayAppFixture fx) : IClassFixture<
     }
 
     [Fact]
-    public async Task Accepts_public_https_target()
+    public async Task Accepts_public_https_target_and_stores_secret_encrypted()
     {
         var ct = TestContext.Current.CancellationToken;
         var client = await fx.CreateApiClientAsync(ct);
+        var secret = "s3cret-" + Guid.NewGuid().ToString("N");
 
-        var resp = await client.PostAsJsonAsync("/v1/webhooks", new { targetUrl = "https://hooks.example.com/teams" }, ct);
+        var resp = await client.PostAsJsonAsync("/v1/webhooks", new { targetUrl = "https://hooks.example.com/teams", secret }, ct);
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var id = (await resp.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("id").GetGuid();
+        await using var scope = fx.Services.CreateAsyncScope();
+        await using var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<GatewayDbContext>>().CreateDbContextAsync(ct);
+        var stored = (await db.WebhookSubscriptions.SingleAsync(w => w.Id == id, ct)).Secret;
+        Assert.DoesNotContain(secret, stored); // DB 裡不是明文
+        Assert.Equal(secret, scope.ServiceProvider.GetRequiredService<WebhookSecretProtector>().Unprotect(stored));
     }
 }
