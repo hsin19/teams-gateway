@@ -17,7 +17,7 @@
 
 ## 兩個 provider 要守的事
 
-- **事件序號 = commit 順序**：ADR 0006 的讀法是「讀游標之後的事件」，要求序號照 commit 順序遞增。SQLite 一次只有一個寫入者，天生成立；Postgres 的序號在 INSERT 時就分配，兩筆交易同時跑時，序號小的可能比較晚 commit，讀的人就會跳過它。現在靠 `MessageIngestor` 的寫入鎖讓整個行程只有一個寫入點，所以成立；寫 `PublishedEvents` 的地方不能繞過它，也不能跑多個 gateway 實例（本來就是單實例，見 `DEPLOY.md`）。
+- **事件序號 = commit 順序**：ADR 0006 的讀法是「讀游標之後的事件」，要求序號照 commit 順序遞增。SQLite 一次只有一個寫入者，天生成立；Postgres 的序號在 INSERT 時就分配，兩筆交易同時跑時，序號小的可能比較晚 commit，讀的人就會跳過它。現在靠 `MessageIngestor` 的寫入鎖讓整個行程只有一個寫入點，所以成立；寫 `PublishedEvents` 的地方不能繞過它，也不能跑多個 gateway 實例（本來就是單實例，見根目錄 README〈部署〉）。
 - **時間一律 UTC**：Npgsql 只收 offset 0 的 `DateTimeOffset`，寫入前由 `UtcConverter` 轉成 UTC。SQLite 照舊存 Unix 毫秒。
 - **Postgres 要專用的資料庫**：gateway 啟動時看到「有表卻沒有 migration 紀錄」會拒絕（ADR 0009），別的服務的表也算，所以不能跟別的服務共用同一個資料庫（同一個 server 沒關係）。
 - **DataProtection key 還在檔案**（`Gateway:DataDir/keys`）：用 Postgres 時，登入 cookie 在 DB、解密用的 key 在 volume，備份和還原要兩邊一起。

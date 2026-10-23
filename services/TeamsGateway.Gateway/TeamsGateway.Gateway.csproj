@@ -5,7 +5,13 @@
     <!-- 低流量的常駐服務：workstation GC + 非並行，記憶體佔用遠低於預設的 server GC -->
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <ContainerRepository>teams-gateway</ContainerRepository>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- cookie 的 DataProtection key、SQLite 都落這，部署端掛 volume 才能跨重啟（埠不用設：base image 預設聽 8080） -->
+    <ContainerEnvironmentVariable Include="Gateway__DataDir" Value="/data" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="TeamsGateway.Gateway.UnitTests" />

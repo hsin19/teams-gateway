@@ -40,6 +40,15 @@ curl -X POST -H "X-Admin-Token: $TOKEN" -H "Content-Type: application/json" -d '
 
 登入 cookie 以 DataProtection 加密後存進 DB（`SecureValues` 表），key 在 `.data/keys/`（用 Postgres 時也還是在檔案，備份要兩邊一起）；skypetoken 只放記憶體，重啟後用 cookie 重換。
 
+## 部署注意
+
+image、副本數與必要設定見根目錄 README〈部署〉。
+
+- **對外只開 `/v1`、`/mcp`**：gateway 本身是明文 HTTP（容器裡聽 8080），admin token、API key、訊息內容都是明文，前面一定要有 TLS（反向代理或 tunnel）。`/admin` 不要對外，bootstrap、建 key 在部署環境內部打。API key 沒有權限範圍，對外的路徑最好再加一層存取控制。
+- **`/data` 等於帳號本身**：登入 cookie、webhook secret 用 DataProtection 加密，但解密用的 key（`/data/keys`）就在同一個 volume、沒再加密：拿到 volume（用 Postgres 時再加上 DB）就拿得到 Teams 帳號。權限、備份要當密碼看待。
+- **對外連線**：要連得到 `login.live.com`、`teams.live.com`（chatsvc）、`*.trouter.skype.com`（WebSocket），受限網段要先開白名單。
+- **health**：`/health`（含 DB）、`/alive` 不需要認證，只回 `Healthy` / `Unhealthy`，不帶細節。
+
 ## 訂閱哪些對話（範圍）
 
 gateway **只追 / 存訂閱中的對話**（Trouter 會推帳號的所有對話，但只有訂閱的會入庫、才會進 SSE / webhook）。

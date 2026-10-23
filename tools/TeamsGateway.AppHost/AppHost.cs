@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration;
 var builder = DistributedApplication.CreateBuilder(args);
 
 // 只在本機開發用：起 gateway + slack-relay 並接上 Aspire dashboard（log / trace / metrics）。
-// 正式部署走 docker-compose.yml（見 DEPLOY.md），不部 AppHost。
+// 正式部署用 CI 出的 image（見根目錄 README〈部署〉），不部 AppHost。
 
 // 本機的 secret 與設定放這個專案的 appsettings.Local.json（gitignored），key 就是服務吃的扁平環境變數名稱。
 // 下面 WithLocalEnv / WithLocalEnvPrefix 帶的，都是正式環境也要設的環境變數。

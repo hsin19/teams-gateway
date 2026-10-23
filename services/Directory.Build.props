@@ -1,0 +1,16 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!-- 部署用的 image 由 SDK 出（`dotnet publish -t:PublishContainer`，ADR 0010），不寫 Dockerfile；repository 名稱在各自的 csproj -->
+  <PropertyGroup>
+    <!-- 兩個架構合成同一個 tag。JIT 編出來是 IL，分架構的只有 NuGet 帶來的 native 函式庫，在任何一台都能出，不用模擬 -->
+    <RuntimeIdentifiers>linux-x64;linux-arm64</RuntimeIdentifiers>
+    <ContainerRuntimeIdentifiers>linux-x64;linux-arm64</ContainerRuntimeIdentifiers>
+    <!-- chiseled：沒有 shell 與套件管理、以非 root（uid 1654）執行；InvariantGlobalization 開著，不需要 ICU -->
+    <ContainerFamily>noble-chiseled</ContainerFamily>
+    <!-- 讓 SDK 產生 org.opencontainers.image.source / revision label：GHCR 靠 source 把 package 連到 repo -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+
+</Project>

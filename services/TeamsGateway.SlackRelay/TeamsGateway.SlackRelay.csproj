@@ -8,7 +8,13 @@
     <!-- 低流量的常駐服務：workstation GC，記憶體佔用遠低於預設 server GC -->
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <ContainerRepository>teams-slack-relay</ContainerRepository>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Routes 是部署那台的設定，runtime 掛檔進來；在本機 publish image 也不能把它包進去 -->
+    <Content Update="appsettings.Local.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="TeamsGateway.SlackRelay.UnitTests" />
