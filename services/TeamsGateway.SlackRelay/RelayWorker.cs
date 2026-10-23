@@ -30,6 +30,11 @@ public sealed class RelayWorker(
     private readonly Dictionary<string, string> _senderNames = new();
     private const int MaxSenderNames = 5000;
 
+    // Slack thread（channel/ts）→ 裡面已經貼過的表情留言的事件序號。relay 重啟後從 afterMessage 續接會重送表情事件，
+    // 表情沒有版本號，靠序號認出貼過的。第一次碰到某個 thread 才去 Slack 讀；滿了整個清掉，代價只是再讀一次
+    private readonly Dictionary<string, HashSet<long>> _reactionNotes = new();
+    private const int MaxReactionThreads = 2000;
+
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         var opts = options.Value;
@@ -62,7 +67,7 @@ public sealed class RelayWorker(
                     if (evt.Message is { } message)
                         await RelayWithRetryAsync(message, routes, opts.Slack.DefaultChannel, ct);
                     else if (evt.Reaction is { } reaction)
-                        await WithRetryAsync($"表情 {reaction.Emoji}（訊息 {reaction.MessageId}）", () => RelayReactionAsync(reaction, ct), ct);
+                        await WithRetryAsync($"表情 {reaction.Emoji}（訊息 {reaction.MessageId}）", () => RelayReactionAsync(reaction, Seq(evt.Id), ct), ct);
                     lastId = evt.Id ?? lastId; // 處理完（或放棄）才往前推
                     backoff = MinBackoff; // 收得到就重置退避
                 }
@@ -139,18 +144,26 @@ public sealed class RelayWorker(
     /// 有人在 Teams 按 / 收回表情：在那則 Slack 訊息的 thread 留一句「*誰* reacted 👀」/「removed」，
     /// bot 也在原訊息按上同一個 Slack 表情（頻道裡就看得到有人按），最後一個人收回時拿掉。
     /// 那則沒轉過（或太舊、對應已清掉）就沒地方掛，略過。
+    /// <paramref name="seq"/> 是 gateway 的事件序號：thread 裡已經有同一個序號的留言（relay 重啟後續接重送的）就不再貼；
+    /// 原生表情的按 / 收回本來就冪等，照做。
     /// </summary>
-    internal async Task RelayReactionAsync(ReactionDto reaction, CancellationToken ct)
+    internal async Task RelayReactionAsync(ReactionDto reaction, long? seq, CancellationToken ct)
     {
         if (reaction.UserName is { } known)
             RememberSender(reaction.UserMri, known);
         if (links.Lookup(reaction.MessageId) is not { } target)
             return;
 
-        var who = reaction.UserName ?? SenderName(reaction.UserMri) ?? "Someone";
-        var verb = reaction.Added ? "reacted" : "removed";
-        await slack.PostReplyAsync(target.Channel, target.Ts,
-            $"*{TeamsText.EscapeMrkdwn(who)}* {verb} {TeamsText.EscapeMrkdwn(TeamsEmoji.Glyph(reaction.Emoji))}", [], ct);
+        var notes = seq is null ? null : await ReactionNotesAsync(target.Channel, target.Ts, ct);
+        if (notes is null || !notes.Contains(seq.GetValueOrDefault()))
+        {
+            var who = reaction.UserName ?? SenderName(reaction.UserMri) ?? "Someone";
+            var verb = reaction.Added ? "reacted" : "removed";
+            // 貼成了才記：沒貼成的下次重送還會再試
+            if (await slack.PostReactionNoteAsync(target.Channel, target.Ts,
+                    $"*{TeamsText.EscapeMrkdwn(who)}* {verb} {TeamsText.EscapeMrkdwn(TeamsEmoji.Glyph(reaction.Emoji))}", seq, ct))
+                notes?.Add(seq.GetValueOrDefault());
+        }
 
         // 不同 Teams 表情可能對到同一個 Slack 表情（like / yes 都是 👍）：其中一個收回到 0 就會拿掉，可以接受
         if (TeamsEmoji.SlackName(reaction.Emoji) is { } name && (reaction.Added || reaction.Count == 0))
@@ -255,6 +268,23 @@ public sealed class RelayWorker(
     }
 
     private string? SenderName(string mri) => _senderNames.GetValueOrDefault(mri);
+
+    /// <summary>某則 Slack 訊息 thread 裡已經貼過的表情留言序號；第一次碰到這個 thread 才去 Slack 讀，之後用記憶體裡的。</summary>
+    private async Task<HashSet<long>> ReactionNotesAsync(string channel, string ts, CancellationToken ct)
+    {
+        var key = $"{channel}/{ts}";
+        if (_reactionNotes.TryGetValue(key, out var notes))
+            return notes;
+        if (_reactionNotes.Count >= MaxReactionThreads)
+            _reactionNotes.Clear();
+        notes = [.. await slack.ReadReactionSeqsAsync(channel, ts, ct)];
+        _reactionNotes[key] = notes;
+        return notes;
+    }
+
+    /// <summary>SSE 的 <c>id</c>（gateway 事件序號）；沒有或看不懂就 null，表情留言就不去重。</summary>
+    private static long? Seq(string? eventId) =>
+        long.TryParse(eventId, NumberStyles.None, CultureInfo.InvariantCulture, out var seq) ? seq : null;
 
     /// <summary>發話者那行 + 內文：內文一律另起一行（單行、多行、回覆看起來都一致）；沒內文（只有圖 / 附件）就只有發話者。</summary>
     internal static string Compose(string header, string body) => body.Length > 0 ? $"{header}\n{body}" : header;

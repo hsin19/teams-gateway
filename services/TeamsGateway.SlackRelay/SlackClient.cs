@@ -1,17 +1,19 @@
 using System.Globalization;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace TeamsGateway.SlackRelay;
 
 /// <summary>
 /// Slack Web API：發訊息 / 原地更新 / thread 回覆 / 取 permalink / 加入頻道 / 讀歷史 / 上傳圖片。
-/// 轉過去的訊息會夾一個 metadata（Teams 訊息 id），讓重啟時能從 Slack 歷史重建對應。
+/// 轉過去的訊息會夾一個 metadata（Teams 訊息 id），讓重啟時能從 Slack 歷史重建對應；表情留言夾事件序號，重送時認得出貼過了。
 /// 有圖的訊息改用 blocks：文字 section + 每張圖一個 image block（引用先上傳好的 Slack 檔案）。
 /// </summary>
 public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
 {
     private const string MetaEventType = "teams_relay";
+    private const string ReactionEventType = "teams_reaction";
     private const int SectionMaxChars = 3000;
 
     // 剛上傳的檔 Slack 可能還沒處理完，這時引用它的 image block 會回 invalid_blocks
@@ -38,6 +40,12 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     public async Task PostReplyAsync(string channel, string threadTs, string text, IReadOnlyList<string> images, CancellationToken ct) =>
         await SendAsync("chat.postMessage", channel, text, images, clearBlocks: false,
             (t, blocks) => new SlackMessageRequest(channel, t, blocks, ThreadTs: threadTs), ct);
+
+    /// <summary>在某則訊息的 thread 底下留表情留言，夾著 gateway 的事件序號 <paramref name="seq"/>（見 <see cref="ReadReactionSeqsAsync"/>）；回傳有沒有貼成。</summary>
+    public async Task<bool> PostReactionNoteAsync(string channel, string threadTs, string text, long? seq, CancellationToken ct) =>
+        await SendAsync("chat.postMessage", channel, text, [], clearBlocks: false,
+            (t, blocks) => new SlackMessageRequest(channel, t, blocks, ThreadTs: threadTs,
+                Metadata: seq is null ? null : new SlackMetadata(ReactionEventType, new SlackRelayPayload(null, null, seq))), ct) is not null;
 
     /// <summary>
     /// 上傳一張圖但不分享到任何頻道（留 private），回傳 file id 給 image block 的 <c>slack_file</c> 引用；失敗 null。
@@ -116,26 +124,43 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     public async Task<IReadOnlyList<RelayedMessage>> ReadRelayedAsync(string channel, long oldestUnixSeconds, CancellationToken ct)
     {
         var found = new List<RelayedMessage>();
+        await foreach (var m in ReadPagesAsync("conversations.history", channel, $"oldest={oldestUnixSeconds}", ct))
+            if (m.Metadata?.EventType == MetaEventType && m.Metadata.EventPayload?.TeamsId is { } tid && m.Ts is { } ts)
+                found.Add(new RelayedMessage(tid, ts, m.Text ?? "", m.Metadata.EventPayload.Version));
+        return found;
+    }
+
+    /// <summary>某則訊息 thread 裡已經貼過的表情留言的事件序號（<see cref="PostReactionNoteAsync"/> 夾的 metadata）；讀不到就是空的。</summary>
+    public async Task<IReadOnlyCollection<long>> ReadReactionSeqsAsync(string channel, string threadTs, CancellationToken ct)
+    {
+        var seqs = new HashSet<long>();
+        await foreach (var m in ReadPagesAsync("conversations.replies", channel, $"ts={Uri.EscapeDataString(threadTs)}", ct))
+            if (m.Metadata?.EventType == ReactionEventType && m.Metadata.EventPayload?.Seq is { } seq)
+                seqs.Add(seq);
+        return seqs;
+    }
+
+    /// <summary><c>conversations.history</c> / <c>conversations.replies</c> 共用的翻頁（帶 metadata）。失敗記 warning，停在已讀到的地方。</summary>
+    private async IAsyncEnumerable<HistoryMessage> ReadPagesAsync(string method, string channel, string query, [EnumeratorCancellation] CancellationToken ct)
+    {
         string? cursor = null;
         for (var page = 0; page < 20; page++) // 上限保護
         {
-            var url = $"conversations.history?channel={Uri.EscapeDataString(channel)}&oldest={oldestUnixSeconds}&limit=200&include_all_metadata=true"
+            var url = $"{method}?channel={Uri.EscapeDataString(channel)}&{query}&limit=200&include_all_metadata=true"
                       + (string.IsNullOrEmpty(cursor) ? "" : $"&cursor={Uri.EscapeDataString(cursor)}");
             using var resp = await http.GetAsync(url, ct);
             var body = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.HistoryResponse, ct);
             if (body is not { Ok: true })
             {
-                logger.LogWarning("Slack conversations.history 失敗（channel={Channel}）：{Error}", channel, body?.Error ?? ((int)resp.StatusCode).ToString());
-                break;
+                logger.LogWarning("Slack {Method} 失敗（channel={Channel}）：{Error}", method, channel, body?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture));
+                yield break;
             }
             foreach (var m in body.Messages ?? [])
-                if (m.Metadata?.EventType == MetaEventType && m.Metadata.EventPayload?.TeamsId is { } tid && m.Ts is { } ts)
-                    found.Add(new RelayedMessage(tid, ts, m.Text ?? "", m.Metadata.EventPayload.Version));
+                yield return m;
             cursor = body.ResponseMetadata?.NextCursor;
             if (string.IsNullOrEmpty(cursor))
-                break;
+                yield break;
         }
-        return found;
     }
 
     /// <summary>文字切成 mrkdwn section（每塊上限 3000 字）+ 每張圖一個引用 Slack 檔案的 image block。</summary>

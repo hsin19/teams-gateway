@@ -4,12 +4,18 @@ using System.Text.Json;
 
 namespace TeamsGateway.SlackRelay.UnitTests;
 
-/// <summary>假的 Slack Web API：記下每個呼叫（method + JSON body），一律回成功；chat.getPermalink 回由 ts 組成的 permalink。</summary>
+/// <summary>
+/// 假的 Slack Web API：記下每個呼叫（method + JSON body），一律回成功；chat.getPermalink 回由 ts 組成的 permalink。
+/// 要特定回應（例如 conversations.replies 讀到的 thread）就放進 <see cref="Responses"/>。
+/// </summary>
 internal sealed class RecordingSlack : HttpMessageHandler
 {
     public static string Permalink(string ts) => $"https://example.slack.com/archives/C1/p{ts.Replace(".", "")}";
 
     public List<(string Method, JsonElement Body)> Requests { get; } = [];
+
+    /// <summary>method → 回應的 JSON。</summary>
+    public Dictionary<string, string> Responses { get; } = [];
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -18,7 +24,8 @@ internal sealed class RecordingSlack : HttpMessageHandler
             ? default
             : JsonDocument.Parse(await request.Content.ReadAsStringAsync(cancellationToken)).RootElement.Clone();
         Requests.Add((method, body));
-        var response = method == "chat.getPermalink"
+        var response = Responses.TryGetValue(method, out var canned) ? canned
+            : method == "chat.getPermalink"
             ? $$"""{"ok":true,"permalink":"{{Permalink(System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["message_ts"]!)}}"}"""
             : """{"ok":true,"ts":"111.333"}""";
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(response, Encoding.UTF8, "application/json") };

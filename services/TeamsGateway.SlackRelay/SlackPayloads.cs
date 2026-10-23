@@ -25,10 +25,13 @@ internal sealed record SlackText(string Type, string Text);
 
 internal sealed record SlackFileRef(string Id);
 
-/// <summary>訊息 metadata：轉過去的訊息夾著 Teams id / 版本，重啟時從 Slack 歷史讀回來重建對應。</summary>
+/// <summary>
+/// 訊息 metadata：轉過去的訊息（<c>teams_relay</c>）夾著 Teams id / 版本，重啟時從 Slack 歷史讀回來重建對應；
+/// 表情留言（<c>teams_reaction</c>）夾著 gateway 的事件序號，重送時認得出貼過了。
+/// </summary>
 internal sealed record SlackMetadata(string? EventType, SlackRelayPayload? EventPayload);
 
-internal sealed record SlackRelayPayload(string? TeamsId, long? Version);
+internal sealed record SlackRelayPayload(string? TeamsId, long? Version, long? Seq = null);
 
 internal sealed record JoinRequest(string Channel);
 
