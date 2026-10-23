@@ -6,7 +6,7 @@ using TeamsGateway.SlackRelay;
 namespace TeamsGateway.SlackRelay.UnitTests;
 
 /// <summary>
-/// 回覆轉過的訊息：第一行「*Bob* Reply Alice」（名字連回被引用那則、不加冒號），內容在下一行。
+/// 回覆轉過的訊息：第一行「*Bob* replied to Alice」（名字連回被引用那則、不加冒號），內容在下一行。
 /// Teams 可以一次引用好幾則，每一則都要接得上。內容是合成的假資料。
 /// </summary>
 public class RelayReplyTests
@@ -23,7 +23,7 @@ public class RelayReplyTests
     {
         var text = await RelayAsync(QuoteHtml("100", "Alice", "hello") + "<p>thanks</p>", ("100", "111.100"));
 
-        Assert.Equal($"*Bob* Reply <{RecordingSlack.Permalink("111.100")}|Alice>\nthanks", text);
+        Assert.Equal($"*Bob* replied to <{RecordingSlack.Permalink("111.100")}|Alice>\nthanks", text);
     }
 
     [Fact]
@@ -33,7 +33,7 @@ public class RelayReplyTests
             QuoteHtml("100", "Alice", "123") + "<p></p>" + QuoteHtml("200", "Carol", "456") + "<p>789</p>",
             ("100", "111.100"), ("200", "111.200"));
 
-        Assert.Equal($"*Bob* Reply <{RecordingSlack.Permalink("111.100")}|Alice>, <{RecordingSlack.Permalink("111.200")}|Carol>\n789", text);
+        Assert.Equal($"*Bob* replied to <{RecordingSlack.Permalink("111.100")}|Alice>, <{RecordingSlack.Permalink("111.200")}|Carol>\n789", text);
     }
 
     // 引用的其中一則沒轉過：有轉過的接連結，沒轉過的照樣畫成 blockquote
@@ -44,7 +44,7 @@ public class RelayReplyTests
             QuoteHtml("100", "Alice", "123") + "<p></p>" + QuoteHtml("200", "Carol", "456") + "<p>789</p>",
             ("100", "111.100"));
 
-        Assert.Equal($"*Bob* Reply <{RecordingSlack.Permalink("111.100")}|Alice>\n> *Carol*\n> 456\n789", text);
+        Assert.Equal($"*Bob* replied to <{RecordingSlack.Permalink("111.100")}|Alice>\n> *Carol*\n> 456\n789", text);
     }
 
     // 引用 HTML 裡的作者名是 Teams 塞的（實際看過 "Display Name"）：照 MRI 查回本名，像 Teams 自己那樣
@@ -53,7 +53,7 @@ public class RelayReplyTests
     {
         var text = await RelayAsync(QuoteHtml("100", "Display Name", "123", mri: "8:bob") + "<p>789</p>", ("100", "111.100"));
 
-        Assert.Equal($"*Bob* Reply <{RecordingSlack.Permalink("111.100")}|Bob>\n789", text);
+        Assert.Equal($"*Bob* replied to <{RecordingSlack.Permalink("111.100")}|Bob>\n789", text);
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class RelayReplyTests
             earlierSenders: [("8:alice", "Alice Chen")]);
 
         // 有連結的、沒轉過畫成 blockquote 的，都用查到的名字
-        Assert.Equal($"*Bob* Reply <{RecordingSlack.Permalink("111.100")}|Alice Chen>\n> *Alice Chen*\n> 456\n789", text);
+        Assert.Equal($"*Bob* replied to <{RecordingSlack.Permalink("111.100")}|Alice Chen>\n> *Alice Chen*\n> 456\n789", text);
     }
 
     private static Task<string?> RelayAsync(string content, params (string TeamsId, string Ts)[] relayed) =>

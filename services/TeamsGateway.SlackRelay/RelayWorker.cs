@@ -246,8 +246,8 @@ public sealed class RelayWorker(
         }
 
         var body = TeamsText.ToSlack(message.Content, linkedQuotes, SenderName);
-        // 回覆的第一行讀起來是一句話：「*Bob* Reply Alice, Carol」（不加冒號），內容在下一行
-        var header = replyLinks.Count == 0 ? Header(message) : $"{Name(message)} Reply {string.Join(", ", replyLinks)}";
+        // 回覆的第一行讀起來是一句話：「*Bob* replied to Alice, Carol」（不加冒號），內容在下一行
+        var header = replyLinks.Count == 0 ? Header(message) : $"{Name(message)} replied to {string.Join(", ", replyLinks)}";
 
         var text = Compose(header, body).TrimEnd();
 
