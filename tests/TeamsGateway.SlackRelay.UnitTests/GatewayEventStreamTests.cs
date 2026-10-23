@@ -57,6 +57,50 @@ public class GatewayEventStreamTests
         });
     }
 
+    [Fact]
+    public async Task Slow_consumer_does_not_trip_the_idle_timeout()
+    {
+        // 處理一則訊息（例如傳圖到 Slack）比逾時還久，不能被當成 gateway 沒動靜
+        var http = new HttpClient(new ChunkedHandler(SseBody.Split("\n\n").Select(e => e + "\n\n").ToArray()))
+        {
+            BaseAddress = new Uri("http://localhost"),
+        };
+        var stream = new GatewayEventStream(http, NullLogger<GatewayEventStream>.Instance, idleTimeout: TimeSpan.FromMilliseconds(200));
+
+        var ids = new List<string?>();
+        await foreach (var evt in stream.ConnectAsync(null, null, TestContext.Current.CancellationToken))
+        {
+            ids.Add(evt.Id);
+            await Task.Delay(500, TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(["7", "8"], ids);
+    }
+
+    /// <summary>每次 ReadAsync 吐一段（每個 SSE 事件一段），吐完就結束；會檢查取消。</summary>
+    private sealed class ChunkedHandler(string[] chunks) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new ChunkStream(chunks.Select(Encoding.UTF8.GetBytes))),
+            });
+    }
+
+    private sealed class ChunkStream(IEnumerable<byte[]> chunks) : NeverStream
+    {
+        private readonly Queue<byte[]> _chunks = new(chunks);
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_chunks.TryDequeue(out var chunk))
+                return ValueTask.FromResult(0);
+            chunk.CopyTo(buffer);
+            return ValueTask.FromResult(chunk.Length);
+        }
+    }
+
     private sealed class SilentHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
@@ -64,7 +108,7 @@ public class GatewayEventStreamTests
     }
 
     /// <summary>讀了就一直等，直到被取消。</summary>
-    private sealed class NeverStream : Stream
+    private class NeverStream : Stream
     {
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {

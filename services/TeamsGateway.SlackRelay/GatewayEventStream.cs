@@ -43,12 +43,13 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
         string? eventType = null;
         string? eventId = null;
         var data = new StringBuilder();
-        using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
         while (!ct.IsCancellationRequested)
         {
-            idle.CancelAfter(_idleTimeout); // 每收到一行就重新計時
             string? line;
+            // 每次讀各自計時：只算「等 gateway」的時間，呼叫端處理訊息（傳圖到 Slack 等）花多久都不算
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            idle.CancelAfter(_idleTimeout);
             try
             {
                 line = await reader.ReadLineAsync(idle.Token);
