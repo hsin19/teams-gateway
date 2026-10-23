@@ -17,8 +17,9 @@ public static partial class TeamsText
     /// <summary>
     /// <paramref name="linkedQuotes"/>：已經改用 Slack permalink 連回去的引用（Teams 訊息 id），這些 blockquote 就不再畫；
     /// 其餘引用照樣畫成 Slack blockquote。Teams 一則訊息可以同時引用好幾則。
+    /// <paramref name="nameOf"/>：用 Teams 帳號（MRI）查發話者現在的名字（見 <see cref="QuotedMessage"/>）；查不到用 HTML 裡的。
     /// </summary>
-    public static string ToSlack(string? content, IReadOnlySet<string>? linkedQuotes = null)
+    public static string ToSlack(string? content, IReadOnlySet<string>? linkedQuotes = null, Func<string, string?>? nameOf = null)
     {
         if (string.IsNullOrWhiteSpace(content))
             return content ?? "";
@@ -32,7 +33,7 @@ public static partial class TeamsText
         {
             text.Append(PlainText(content[last..match.Index]));
             if (linkedQuotes is null || QuoteIdRegex().Match(match.Value) is not { Success: true } id || !linkedQuotes.Contains(id.Groups[1].Value))
-                text.Append(Quote(match.Groups[1].Value));
+                text.Append(Quote(match.Groups[1].Value, nameOf));
             last = match.Index + match.Length;
         }
         text.Append(PlainText(content[last..]));
@@ -78,9 +79,9 @@ public static partial class TeamsText
     private static bool IsBoldBoundary(char c) => char.IsWhiteSpace(c) || (c < 128 && char.IsPunctuation(c));
 
     /// <summary>回覆引用：抽出「發話者 + 被引用內容」，渲染成兩行 Slack blockquote。</summary>
-    private static string Quote(string inner)
+    private static string Quote(string inner, Func<string, string?>? nameOf)
     {
-        var author = QuotedAuthor(inner);
+        var author = QuotedAuthorMri(inner) is { } mri && nameOf?.Invoke(mri) is { } known ? known : QuotedAuthor(inner);
         var quoted = QuotedText(inner) ?? Decode(CollapseTags(inner));
         if (quoted.Length == 0 && author is null)
             return "";
@@ -116,8 +117,11 @@ public static partial class TeamsText
     private static readonly HashSet<string> ImageFileTypes =
         new(["jpg", "jpeg", "png", "gif", "bmp", "webp", "heic", "heif", "tif", "tiff"], StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>被引用的一則：Teams 訊息 id（blockquote 的 itemid）與發話者名稱（沒帶就 null）。</summary>
-    public readonly record struct QuotedMessage(string Id, string? Author);
+    /// <summary>
+    /// 被引用的一則：Teams 訊息 id（blockquote 的 itemid）、HTML 裡寫的發話者名稱、發話者的 Teams 帳號（MRI）。
+    /// HTML 裡的名稱不可靠（可能是舊名，甚至是 "Display Name"）——Teams 自己是拿 MRI 去查現在的名字。
+    /// </summary>
+    public readonly record struct QuotedMessage(string Id, string? Author, string? AuthorMri = null);
 
     /// <summary>這則回覆引用了哪些訊息，照出現順序（Teams 可以一次引用好幾則）；不是回覆就是空的。</summary>
     public static IReadOnlyList<QuotedMessage> Quotes(string? content)
@@ -127,9 +131,13 @@ public static partial class TeamsText
         return BlockquoteRegex().Matches(content)
             .Select(m => (Id: QuoteIdRegex().Match(m.Value), Inner: m.Groups[1].Value))
             .Where(q => q.Id.Success)
-            .Select(q => new QuotedMessage(q.Id.Groups[1].Value, QuotedAuthor(q.Inner)))
+            .Select(q => new QuotedMessage(q.Id.Groups[1].Value, QuotedAuthor(q.Inner), QuotedAuthorMri(q.Inner)))
             .ToList();
     }
+
+    /// <summary>引用的發話者帳號：itemprop="mri" 那個元素的 itemid（例如 <c>8:live:someone</c>）。</summary>
+    private static string? QuotedAuthorMri(string inner) =>
+        MriTagRegex().Match(inner) is { Success: true } tag && ItemIdRegex().Match(tag.Value) is { Success: true } id ? id.Groups[1].Value : null;
 
     /// <summary>引用的發話者（itemprop="mri" 元素的文字）。要完整 decode + trim，不然尾端空白會讓 Slack 粗體失效。</summary>
     private static string? QuotedAuthor(string inner)
@@ -167,6 +175,12 @@ public static partial class TeamsText
 
     [GeneratedRegex(@"itemprop=""mri""[^>]*>([^<]*)", RegexOptions.IgnoreCase)]
     private static partial Regex MriRegex();
+
+    [GeneratedRegex(@"<[^>]*\bitemprop=""mri""[^>]*>", RegexOptions.IgnoreCase)]
+    private static partial Regex MriTagRegex();
+
+    [GeneratedRegex(@"\bitemid=""([^""]+)""", RegexOptions.IgnoreCase)]
+    private static partial Regex ItemIdRegex();
 
     [GeneratedRegex(@"itemprop=""preview""[^>]*>(.*?)</", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex PreviewRegex();

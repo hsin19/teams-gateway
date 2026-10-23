@@ -95,6 +95,15 @@ public class TeamsTextTests
     {
         Assert.Equal([new TeamsText.QuotedMessage("1792522584402", "Bob")], TeamsText.Quotes(QuoteHtml("1792522584402", "Bob", "x") + "<p>reply</p>"));
         Assert.Equal("Alice", TeamsText.Quotes(ReplyHtml).Single().Author); // 尾端 &nbsp; 要去掉
+        Assert.Equal("8:live:someone", TeamsText.Quotes(ReplyHtml).Single().AuthorMri);
+    }
+
+    // HTML 裡的作者名不可靠：查得到 MRI 對應的名字就用它，查不到才用 HTML 裡的
+    [Fact]
+    public void Quote_author_is_resolved_by_mri_when_known()
+    {
+        Assert.Contains("> *Alice Chen*", TeamsText.ToSlack(ReplyHtml, nameOf: mri => mri == "8:live:someone" ? "Alice Chen" : null));
+        Assert.Contains("> *Alice*", TeamsText.ToSlack(ReplyHtml, nameOf: _ => null));
     }
 
     [Fact]

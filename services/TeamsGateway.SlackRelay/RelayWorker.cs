@@ -25,6 +25,11 @@ public sealed class RelayWorker(
     private readonly Dictionary<string, string> _uploadedImages = new();
     private const int MaxUploadedImages = 2000;
 
+    // Teams 帳號（MRI）→ 最近看到的顯示名稱。引用 HTML 裡的作者名不可靠（可能是舊名或 "Display Name"），
+    // Teams 自己也是拿 MRI 查名字。純記憶體：重啟後要等那個人講過話才查得到，查不到就退回 HTML 裡的名字
+    private readonly Dictionary<string, string> _senderNames = new();
+    private const int MaxSenderNames = 5000;
+
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         var opts = options.Value;
@@ -127,6 +132,7 @@ public sealed class RelayWorker(
 
     private async Task RelayAsync(MessageDto message, Dictionary<string, string> routes, string? defaultChannel, CancellationToken ct)
     {
+        RememberSender(message); // 先記：回覆引用自己的訊息時，這一則就查得到
         var channel = routes.GetValueOrDefault(message.ConversationId) ?? defaultChannel;
         if (channel is null)
             return; // 沒對應頻道、也沒 default
@@ -208,6 +214,17 @@ public sealed class RelayWorker(
     private static string Name(MessageDto message) =>
         $"*{TeamsText.EscapeMrkdwn(string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName)}*";
 
+    private void RememberSender(MessageDto message)
+    {
+        if (message.From is not { Length: > 0 } mri || string.IsNullOrWhiteSpace(message.FromName))
+            return;
+        if (_senderNames.Count >= MaxSenderNames && !_senderNames.ContainsKey(mri))
+            _senderNames.Clear(); // 滿了整個清掉：常駐很久也不會一直長，代價只是暫時退回 HTML 裡的名字
+        _senderNames[mri] = message.FromName;
+    }
+
+    private string? SenderName(string mri) => _senderNames.GetValueOrDefault(mri);
+
     /// <summary>發話者那行 + 內文：內文一律另起一行（單行、多行、回覆看起來都一致）；沒內文（只有圖 / 附件）就只有發話者。</summary>
     internal static string Compose(string header, string body) => body.Length > 0 ? $"{header}\n{body}" : header;
 
@@ -222,12 +239,13 @@ public sealed class RelayWorker(
             if (links.Lookup(quote.Id) is { } slackRef
                 && await slack.GetPermalinkAsync(slackRef.Channel, slackRef.Ts, ct) is { } permalink)
             {
-                replyLinks.Add($"<{permalink}|{TeamsText.EscapeMrkdwn(quote.Author ?? "message")}>");
+                var author = (quote.AuthorMri is { } mri ? SenderName(mri) : null) ?? quote.Author ?? "message";
+                replyLinks.Add($"<{permalink}|{TeamsText.EscapeMrkdwn(author)}>");
                 linkedQuotes.Add(quote.Id);
             }
         }
 
-        var body = TeamsText.ToSlack(message.Content, linkedQuotes);
+        var body = TeamsText.ToSlack(message.Content, linkedQuotes, SenderName);
         // 回覆的第一行讀起來是一句話：「*Bob* Reply Alice, Carol」（不加冒號），內容在下一行
         var header = replyLinks.Count == 0 ? Header(message) : $"{Name(message)} Reply {string.Join(", ", replyLinks)}";
 
