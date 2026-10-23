@@ -50,8 +50,8 @@ public sealed class RelayWorker(
             {
                 await foreach (var evt in stream.ConnectAsync(chats, lastId, ct))
                 {
-                    lastId = evt.Id ?? lastId;
-                    await RelayAsync(evt.Message, routes, opts.Slack.DefaultChannel, ct);
+                    await RelayWithRetryAsync(evt.Message, routes, opts.Slack.DefaultChannel, ct);
+                    lastId = evt.Id ?? lastId; // 處理完（或放棄）才往前推
                     backoff = MinBackoff; // 收得到就重置退避
                 }
             }
@@ -66,6 +66,37 @@ public sealed class RelayWorker(
 
             await Task.Delay(backoff, ct);
             backoff = TimeSpan.FromSeconds(Math.Min(backoff.TotalSeconds * 2, MaxBackoff.TotalSeconds));
+        }
+    }
+
+    /// <summary>單則轉送失敗後的重試間隔；用完還失敗就放棄這則。</summary>
+    internal TimeSpan[] RetryDelays { get; init; } = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10)];
+
+    /// <summary>
+    /// 轉一則；Slack / gateway 一時不通就退避重試，還是不行記 error 放棄這則、繼續下一則。
+    /// 例外不能冒出去：外層會當成 SSE 斷線，重連後這則就默默消失、log 還寫成連線問題。
+    /// （編輯在「舊版留證」成功、「原地更新」失敗時重試會多留一則證，可以接受。）
+    /// </summary>
+    internal async Task RelayWithRetryAsync(MessageDto message, Dictionary<string, string> routes, string? defaultChannel, CancellationToken ct)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await RelayAsync(message, routes, defaultChannel, ct);
+                return;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested && attempt < RetryDelays.Length)
+            {
+                logger.LogWarning(ex, "轉送 {MessageId} 失敗，{Delay} 後重試", message.Id, RetryDelays[attempt]);
+                await Task.Delay(RetryDelays[attempt], ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogError(ex, "轉送 {MessageId}（{Conversation}）重試 {Attempts} 次仍失敗，放棄這則",
+                    message.Id, message.ConversationId, RetryDelays.Length);
+                return;
+            }
         }
     }
 

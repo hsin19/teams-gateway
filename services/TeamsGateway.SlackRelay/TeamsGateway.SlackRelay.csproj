@@ -11,6 +11,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="TeamsGateway.SlackRelay.UnitTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\packages\TeamsGateway.ServiceDefaults\TeamsGateway.ServiceDefaults.csproj" />
     <ProjectReference Include="..\..\packages\TeamsGateway.Contracts\TeamsGateway.Contracts.csproj" />
   </ItemGroup>
