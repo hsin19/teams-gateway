@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ServiceDiscovery;
 using OpenTelemetry;
@@ -28,8 +29,9 @@ public static class Extensions
 
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
-            // Turn on resilience by default
-            http.AddStandardResilienceHandler();
+            // Turn on resilience by default.
+            // 不重試 POST 這類非冪等請求：逾時 / 5xx 時對方可能其實收到了，重送會讓 Teams 發話、Slack 貼文、webhook 重複
+            http.AddStandardResilienceHandler(options => options.Retry.DisableForUnsafeHttpMethods());
 
             // Turn on service discovery by default
             http.AddServiceDiscovery();

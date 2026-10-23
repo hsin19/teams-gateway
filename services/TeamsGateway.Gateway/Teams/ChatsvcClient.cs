@@ -137,7 +137,8 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
 
     public async Task<SendMessageResult> SendMessageAsync(string threadId, string text, string displayName, CancellationToken ct = default)
     {
-        var clientMessageId = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
+        // 亂數而不是時間戳：同一毫秒的兩個發話不能撞號（Teams 用它認同一則訊息）
+        var clientMessageId = Random.Shared.NextInt64(1_000_000_000_000_000_000, long.MaxValue).ToString(CultureInfo.InvariantCulture);
         var body = new
         {
             content = text,
