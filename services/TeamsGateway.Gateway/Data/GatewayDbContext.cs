@@ -6,9 +6,8 @@ public class GatewayDbContext(DbContextOptions<GatewayDbContext> options) : DbCo
 {
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
     {
-        // SQLite 不能對 DateTimeOffset 做 ORDER BY / 比較；存成 UTC DateTime（可排序、可做時間範圍查詢）。
-        // 我們的時間一律當 UTC 用，不吃 offset。
-        builder.Properties<DateTimeOffset>().HaveConversion<UtcDateTimeConverter>();
+        // 時間存成 Unix 毫秒（INTEGER）：SQLite 沒有時間型別，EF 預設存帶 offset 的 TEXT，連 ORDER BY / 比較都不支援
+        builder.Properties<DateTimeOffset>().HaveConversion<UnixMillisecondsConverter>();
     }
 
     public DbSet<Conversation> Conversations => Set<Conversation>();

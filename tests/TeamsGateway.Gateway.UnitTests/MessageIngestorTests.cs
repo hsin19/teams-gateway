@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using TeamsGateway.Contracts;
 using TeamsGateway.Gateway.Data;
 using TeamsGateway.Gateway.Events;
@@ -117,6 +118,31 @@ public class MessageIngestorTests
 
         await using var ctx = db.CreateDbContext();
         Assert.Empty(ctx.PublishedEvents);
+    }
+
+    // 時間存 Unix 毫秒（INTEGER）：比較 / 排序是整數運算，讀回來是同一個時間點
+    [Fact]
+    public async Task Times_are_stored_as_unix_milliseconds()
+    {
+        using var db = new TestDb();
+        await AddConversationAsync(db, subscribed: true);
+        var composed = new DateTimeOffset(2026, 10, 22, 12, 34, 56, 789, TimeSpan.FromHours(8));
+        var ct = TestContext.Current.CancellationToken;
+        await new MessageIngestor(db, new GatewayEventBus())
+            .UpsertAsync(Msg("100", version: 100) with { Time = composed }, "{}", false, ct);
+
+        await using var ctx = db.CreateDbContext();
+        var connection = ctx.Database.GetDbConnection();
+        await ctx.Database.OpenConnectionAsync(ct);
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT typeof(ComposeTime), ComposeTime FROM MessageEvents";
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            Assert.True(await reader.ReadAsync(ct));
+            Assert.Equal("integer", reader.GetString(0));
+            Assert.Equal(composed.ToUnixTimeMilliseconds(), reader.GetInt64(1));
+        }
+        Assert.Equal(composed, ctx.MessageEvents.Single().ComposeTime); // 同一個時間點（讀回來是 UTC）
     }
 
     [Fact]
