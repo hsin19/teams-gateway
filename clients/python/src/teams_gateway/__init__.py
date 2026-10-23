@@ -115,20 +115,23 @@ class TeamsGatewayClient:
                 backoff = min(backoff * 2, 30.0)
 
     def _stream(self, params: dict | None, last_id: str | None) -> Iterator[tuple[str | None, Message]]:
-        """yield (事件序號, 訊息)。"""
+        """yield (事件序號, 訊息)。只取 message 事件；其他種類（例如 reaction 表情）略過。"""
         headers = {"Last-Event-ID": last_id} if last_id else {}
         # gateway 閒置時每 20s 送心跳：60s 什麼都沒收到就當連線半死，丟 ReadTimeout 讓 events() 重連
         timeout = httpx.Timeout(30.0, read=60.0)
         with self._http.stream("GET", "/v1/events", params=params, headers=headers, timeout=timeout) as resp:
             self._raise(resp)
             event_id: str | None = None
+            event_type = "message"
             for line in resp.iter_lines():
                 if line.startswith("id:"):
                     event_id = line[3:].strip()
-                elif line.startswith("data:"):
+                elif line.startswith("event:"):
+                    event_type = line[6:].strip()
+                elif line.startswith("data:") and event_type == "message":
                     yield event_id, Message._parse(json.loads(line[5:].strip()))
                 elif not line:
-                    event_id = None
+                    event_id, event_type = None, "message"
 
     def _get(self, path: str, params: dict | None = None):
         resp = self._http.get(path, params=params)

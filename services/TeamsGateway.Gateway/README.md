@@ -80,9 +80,9 @@ curl -X DELETE -H "X-Admin-Token: $T"  $BASE/admin/subscriptions/<id>           
 | `POST /v1/chats/{id}/messages` `{"text":"..."}` | 發話 |
 | `GET /v1/messages/{id}/revisions` | 一則訊息的編輯歷史：`current`（目前版本）+ `revisions`（被取代的舊版本，由舊到新，含 `content` / `superseded_at`） |
 | `GET /v1/media?url=<圖片網址>` | 代抓訊息內嵌圖片（`<img src>` 指向 `*.asm.skype.com`，要 Teams 登入才拿得到）；只接受這個網域 |
-| `GET /v1/events?chats=<id>,<id>` | **SSE** 即時新訊息串流（像 Slack Socket Mode）；`chats` 省略 = 全部。SSE `id` 是事件序號（不是訊息 id，編輯會沿用訊息 id）；重連帶 `Last-Event-ID`（上次收到的 `id`）會先補回斷線期間發過的事件（保留 `Gateway:EventRetentionDays`，預設 7 天）；訂閱者重啟、沒留序號時可帶 `afterMessage=<Teams 訊息 id>`（最後處理的那則），從它第一次發出之後補（之後的編輯也會重送，照 `version` 去重）。閒置時每 `Gateway:SseHeartbeatSeconds`（預設 20）秒送 `: ping` 心跳，訂閱者可據此判斷連線半死；API key 被撤銷時會斷線 |
+| `GET /v1/events?chats=<id>,<id>` | **SSE** 即時事件串流（像 Slack Socket Mode）；`chats` 省略 = 全部。事件兩種：`event: message`（新訊息 / 編輯 / 刪除，`MessageDto`）、`event: reaction`（有人按 / 收回表情，`ReactionDto`：誰、哪個表情、還剩幾個人）。SSE `id` 是事件序號（不是訊息 id，編輯會沿用訊息 id）；重連帶 `Last-Event-ID`（上次收到的 `id`）會先補回斷線期間發過的事件（保留 `Gateway:EventRetentionDays`，預設 7 天）；訂閱者重啟、沒留序號時可帶 `afterMessage=<Teams 訊息 id>`（最後處理的那則），從它第一次發出之後補（之後的編輯也會重送，照 `version` 去重）。閒置時每 `Gateway:SseHeartbeatSeconds`（預設 20）秒送 `: ping` 心跳，訂閱者可據此判斷連線半死；API key 被撤銷時會斷線 |
 | `POST /mcp` | **MCP** server（Streamable HTTP）：`list_chats` / `read_messages` / `send_message`，給 agent 用。接法見 `clients/mcp/` |
-| `POST/GET/DELETE /v1/webhooks` | 登記 / 列 / 刪 webhook；有符合的新訊息時 gateway POST 過去，帶 `X-TeamsGateway-Signature: sha256=<hmac>`。目標只能是 http(s)，預設不能打 loopback / 私有網段（訂閱者在同機 / 同網段 / 同 docker 網路時設 `Gateway:WebhookAllowPrivateNetworks=true`），link-local（雲端 metadata）一律不行；不跟 redirect |
+| `POST/GET/DELETE /v1/webhooks` | 登記 / 列 / 刪 webhook；有符合的新訊息時 gateway POST 過去，帶 `X-TeamsGateway-Signature: sha256=<hmac>`。`X-TeamsGateway-Event` 是 `message` 或 `reaction`（body 分別是 `MessageDto` / `ReactionDto`）。目標只能是 http(s)，預設不能打 loopback / 私有網段（訂閱者在同機 / 同網段 / 同 docker 網路時設 `Gateway:WebhookAllowPrivateNetworks=true`），link-local（雲端 metadata）一律不行；不跟 redirect |
 
 即時推播由背景的 Trouter 連線收進來，寫進 `MessageEvents` 後 publish 給 SSE。自己發的訊息也會推回來（`from` 是自己）。
 

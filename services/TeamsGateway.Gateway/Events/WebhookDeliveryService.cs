@@ -25,7 +25,7 @@ public sealed class WebhookDeliveryService(
         {
             try
             {
-                await DeliverAsync(evt.Message, stoppingToken);
+                await DeliverAsync(evt, stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -34,13 +34,13 @@ public sealed class WebhookDeliveryService(
         }
     }
 
-    private async Task DeliverAsync(MessageDto message, CancellationToken ct)
+    private async Task DeliverAsync(GatewayEvent evt, CancellationToken ct)
     {
-        var hooks = await HooksForAsync(factory, message.ConversationId, ct);
+        var hooks = await HooksForAsync(factory, evt.ConversationId, ct);
         if (hooks.Count == 0)
             return;
 
-        var body = JsonSerializer.Serialize(message, ContractsJsonContext.Default.MessageDto);
+        var body = evt.ToJson();
         var bytes = Encoding.UTF8.GetBytes(body);
         var client = httpFactory.CreateClient(HttpClientName);
 
@@ -52,7 +52,7 @@ public sealed class WebhookDeliveryService(
                 {
                     Content = new ByteArrayContent(bytes) { Headers = { ContentType = new("application/json") } },
                 };
-                request.Headers.TryAddWithoutValidation("X-TeamsGateway-Event", "message");
+                request.Headers.TryAddWithoutValidation("X-TeamsGateway-Event", evt.Kind); // message / reaction
                 if (secrets.Unprotect(hook.Secret) is { Length: > 0 } secret)
                     request.Headers.TryAddWithoutValidation("X-TeamsGateway-Signature", "sha256=" + Sign(secret, bytes));
 

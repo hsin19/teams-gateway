@@ -70,9 +70,11 @@ public class PublishedEvent
 {
     /// <summary>自增序號（SQLite AUTOINCREMENT，不重用）。</summary>
     public long Seq { get; set; }
+    /// <summary>事件種類（SSE 的 event 名稱）：<c>message</c> 或 <c>reaction</c>，見 <c>EventKinds</c>。</summary>
+    public string Kind { get; set; } = "message";
     public required string MessageId { get; set; }
     public required string ConversationId { get; set; }
-    /// <summary>發出去的 <c>MessageDto</c> JSON，補收時原樣重送。</summary>
+    /// <summary>發出去的 JSON（<c>MessageDto</c> 或 <c>ReactionDto</c>，看 <see cref="Kind"/>），補收時原樣重送。</summary>
     public required string Payload { get; set; }
     public DateTimeOffset PublishedAt { get; set; }
 }

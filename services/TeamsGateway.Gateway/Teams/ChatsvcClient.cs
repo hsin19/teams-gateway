@@ -210,6 +210,46 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         }
     }
 
+    /// <summary>
+    /// <c>properties.emotions</c> → 表情代碼 →（按的人 MRI → 按的時間）。chatsvc 給的是陣列
+    /// <c>[{key, users: [{mri, time}]}]</c>，也接字串化的 JSON（跟 files 一樣）。沒人按的表情不列。
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlyDictionary<string, DateTimeOffset>> ParseReactions(string rawJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            var emotions = Child(Child(doc.RootElement, "properties"), "emotions");
+            if (emotions.ValueKind != JsonValueKind.String)
+                return ParseEmotionArray(emotions);
+            using var inner = JsonDocument.Parse(emotions.GetString() ?? "[]");
+            return ParseEmotionArray(inner.RootElement);
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, IReadOnlyDictionary<string, DateTimeOffset>>();
+        }
+    }
+
+    private static Dictionary<string, IReadOnlyDictionary<string, DateTimeOffset>> ParseEmotionArray(JsonElement emotions)
+    {
+        var result = new Dictionary<string, IReadOnlyDictionary<string, DateTimeOffset>>();
+        if (emotions.ValueKind != JsonValueKind.Array)
+            return result;
+        foreach (var emotion in emotions.EnumerateArray())
+        {
+            if (GetString(emotion, "key") is not { } key || Child(emotion, "users") is not { ValueKind: JsonValueKind.Array } users)
+                continue;
+            var byUser = new Dictionary<string, DateTimeOffset>();
+            foreach (var user in users.EnumerateArray())
+                if (GetString(user, "mri") is { } mri)
+                    byUser[mri] = DateTimeOffset.FromUnixTimeMilliseconds(GetInt64(user, "time"));
+            if (byUser.Count > 0)
+                result[key] = byUser;
+        }
+        return result;
+    }
+
     /// <summary><c>properties.files</c> → 附件。chatsvc 給的是「字串化的 JSON 陣列」，也接直接是陣列的情況。</summary>
     private static IReadOnlyList<AttachmentDto>? ParseAttachments(JsonElement props)
     {

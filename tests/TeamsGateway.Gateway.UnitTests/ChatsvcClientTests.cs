@@ -89,6 +89,26 @@ public class ChatsvcClientTests
         Assert.Equal((edited, deleted), (msg.Edited, msg.Deleted));
     }
 
+    // emotions 是陣列，偶爾是字串化的 JSON；沒人按的表情不算
+    [Theory]
+    [InlineData("""{"properties":{"emotions":[{"key":"heart","users":[{"mri":"8:a","time":1792640000000},{"mri":"8:b","time":"1792640000500"}]},{"key":"like","users":[]}]}}""")]
+    [InlineData("""{"properties":{"emotions":"[{\"key\":\"heart\",\"users\":[{\"mri\":\"8:a\",\"time\":1792640000000},{\"mri\":\"8:b\",\"time\":1792640000500}]}]"}}""")]
+    public void ParseReactions_reads_who_reacted_with_what(string json)
+    {
+        var reactions = ChatsvcClient.ParseReactions(json);
+
+        var heart = Assert.Single(reactions);
+        Assert.Equal("heart", heart.Key);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1792640000500), heart.Value["8:b"]);
+        Assert.Equal(["8:a", "8:b"], heart.Value.Keys.Order());
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"properties":{}}""")]
+    [InlineData("not json")]
+    public void ParseReactions_empty_without_emotions(string json) => Assert.Empty(ChatsvcClient.ParseReactions(json));
+
     [Fact]
     public void ParseMessage_returns_null_without_id()
     {

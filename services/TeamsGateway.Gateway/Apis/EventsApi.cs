@@ -79,8 +79,8 @@ public static class EventsApi
                         // 序號斷洞：匯流排滿了丟掉舊的、或兩個寫入交錯 publish。洞裡的都已入庫，從 DB 補
                         if (evt.Seq > cursor + 1)
                             cursor = await ReplayAsync(http, factory, cursor, upTo: evt.Seq - 1, Wanted, ct);
-                        if (Wanted(evt.Message.ConversationId))
-                            await WriteAsync(http, evt.Seq, JsonSerializer.Serialize(evt.Message, ContractsJsonContext.Default.MessageDto), ct);
+                        if (Wanted(evt.ConversationId))
+                            await WriteAsync(http, evt.Seq, evt.Kind, evt.ToJson(), ct);
                         cursor = evt.Seq;
                     }
                     continue;
@@ -142,7 +142,7 @@ public static class EventsApi
             foreach (var evt in batch)
             {
                 if (wanted(evt.ConversationId))
-                    await WriteAsync(http, evt.Seq, evt.Payload, ct);
+                    await WriteAsync(http, evt.Seq, evt.Kind, evt.Payload, ct);
                 cursor = evt.Seq;
             }
             if (batch.Count < ReplayBatch)
@@ -150,9 +150,9 @@ public static class EventsApi
         }
     }
 
-    private static async Task WriteAsync(HttpContext http, long seq, string json, CancellationToken ct)
+    private static async Task WriteAsync(HttpContext http, long seq, string kind, string json, CancellationToken ct)
     {
-        await http.Response.WriteAsync($"id: {seq}\nevent: message\ndata: {json}\n\n", ct);
+        await http.Response.WriteAsync($"id: {seq}\nevent: {kind}\ndata: {json}\n\n", ct);
         await http.Response.Body.FlushAsync(ct);
     }
 }

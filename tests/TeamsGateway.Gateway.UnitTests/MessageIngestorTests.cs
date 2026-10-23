@@ -83,7 +83,45 @@ public class MessageIngestorTests
         await using (var ctx = db.CreateDbContext())
             Assert.Equal(200, ctx.MessageRevisions.Single().Version);
         Assert.True(sub.Reader.TryRead(out var edit));
-        Assert.Equal("改過", edit!.Message.Content);
+        Assert.Equal("改過", edit!.Message!.Content);
+    }
+
+    // 按 / 收回表情：發 reaction 事件（不是編輯），帶誰、什麼表情、還剩幾個人
+    [Fact]
+    public async Task Reactions_are_published_as_reaction_events()
+    {
+        using var db = new TestDb();
+        await AddConversationAsync(db, subscribed: true);
+        var bus = new GatewayEventBus();
+        using var sub = bus.Subscribe();
+        var ingestor = new MessageIngestor(db, bus);
+        var ct = TestContext.Current.CancellationToken;
+        await ingestor.UpsertAsync(Msg("50", version: 50) with { From = "8:alice", FromName = "Alice" }, "{}", publish: false, ct); // Alice 講過話
+        await ingestor.UpsertAsync(Msg("100", version: 100), "{}", publish: true, ct);
+        Assert.True(sub.Reader.TryRead(out _));
+
+        const string heart = """{"properties":{"emotions":[{"key":"heart","users":[{"mri":"8:alice","time":1792640000000}]}]}}""";
+        Assert.Equal(IngestResult.Unchanged, await ingestor.UpsertAsync(Msg("100", version: 200), heart, publish: true, ct));
+
+        Assert.True(sub.Reader.TryRead(out var added));
+        Assert.Null(added!.Message);
+        Assert.Equal(
+            new ReactionDto("100", "19:x@thread.v2", "heart", "8:alice", "Alice", Added: true, DateTimeOffset.FromUnixTimeMilliseconds(1792640000000), Count: 1),
+            added.Reaction);
+
+        // Alice 收回 ❤️、Bob 按 👀（Bob 沒講過話，名字查不到）
+        const string eyes = """{"properties":{"emotions":"[{\"key\":\"1f440_eyes\",\"users\":[{\"mri\":\"8:bob\",\"time\":1792640100000}]}]"}}""";
+        await ingestor.UpsertAsync(Msg("100", version: 300), eyes, publish: true, ct);
+
+        var changes = new List<ReactionDto>();
+        while (sub.Reader.TryRead(out var evt))
+            changes.Add(evt.Reaction!);
+        Assert.Equal(
+            [("1f440_eyes", "8:bob", (string?)null, true, 1), ("heart", "8:alice", "Alice", false, 0)],
+            changes.Select(c => (c.Emoji, c.UserMri, c.UserName, c.Added, c.Count)).OrderBy(c => c.Emoji));
+        await using var ctx = db.CreateDbContext();
+        Assert.Empty(ctx.MessageRevisions); // 表情不是編輯
+        Assert.Equal(3, ctx.PublishedEvents.Count(e => e.Kind == "reaction"));
     }
 
     [Fact]

@@ -32,6 +32,31 @@ public sealed record MessagePage(IReadOnlyList<MessageDto> Messages, string? Nex
 
 public sealed record SendMessageRequest(string Text);
 
+/// <summary>SSE 的 <c>event</c> 名稱，也是 webhook 的 <c>X-TeamsGateway-Event</c> header 值。</summary>
+public static class EventKinds
+{
+    /// <summary>新訊息 / 編輯 / 刪除，資料是 <see cref="MessageDto"/>。</summary>
+    public const string Message = "message";
+
+    /// <summary>有人按 / 收回表情，資料是 <see cref="ReactionDto"/>。</summary>
+    public const string Reaction = "reaction";
+}
+
+/// <summary>
+/// 有人在一則訊息上按或收回表情。<c>Emoji</c> 是 Teams 的表情代碼，例如 <c>heart</c>、<c>like-tone2</c>（膚色）、
+/// <c>1f440_eyes</c>（Unicode 碼位 + 名稱）。<c>UserName</c> 查不到時是 null。
+/// <c>Count</c> 是這個表情變動後還有幾個人按著（收回後是 0 = 已經沒人按了）。
+/// </summary>
+public sealed record ReactionDto(
+    string MessageId,
+    string ConversationId,
+    string Emoji,
+    string UserMri,
+    string? UserName,
+    bool Added,
+    DateTimeOffset Time,
+    int Count);
+
 /// <summary>API 的錯誤回應：<c>{"error": "..."}</c>。</summary>
 public sealed record ApiError(string Error);
 
