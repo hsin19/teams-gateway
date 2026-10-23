@@ -82,6 +82,17 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
         if (dto.Version <= existing.Version)
             return IngestResult.Unchanged; // 同版或更舊（重送）
 
+        // 版本跳了、看得到的卻都沒變：有人按表情（reaction）Teams 也會讓 version 往上跳。
+        // 只把版本 / 原始 JSON 跟上（之後的比對才準），不留 revision、不發給訂閱者——不然 Slack 會多出一則一模一樣的「編輯」
+        if (SameVisible(existing, dto))
+        {
+            existing.Version = dto.Version;
+            existing.Edited = dto.Edited;
+            existing.RawJson = rawJson;
+            await db.SaveChangesAsync(ct);
+            return IngestResult.Unchanged;
+        }
+
         // 被編輯 / 刪除：先留存舊版本，再更新成最新
         db.MessageRevisions.Add(new MessageRevision
         {
@@ -104,6 +115,13 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
             bus.Publish(new GatewayEvent(updated.Seq, dto));
         return IngestResult.Updated;
     }
+
+    /// <summary>看得到的部分（內容、類型、刪除、附件）一樣。</summary>
+    private static bool SameVisible(MessageEvent stored, MessageDto incoming) =>
+        stored.Content == incoming.Content
+        && stored.MessageType == incoming.Type
+        && stored.Deleted == incoming.Deleted
+        && (ChatsvcClient.ParseAttachments(stored.RawJson) ?? []).SequenceEqual(incoming.Attachments ?? []);
 
     /// <summary>把要發的事件加進流水帳；SaveChanges 之後 <see cref="PublishedEvent.Seq"/> 才有值。</summary>
     private static PublishedEvent Record(GatewayDbContext db, MessageDto dto)

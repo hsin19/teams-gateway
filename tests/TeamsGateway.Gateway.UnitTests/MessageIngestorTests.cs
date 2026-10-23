@@ -55,6 +55,37 @@ public class MessageIngestorTests
         Assert.Equal(100, revision.Version);
     }
 
+    // 有人按表情：Teams 讓 version 往上跳，但內容沒變——不是編輯：不留 revision、不發給訂閱者
+    [Fact]
+    public async Task Reaction_only_version_bump_is_not_an_edit()
+    {
+        using var db = new TestDb();
+        await AddConversationAsync(db, subscribed: true);
+        var bus = new GatewayEventBus();
+        using var sub = bus.Subscribe();
+        var ingestor = new MessageIngestor(db, bus);
+        var ct = TestContext.Current.CancellationToken;
+
+        await ingestor.UpsertAsync(Msg("100", version: 100, content: "hi"), "{}", publish: true, ct);
+        var reacted = await ingestor.UpsertAsync(Msg("100", version: 200, content: "hi"), "{}", publish: true, ct);
+
+        Assert.Equal(IngestResult.Unchanged, reacted);
+        Assert.True(sub.Reader.TryRead(out _));   // 新訊息那一則
+        Assert.False(sub.Reader.TryRead(out _));  // 表情那次沒發
+        await using (var ctx = db.CreateDbContext())
+        {
+            Assert.Empty(ctx.MessageRevisions);
+            Assert.Equal(200, ctx.MessageEvents.Single().Version); // 版本有跟上
+        }
+
+        // 之後真的編輯：照常留 revision（被取代的是表情之後的那一版）並發出
+        Assert.Equal(IngestResult.Updated, await ingestor.UpsertAsync(Msg("100", version: 300, content: "改過", edited: true), "{}", publish: true, ct));
+        await using (var ctx = db.CreateDbContext())
+            Assert.Equal(200, ctx.MessageRevisions.Single().Version);
+        Assert.True(sub.Reader.TryRead(out var edit));
+        Assert.Equal("改過", edit!.Message.Content);
+    }
+
     [Fact]
     public async Task Delete_marker_sets_deleted()
     {
