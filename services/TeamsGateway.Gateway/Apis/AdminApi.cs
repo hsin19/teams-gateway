@@ -49,7 +49,7 @@ public static class AdminApi
             // 一定要真的重換：GetAsync 會回快取，cookie 已經死了也照樣回 ok
             try
             {
-                var token = await tokens.RefreshAsync(ct);
+                var token = await tokens.RefreshAsync(ct: ct);
                 return Results.Ok(new { token.SkypeId, token.ExpiresAt });
             }
             catch (InvalidOperationException ex)

@@ -23,7 +23,7 @@ public sealed class MediaClient(HttpClient http, SkypeTokenProvider tokens)
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
         {
             resp.Dispose();
-            token = await tokens.RefreshAsync(ct);
+            token = await tokens.RefreshAsync(token.Token, ct);
             resp = await SendAsync(uri, token.Token, ct);
         }
 

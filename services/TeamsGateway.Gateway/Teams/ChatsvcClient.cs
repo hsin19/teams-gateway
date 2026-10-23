@@ -237,7 +237,7 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         {
             logger.LogInformation("chatsvc 回 401，強制換 token 重試");
             resp.Dispose();
-            token = await tokens.RefreshAsync(ct);
+            token = await tokens.RefreshAsync(token.Token, ct);
             resp = await http.SendAsync(Apply(make(), token.Token), ct);
         }
         if (!resp.IsSuccessStatusCode)

@@ -53,12 +53,17 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
         }
     }
 
-    /// <summary>強制重換（例如打 chatsvc 收到 401 時）。</summary>
-    public async Task<SkypeToken> RefreshAsync(CancellationToken ct = default)
+    /// <summary>
+    /// 強制重換（例如打 chatsvc 收到 401 時）。帶上被拒的 <paramref name="rejectedToken"/>：好幾個請求同時 401 時，
+    /// 等鎖期間別人已經換到新的就直接用，不會每個都重跑一次登入流程（連打 login.microsoftonline.com 會被限流）。
+    /// </summary>
+    public async Task<SkypeToken> RefreshAsync(string? rejectedToken = null, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct);
         try
         {
+            if (CanReuse(_cached, rejectedToken, DateTimeOffset.UtcNow))
+                return _cached!;
             _cached = await MintTrackedAsync(ct);
             logger.LogInformation("強制換 skypetoken，skypeid={SkypeId}", _cached.SkypeId);
             return _cached;
@@ -68,6 +73,10 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
             _gate.Release();
         }
     }
+
+    /// <summary>快取的 token 不是被拒的那個、而且還沒快過期 → 別人剛換過，不用再換。沒指定被拒的（admin 強制換）一律重換。</summary>
+    internal static bool CanReuse(SkypeToken? cached, string? rejectedToken, DateTimeOffset now) =>
+        rejectedToken is not null && cached is { } c && c.Token != rejectedToken && c.ExpiresAt - RefreshSkew > now;
 
     /// <summary>包住 <see cref="MintAsync"/>，記下成功 / 失敗時間給健康狀態用。</summary>
     private async Task<SkypeToken> MintTrackedAsync(CancellationToken ct)
@@ -79,7 +88,7 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
             LastError = null;
             return token;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!ct.IsCancellationRequested) // 呼叫端自己取消（斷線 / 關機）不算認證失敗
         {
             LastFailureAt = DateTimeOffset.UtcNow;
             LastError = ex.Message;
