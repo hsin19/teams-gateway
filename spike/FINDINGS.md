@@ -53,6 +53,8 @@
   **只帶 token 時只回一對一對話**，要加網頁 client 的識別 header（`x-ms-client-type: cdlworker`、`ms-ic3-product: tfl` 等，見 `teams_api.headers`）才會回群組。
 - 成員：`GET /api/chatsvc/consumer/v1/threads/{id}?view=msnp24Equivalent` → `members[]`。列對話時的 `threadProperties` 沒有成員數。
 - 訊息：`GET .../users/ME/conversations/{id}/messages?view=...&pageSize=200&startTime=0`，翻頁用回傳的 `_metadata.backwardLink`。
+- 用帳號查名字（`profiles.py`）：`POST /api/mt/beta/users/fetchShortProfile?...`，body 是 MRI 陣列，回 `value[]`（`mri`、`displayName`…）。
+  **要 MT 的 Bearer token 加 `x-skypetoken`**，只帶 skypetoken 會 401。MT token 就是換 skypetoken 時 authorization_code 那步拿到的 `access_token`（約 8 小時）。
 
 ## 發話（不需要瀏覽器）
 

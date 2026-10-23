@@ -10,7 +10,11 @@ namespace TeamsGateway.Gateway.Teams;
 /// <summary>一筆存下來的登入 cookie（來自瀏覽器 profile 匯出）。只需要這幾個欄位。</summary>
 public sealed record LoginCookie(string Name, string Value, string Domain, string? Path);
 
-public sealed record SkypeToken(string Token, string SkypeId, DateTimeOffset ExpiresAt);
+/// <summary>
+/// skypetoken（chatsvc / Trouter 用）與一起換到的 MT token（<c>api/mt</c> 端點用，例如用帳號查人名）。
+/// 兩顆都約 8 小時；<see cref="ExpiresAt"/> 取兩者較早的，一起換。
+/// </summary>
+public sealed record SkypeToken(string Token, string SkypeId, DateTimeOffset ExpiresAt, string? MtToken = null);
 
 /// <summary>
 /// 用登入 cookie 經純 HTTP 換到 skypetoken，並快取到快過期才重換。整個流程不需要瀏覽器。
@@ -120,6 +124,10 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
             ["client_info"] = "1",
         }, origin: true, ct);
         var refreshToken = tokenResp.RootElement.GetProperty("refresh_token").GetString()!;
+        // 這一步本身就是 MT（mtsvc）服務的 token：留著給 api/mt 端點用（例如查人名），不用另外換
+        var mtToken = tokenResp.RootElement.GetProperty("access_token").GetString()!;
+        var mtExpiresAt = DateTimeOffset.UtcNow.AddSeconds(
+            tokenResp.RootElement.TryGetProperty("expires_in", out var expiresIn) && expiresIn.ValueKind == JsonValueKind.Number && expiresIn.TryGetInt32(out var seconds) ? seconds : 3600);
 
         using var authResp = await PostFormAsync(http, Token, new Dictionary<string, string>
         {
@@ -135,7 +143,7 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
         var skype = await AuthzConsumerAsync(http, accessToken, ct);
 
         await SaveCookiesAsync(container, ct);
-        return skype;
+        return skype with { MtToken = mtToken, ExpiresAt = skype.ExpiresAt < mtExpiresAt ? skype.ExpiresAt : mtExpiresAt };
     }
 
     private async Task<string> SilentAuthorizeAsync(HttpClient http, string challenge, CancellationToken ct)

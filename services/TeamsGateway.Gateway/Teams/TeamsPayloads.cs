@@ -43,6 +43,11 @@ internal sealed record ChatsvcSendRequest(
     [property: JsonPropertyName("clientmessageid")] string ClientMessageId,
     [property: JsonPropertyName("imdisplayname")] string ImDisplayName);
 
+/// <summary><c>mt/beta/users/fetchShortProfile</c> 的回應（只取用得到的欄位）。</summary>
+internal sealed record ShortProfiles(IReadOnlyList<ShortProfile>? Value);
+
+internal sealed record ShortProfile(string? Mri, string? DisplayName);
+
 /// <summary>Teams 協定 body 與登入 cookie 的 source-gen context（Web 預設）。</summary>
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 [JsonSerializable(typeof(TrouterClientInfo))]
@@ -52,4 +57,6 @@ internal sealed record ChatsvcSendRequest(
 [JsonSerializable(typeof(RegistrationRequest))]
 [JsonSerializable(typeof(ChatsvcSendRequest))]
 [JsonSerializable(typeof(List<LoginCookie>))]
+[JsonSerializable(typeof(List<string>))]
+[JsonSerializable(typeof(ShortProfiles))]
 internal sealed partial class TeamsJsonContext : JsonSerializerContext;

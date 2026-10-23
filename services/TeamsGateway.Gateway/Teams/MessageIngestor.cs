@@ -12,7 +12,7 @@ public enum IngestResult { Inserted, Updated, Unchanged }
 /// 以 Teams 訊息 id 為主鍵；同 id 但 version 更大 = 被編輯 / 刪除 → 更新內容與標記。live 才 publish。
 /// publish 的事件跟訊息同一個交易記進 <see cref="PublishedEvent"/>，SSE 斷線補收靠它。版本變大時也比對表情，有人按 / 收回就發 reaction 事件。
 /// </summary>
-public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory, GatewayEventBus bus)
+public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory, GatewayEventBus bus, IPeopleDirectory? people = null)
 {
     // Trouter、輪詢、慢更新、回補會同時寫同一則（先查再插 → 主鍵衝突、編輯的 revision 重複）：寫入一次一筆。
     // 量很小，串行化沒有成本；也讓事件依序號順序 publish
@@ -132,22 +132,32 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
         && stored.Deleted == incoming.Deleted
         && (ChatsvcClient.ParseAttachments(stored.RawJson) ?? []).SequenceEqual(incoming.Attachments ?? []);
 
-    /// <summary>前後兩版的表情變動；按的人的名字用他在 DB 裡最近一則訊息的顯示名稱（查不到就 null）。</summary>
-    private static async Task<List<ReactionDto>> ReactionChangesAsync(
+    /// <summary>
+    /// 前後兩版的表情變動。按的人的名字先用他在 DB 裡最近一則訊息的顯示名稱；沒在訂閱群組講過話的（只按表情）
+    /// 再去 Teams 查（<see cref="IPeopleDirectory"/>），都查不到就 null。
+    /// </summary>
+    private async Task<List<ReactionDto>> ReactionChangesAsync(
         GatewayDbContext db, string beforeJson, string afterJson, MessageDto dto, CancellationToken ct)
     {
         var changes = DiffReactions(ChatsvcClient.ParseReactions(beforeJson), ChatsvcClient.ParseReactions(afterJson), DateTimeOffset.UtcNow);
-        var result = new List<ReactionDto>(changes.Count);
-        foreach (var change in changes)
-        {
-            var name = await db.MessageEvents
-                .Where(m => m.SenderMri == change.Mri && m.SenderName != null)
+        if (changes.Count == 0)
+            return [];
+
+        var names = new Dictionary<string, string?>();
+        foreach (var mri in changes.Select(c => c.Mri).Distinct())
+            names[mri] = await db.MessageEvents
+                .Where(m => m.SenderMri == mri && m.SenderName != null)
                 .OrderByDescending(m => m.ReceivedAt)
                 .Select(m => m.SenderName)
                 .FirstOrDefaultAsync(ct);
-            result.Add(new ReactionDto(dto.Id, dto.ConversationId, change.Emoji, change.Mri, name, change.Added, change.Time, change.Count));
-        }
-        return result;
+        var unknown = names.Where(n => n.Value is null).Select(n => n.Key).ToList();
+        if (unknown.Count > 0 && people is not null)
+            foreach (var (mri, name) in await people.DisplayNamesAsync(unknown, ct))
+                names[mri] = name;
+
+        return changes
+            .Select(c => new ReactionDto(dto.Id, dto.ConversationId, c.Emoji, c.Mri, names[c.Mri], c.Added, c.Time, c.Count))
+            .ToList();
     }
 
     internal readonly record struct ReactionChange(string Emoji, string Mri, bool Added, DateTimeOffset Time, int Count);

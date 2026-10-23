@@ -124,6 +124,42 @@ public class MessageIngestorTests
         Assert.Equal(3, ctx.PublishedEvents.Count(e => e.Kind == "reaction"));
     }
 
+    // 只按表情、沒在訂閱群組講過話的人：DB 查不到名字，改問 Teams；DB 有的就不問
+    [Fact]
+    public async Task Unknown_reactor_names_are_looked_up()
+    {
+        using var db = new TestDb();
+        await AddConversationAsync(db, subscribed: true);
+        var bus = new GatewayEventBus();
+        using var sub = bus.Subscribe();
+        var people = new FakePeople(new Dictionary<string, string> { ["8:bob"] = "Bob Lin" });
+        var ingestor = new MessageIngestor(db, bus, people);
+        var ct = TestContext.Current.CancellationToken;
+        await ingestor.UpsertAsync(Msg("50", version: 50) with { From = "8:alice", FromName = "Alice" }, "{}", publish: false, ct);
+        await ingestor.UpsertAsync(Msg("100", version: 100), "{}", publish: false, ct);
+
+        const string reacted = """{"properties":{"emotions":[{"key":"like","users":[{"mri":"8:alice","time":1792640000000},{"mri":"8:bob","time":1792640000000},{"mri":"8:carol","time":1792640000000}]}]}}""";
+        await ingestor.UpsertAsync(Msg("100", version: 200), reacted, publish: true, ct);
+
+        var names = new Dictionary<string, string?>();
+        while (sub.Reader.TryRead(out var evt))
+            names[evt.Reaction!.UserMri] = evt.Reaction.UserName;
+        Assert.Equal(new Dictionary<string, string?> { ["8:alice"] = "Alice", ["8:bob"] = "Bob Lin", ["8:carol"] = null }, names);
+        Assert.Equal(["8:bob", "8:carol"], people.Asked.Order());
+    }
+
+    private sealed class FakePeople(IReadOnlyDictionary<string, string> known) : IPeopleDirectory
+    {
+        public List<string> Asked { get; } = [];
+
+        public Task<IReadOnlyDictionary<string, string>> DisplayNamesAsync(IReadOnlyCollection<string> mris, CancellationToken ct)
+        {
+            Asked.AddRange(mris);
+            return Task.FromResult<IReadOnlyDictionary<string, string>>(
+                mris.Where(known.ContainsKey).ToDictionary(m => m, m => known[m]));
+        }
+    }
+
     [Fact]
     public async Task Delete_marker_sets_deleted()
     {
