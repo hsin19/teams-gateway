@@ -8,7 +8,7 @@
 
 | 需求 | 選擇 | 原因 |
 |---|---|---|
-| DB，之後好轉正式 | EF Core + SQLite | provider 可抽換；DbContext 註冊集中一處，之後換 Postgres / SQL Server 只改一行，並接 Aspire 第一方 EF 整合 |
+| DB，之後好轉正式 | EF Core + SQLite | provider 可抽換；DbContext 註冊集中一處，之後換 Postgres / SQL Server 只改一行，並接 Aspire 第一方 EF 整合（後來改成用設定在 SQLite / Postgres 間切換，見 ADR 0008） |
 | 專案框架、好上雲 | .NET Aspire | ServiceDefaults（OTel / health / resilience）+ dashboard；AppHost 只在 dev，正式只部 gateway container，方便日後容器化部署流程（後來 relay 也以 container 部署，見 `DEPLOY.md`） |
 | 省記憶體 | workstation GC（非 server、非並行），不是 Native AOT | 見下 |
 

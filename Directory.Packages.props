@@ -7,6 +7,12 @@
   <!-- 資料存取 -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.13" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+  </ItemGroup>
+
+  <!-- Aspire hosting 整合（AppHost 與 functional test 起 container 用），版本跟 global.json 的 Aspire.AppHost.Sdk 一致 -->
+  <ItemGroup>
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.3" />
   </ItemGroup>
 
   <!-- MCP -->

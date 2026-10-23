@@ -17,7 +17,8 @@ public enum IngestResult { Inserted, Updated, Unchanged }
 public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory, GatewayEventBus bus, IPeopleDirectory? people = null)
 {
     // Trouter、輪詢、慢更新、回補會同時寫同一則（先查再插 → 主鍵衝突、編輯的 revision 重複）：寫入一次一筆。
-    // 量很小，串行化沒有成本；也讓事件序號照寫入順序遞增
+    // 量很小，串行化沒有成本。也保證事件序號 = commit 順序（ADR 0006 的讀法靠它）：Postgres 的序號在 INSERT 時就分配，
+    // 兩筆交易同時跑時序號小的可能比較晚 commit，讀游標的人會跳過它——所以寫 PublishedEvents 只能經過這把鎖（ADR 0008）
     private readonly SemaphoreSlim _writeGate = new(1, 1);
 
     public async Task<bool> IsSubscribedAsync(string conversationId, CancellationToken ct)

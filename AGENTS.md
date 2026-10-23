@@ -22,6 +22,7 @@
 dotnet build
 dotnet test --project tests/TeamsGateway.Gateway.UnitTests
 dotnet test --project tests/TeamsGateway.Gateway.FunctionalTests
+GATEWAY_TEST_DB=postgres dotnet test --project tests/TeamsGateway.Gateway.FunctionalTests   # 同一組改跑 Postgres（Aspire 起 container，要有 Docker）
 dotnet test --project tests/TeamsGateway.SlackRelay.UnitTests
 dotnet test --project tests/TeamsGateway.Gateway.UnitTests -- --filter-method '*Reaction*'   # 只跑部分
 ```
@@ -36,6 +37,7 @@ dotnet test --project tests/TeamsGateway.Gateway.UnitTests -- --filter-method '*
 - 照周圍的寫法：primary constructor、`sealed`、DTO 用 `record`；JSON 走 source generator（`*JsonContext`），新的 wire 型別要註冊進去。
 - 註解、XML doc、log 訊息用繁體中文，寫「為什麼」，不重複程式碼已經講清楚的事。
 - 測試名稱是英文、底線分隔的句子（例如 `Upsert_inserts_then_dedupes_same_version`），上面用中文註解說明情境；`CancellationToken` 用 `TestContext.Current.CancellationToken`，DB 用 `TestDb`。
+- DB 可切換 SQLite / Postgres（`Gateway:Database:Provider`，ADR 0008），本機預設 SQLite。動到 DB 的程式兩邊都要能跑：改完跑一次 Postgres 版的 functional test；寫 `PublishedEvents` 只能經過 `MessageIngestor` 的寫入鎖（序號要等於 commit 順序）。
 - DB 沒有 migration（`EnsureCreated`）：改了 EF model，既有的 `.data/gateway.db` 要刪掉重建。裡面有登入 cookie 和 API key，**刪之前一定要先問**。
 - 事件相關的程式守 ADR 0006 的契約：所有事件種類同一個串流、順序只保證在同一個對話內、去重與游標分對話記。
 
@@ -69,6 +71,7 @@ dotnet test --project tests/TeamsGateway.Gateway.UnitTests -- --filter-method '*
 本機只當開發環境（ADR 0007），沒有常駐服務。
 
 - `aspire start` 在背景起 gateway（`localhost:5199`）+ slack-relay + dashboard，`aspire stop` 停；`aspire ps` 看有沒有在跑。改了程式要 `aspire resource <gateway|slack-relay> rebuild`（`restart` 不會重新編譯）才會生效；改了 `AppHost.cs` 或它的 `appsettings.Local.json` 要 `aspire stop` 再 `aspire start`。
+- repo 根目錄的 `aspire.config.json` 指定 AppHost：functional test 專案也是 Aspire SDK（Postgres 版測試要起 container），不指定的話 CLI 會要你二選一，非互動模式直接失敗。
 - 全域 `aspire` CLI 要跟 `global.json` 的 `Aspire.AppHost.Sdk` 同一個 minor（現在 13.6）。CLI 比較舊時會經 `dnx` 轉給新版跑、外層連不上 backchannel，`aspire start` 剛好 120 秒後整組被砍（log 有 `Timed out waiting 120s for AppHost to start`）；`dotnet tool update -g Aspire.Cli` 升上去。
 - log：`aspire logs <resource> -t`（帶時間）、`aspire otel logs <resource>`（structured）。`Microsoft.*` / `System.*` / `Polly` 只記 warning 以上。dashboard 不留歷史，要查更早「什麼時候發生」看 DB 的時間欄位（`MessageEvents.ComposeTime` / `ReceivedAt`、`PublishedEvents.PublishedAt`，Unix 毫秒），用唯讀模式開：`sqlite3 'file:.data/gateway.db?mode=ro'`。
 - 訊息晚到先查 Mac 有沒有睡眠（`pmset -g log`）：睡眠時 gateway 跟著暫停，醒來後由輪詢補上並記 `Trouter 漏接` warning，不一定是推播壞了。

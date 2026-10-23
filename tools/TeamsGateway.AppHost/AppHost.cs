@@ -14,8 +14,17 @@ var dataDir = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", ".."
 
 var gateway = builder.AddProject<Projects.TeamsGateway_Gateway>("gateway")
     .WithLocalEnv("Gateway__AdminToken")
+    .WithLocalEnv("Gateway__Database__Provider")
     .WithEnvironment("Gateway__DataDir", dataDir)
     .WithHttpHealthCheck("/health", endpointName: "http");
+
+// DB 預設 SQLite（DataDir 裡的 gateway.db）；appsettings.Local.json 設 Gateway__Database__Provider=Postgres 就改起一個
+// Postgres container（要有 Docker），連線字串由 ConnectionStrings__gateway 帶進去。資料放 named volume，AppHost 重起還在
+if (string.Equals(builder.Configuration["Gateway__Database__Provider"], "Postgres", StringComparison.OrdinalIgnoreCase))
+{
+    var database = builder.AddPostgres("postgres").WithDataVolume().AddDatabase("gateway-db", databaseName: "gateway");
+    gateway.WithReference(database, connectionName: "gateway").WaitFor(database);
+}
 
 // Routes 是 list，攤平成 Relay__Slack__Routes__<i>__Chat / __<i>__Channel
 builder.AddProject<Projects.TeamsGateway_SlackRelay>("slack-relay")

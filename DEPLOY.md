@@ -6,7 +6,8 @@
 
 - **單副本**:gateway 一條 Trouter 連線 + 一個 SQLite writer;relay 一個 SSE consumer。兩者都 `replicas: 1`,不可水平擴。
 - **持久化**:gateway 的 `/data`（cookie + DataProtection key + SQLite）掛 `gateway-data` volume,不然每次重啟要重匯 cookie。
-- **schema**:目前不做 migration。程式的 DB model 改過時 gateway 會拒絕啟動並提示,要把 volume 裡的 `gateway.db` 刪掉重建、重新 bootstrap。正式長期部署前再補 migration。
+- **DB**:預設 SQLite（`/data/gateway.db`）。要用 Postgres 就設 `Gateway__Database__Provider=Postgres` 與 `ConnectionStrings__gateway`，給 gateway 一個專用的資料庫（同一個 server 跟別的服務共用沒關係）；DataProtection key 還是在 `/data/keys`,`/data` volume 照樣要掛（`docs/adr/0008`）。
+- **schema**:目前不做 migration。程式的 DB model 改過時 gateway 會拒絕啟動並提示,要把 `gateway.db` 刪掉（Postgres 則清空那個資料庫）重建、重新 bootstrap。正式長期部署前再補 migration。
 - **egress**:gateway 要連得到 `login.live.com` / `teams.live.com` / chatsvc / `*.trouter.skype.com`（含 WebSocket）。一般網路沒問題;受限網段要先開白名單。
 
 ## 安全注意

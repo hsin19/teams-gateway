@@ -1,0 +1,5 @@
+{
+  "appHost": {
+    "path": "tools/TeamsGateway.AppHost/TeamsGateway.AppHost.csproj"
+  }
+}

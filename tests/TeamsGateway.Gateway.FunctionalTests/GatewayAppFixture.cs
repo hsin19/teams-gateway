@@ -8,12 +8,13 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Npgsql;
 using TeamsGateway.Gateway.Teams;
 
 namespace TeamsGateway.Gateway.FunctionalTests;
 
 /// <summary>
-/// 把整個 gateway 跑在測試宿主裡、打真 HTTP，但資料落臨時目錄、關掉會連 Teams 的背景服務。
+/// 把整個 gateway 跑在測試宿主裡、打真 HTTP，但資料落臨時目錄（或 <see cref="TestDatabase"/> 的 Postgres）、關掉會連 Teams 的背景服務。
 /// 測的是「我們的接線」（auth / 路由 / EF / 序列化）；會連 chatsvc 的讀發交給 E2E canary。
 /// </summary>
 public sealed class GatewayAppFixture : WebApplicationFactory<Program>
@@ -26,6 +27,13 @@ public sealed class GatewayAppFixture : WebApplicationFactory<Program>
     {
         // 資料（SQLite + DataProtection key）落臨時目錄，不碰真的 .data
         builder.UseSetting("Gateway:DataDir", _dataDir);
+        if (TestDatabase.PostgresConnectionString is { } server)
+        {
+            // GATEWAY_TEST_DB=postgres：共用的 Postgres server 上每個 fixture 一個資料庫（EnsureCreated 會建），平行跑也互不干擾
+            var database = new NpgsqlConnectionStringBuilder(server) { Database = "tgw_func_" + Guid.NewGuid().ToString("N") };
+            builder.UseSetting("Gateway:Database:Provider", "Postgres");
+            builder.UseSetting("ConnectionStrings:gateway", database.ConnectionString);
+        }
         builder.UseSetting("Gateway:AdminToken", AdminToken);
         builder.UseSetting("Gateway:SseHeartbeatSeconds", "1"); // 心跳 / 撤銷檢查測試不用等 20 秒
 

@@ -7,9 +7,11 @@ public class GatewayDbContext(DbContextOptions<GatewayDbContext> options) : DbCo
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
     {
         // SQLite 沒有時間型別，EF 預設存帶 offset 的 TEXT，連 ORDER BY / 比較都不支援：存成 Unix 毫秒（INTEGER）。
-        // 有原生時間型別的 provider（例如 Postgres 的 timestamptz）就用它自己的，不轉
+        // Postgres 用原生的 timestamptz，但 Npgsql 只收 offset 0 的 DateTimeOffset，寫入前一律轉 UTC
         if (Database.IsSqlite())
             builder.Properties<DateTimeOffset>().HaveConversion<UnixMillisecondsConverter>();
+        else if (Database.IsNpgsql())
+            builder.Properties<DateTimeOffset>().HaveConversion<UtcConverter>();
     }
 
     public DbSet<Conversation> Conversations => Set<Conversation>();

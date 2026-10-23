@@ -12,6 +12,9 @@ public sealed class GatewayOptions
     /// <summary>SQLite 與 DataProtection key 的存放目錄；預設 content root 下的 <c>.data</c>。</summary>
     public string? DataDir { get; set; }
 
+    /// <summary>資料庫（ADR 0008）：<c>Gateway:Database:Provider</c>。啟動註冊服務時就讀，改了要重啟。</summary>
+    public DatabaseSettings Database { get; set; } = new();
+
     /// <summary>訂閱 / 啟動時回補幾天的歷史訊息（給 Elasticsearch 歷史搜尋留料）。</summary>
     public int BackfillDays { get; set; } = 7;
 
@@ -51,4 +54,16 @@ public sealed class GatewayOptions
 public sealed class SinkSettings
 {
     public bool Enabled { get; set; } = true;
+}
+
+public sealed class DatabaseSettings
+{
+    /// <summary><c>Sqlite</c>（預設，本機開發）或 <c>Postgres</c>（要給 <c>ConnectionStrings:gateway</c>）。</summary>
+    public DatabaseProvider Provider { get; set; } = DatabaseProvider.Sqlite;
+}
+
+public enum DatabaseProvider
+{
+    Sqlite,
+    Postgres,
 }

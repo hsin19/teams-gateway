@@ -29,7 +29,7 @@
 | `tools/TeamsGateway.AppHost` | Aspire 編排：本機開發一次起 gateway + relay（不部署） | ✅ |
 | `spike/` | 逆向非官方 API 的拋棄式 Python 腳本；結論在 [`spike/FINDINGS.md`](spike/FINDINGS.md) | — |
 
-技術選型、結構等決策的理由見 [`docs/adr/`](docs/adr/)（0001 選型、0002 服務內部結構、0003 monorepo、0004 先跑在本機、0005 agent 介面用 MCP、0006 事件出入口抽象化、0007 本機只當開發環境）。
+技術選型、結構等決策的理由見 [`docs/adr/`](docs/adr/)（0001 選型、0002 服務內部結構、0003 monorepo、0004 先跑在本機、0005 agent 介面用 MCP、0006 事件出入口抽象化、0007 本機只當開發環境、0008 資料庫可切換 SQLite / Postgres）。
 
 ## 開始
 
@@ -48,7 +48,8 @@ aspire run          # 起 dashboard + gateway（localhost:5199）+ slack-relay�
   "Relay__Gateway__ApiKey": "tgw_…",      // gateway bootstrap 後 POST /admin/api-keys 建
   "Relay__Slack__BotToken": "xoxb-…",
   "Relay__Slack__Routes__0__Chat": "19:…@thread.v2",   // Teams 對話 → Slack 頻道；list 攤平成 __<i>__
-  "Relay__Slack__Routes__0__Channel": "C…"            // 本機只指 Slack 測試頻道（ADR 0007）
+  "Relay__Slack__Routes__0__Channel": "C…",           // 本機只指 Slack 測試頻道（ADR 0007）
+  "Gateway__Database__Provider": "Postgres"           // 選填：改用 Postgres container（要有 Docker），沒設 = SQLite（ADR 0008）
 }
 ```
 

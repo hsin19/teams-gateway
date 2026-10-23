@@ -5,6 +5,10 @@
     <ProjectReference Include="..\..\services\TeamsGateway.SlackRelay\TeamsGateway.SlackRelay.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <UserSecretsId>ee123c81-fc88-416f-95ae-d4b19a26bcbe</UserSecretsId>

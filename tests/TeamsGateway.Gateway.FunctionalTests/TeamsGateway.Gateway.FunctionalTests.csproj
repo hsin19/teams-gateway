@@ -1,4 +1,5 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<!-- Aspire SDK：GATEWAY_TEST_DB=postgres 時用 Aspire 起 Postgres container 跑同一組測試（照 eShop 的 functional test） -->
+<Project Sdk="Aspire.AppHost.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -7,9 +8,12 @@
     <IsPackable>false</IsPackable>
     <!-- xunit v3 的測試專案要是可執行檔 -->
     <OutputType>Exe</OutputType>
+    <!-- 走 Aspire CLI bundle 的 DCP（跟 AppHost 一樣） -->
+    <AspireUseCliBundle>true</AspireUseCliBundle>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
@@ -20,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\services\TeamsGateway.Gateway\TeamsGateway.Gateway.csproj" />
+    <ProjectReference Include="..\..\services\TeamsGateway.Gateway\TeamsGateway.Gateway.csproj" IsAspireProjectResource="false" />
   </ItemGroup>
 
 </Project>
