@@ -10,7 +10,8 @@ public enum IngestResult { Inserted, Updated, Unchanged }
 /// <summary>
 /// 把一則訊息 upsert 進 DB（Trouter 即時、回補、慢更新共用）。
 /// 以 Teams 訊息 id 為主鍵；同 id 但 version 更大 = 被編輯 / 刪除 → 更新內容與標記。live 才 publish。
-/// publish 的事件跟訊息同一個交易記進 <see cref="PublishedEvent"/>，SSE 斷線補收靠它。版本變大時也比對表情，有人按 / 收回就發 reaction 事件。
+/// publish 的事件跟訊息同一個交易記進 <see cref="PublishedEvent"/>，SSE 斷線補收靠它。版本變大時也比對表情，有人按 / 收回就發 reaction 事件；
+/// 新訊息進來時已經掛著的表情，接在訊息後面當成新按的發。
 /// </summary>
 public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory, GatewayEventBus bus, IPeopleDirectory? people = null)
 {
@@ -72,6 +73,10 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
                     conv.UpdatedAt = DateTimeOffset.UtcNow;
                 }
                 outgoing.Add(Record(db, new GatewayEvent(0, Message: dto)));
+                // 晚到的訊息（睡眠 / 停機後才被輪詢、回補補到）第一次看到時可能已經有人按了表情：
+                // 之後的比對都以這版為準，現在不發就永遠發不出去
+                foreach (var reaction in await ReactionChangesAsync(db, beforeJson: "{}", rawJson, dto, ct))
+                    outgoing.Add(Record(db, new GatewayEvent(0, Reaction: reaction)));
             }
             result = IngestResult.Inserted;
         }

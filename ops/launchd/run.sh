@@ -16,4 +16,5 @@ fi
 export ASPNETCORE_URLS="${ASPNETCORE_URLS:-http://127.0.0.1:5199}"
 export Gateway__DataDir="$(pwd)/.data"
 
-exec dotnet .publish/TeamsGateway.Gateway.dll
+# content root 預設是目前目錄（repo 根）：要指到 .publish，不然讀不到 publish 出來的 appsettings.json（log 等級等）
+exec dotnet .publish/TeamsGateway.Gateway.dll --contentRoot "$(pwd)/.publish"

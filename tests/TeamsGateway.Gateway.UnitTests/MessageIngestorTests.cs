@@ -124,6 +124,42 @@ public class MessageIngestorTests
         Assert.Equal(3, ctx.PublishedEvents.Count(e => e.Kind == "reaction"));
     }
 
+    // 晚到的訊息（例如電腦睡著時發的，醒來才被輪詢補到）第一次看到就已經有人按表情：
+    // 訊息之後接著發 reaction，不然之後的比對都以這版為準，這個表情永遠不會發出去
+    [Fact]
+    public async Task Reactions_already_on_a_new_message_are_published_after_it()
+    {
+        using var db = new TestDb();
+        await AddConversationAsync(db, subscribed: true);
+        var bus = new GatewayEventBus();
+        using var sub = bus.Subscribe();
+        var ingestor = new MessageIngestor(db, bus);
+        var ct = TestContext.Current.CancellationToken;
+        await ingestor.UpsertAsync(Msg("50", version: 50) with { From = "8:alice", FromName = "Alice" }, "{}", publish: false, ct);
+
+        const string pinned = """{"properties":{"emotions":[{"key":"1f4cc_pushpin","users":[{"mri":"8:alice","time":1792726751315}]}]}}""";
+        Assert.Equal(IngestResult.Inserted, await ingestor.UpsertAsync(Msg("100", version: 200), pinned, publish: true, ct));
+
+        Assert.True(sub.Reader.TryRead(out var message));
+        Assert.Equal("100", message!.Message!.Id);
+        Assert.True(sub.Reader.TryRead(out var reaction));
+        Assert.True(reaction!.Seq > message.Seq); // relay 先貼訊息，表情才有地方掛
+        Assert.Equal(
+            new ReactionDto("100", "19:x@thread.v2", "1f4cc_pushpin", "8:alice", "Alice", Added: true, DateTimeOffset.FromUnixTimeMilliseconds(1792726751315), Count: 1),
+            reaction.Reaction);
+        Assert.False(sub.Reader.TryRead(out _));
+
+        // 同一版又來一次（Trouter 晚到、下一輪輪詢）：不重發
+        Assert.Equal(IngestResult.Unchanged, await ingestor.UpsertAsync(Msg("100", version: 200), pinned, publish: true, ct));
+        Assert.False(sub.Reader.TryRead(out _));
+
+        // 只存不發的回補：表情也不發
+        await ingestor.UpsertAsync(Msg("101", version: 101), pinned, publish: false, ct);
+        Assert.False(sub.Reader.TryRead(out _));
+        await using var ctx = db.CreateDbContext();
+        Assert.Equal(["message", "reaction"], ctx.PublishedEvents.OrderBy(e => e.Seq).Select(e => e.Kind));
+    }
+
     // 只按表情、沒在訂閱群組講過話的人：DB 查不到名字，改問 Teams；DB 有的就不問
     [Fact]
     public async Task Unknown_reactor_names_are_looked_up()
