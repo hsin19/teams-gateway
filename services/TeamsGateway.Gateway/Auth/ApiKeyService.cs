@@ -35,6 +35,13 @@ public sealed class ApiKeyService(IDbContextFactory<GatewayDbContext> factory)
         return await db.ApiKeys.FirstOrDefaultAsync(k => k.KeyHash == hash && k.RevokedAt == null, ct);
     }
 
+    /// <summary>key 還有效（存在且沒被撤銷）。給長連線（SSE）定期確認用。</summary>
+    public async Task<bool> IsActiveAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.ApiKeys.AnyAsync(k => k.Id == id && k.RevokedAt == null, ct);
+    }
+
     public async Task<IReadOnlyList<ApiKey>> ListAsync(CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);

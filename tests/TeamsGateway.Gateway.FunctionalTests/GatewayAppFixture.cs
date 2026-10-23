@@ -25,6 +25,7 @@ public sealed class GatewayAppFixture : WebApplicationFactory<Program>
         // 資料（SQLite + DataProtection key）落臨時目錄，不碰真的 .data
         builder.UseSetting("Gateway:DataDir", _dataDir);
         builder.UseSetting("Gateway:AdminToken", AdminToken);
+        builder.UseSetting("Gateway:SseHeartbeatSeconds", "1"); // 心跳 / 撤銷檢查測試不用等 20 秒
 
         builder.ConfigureTestServices(services =>
         {
@@ -36,17 +37,30 @@ public sealed class GatewayAppFixture : WebApplicationFactory<Program>
         });
     }
 
-    /// <summary>走 admin 端點真的建一把 key，回帶著它的 client（順便驗 admin happy path 回得到明文 apiKey）。</summary>
-    public async Task<HttpClient> CreateApiClientAsync(CancellationToken ct)
+    /// <summary>帶 admin token 的 client。</summary>
+    public HttpClient CreateAdminClient()
     {
         var admin = CreateClient();
         admin.DefaultRequestHeaders.Add("X-Admin-Token", AdminToken);
-        var resp = await admin.PostAsJsonAsync("/admin/api-keys", new { name = "func" }, ct);
+        return admin;
+    }
+
+    /// <summary>走 admin 端點真的建一把 key（順便驗 admin happy path 回得到明文 apiKey）。</summary>
+    public async Task<(Guid Id, string ApiKey)> CreateApiKeyAsync(CancellationToken ct)
+    {
+        var resp = await CreateAdminClient().PostAsJsonAsync("/admin/api-keys", new { name = "func" }, ct);
         resp.EnsureSuccessStatusCode();
         var created = await resp.Content.ReadFromJsonAsync<JsonElement>(ct);
+        return (created.GetProperty("id").GetGuid(), created.GetProperty("apiKey").GetString()!);
+    }
 
+    /// <summary>帶一把新 key 的 client。</summary>
+    public async Task<HttpClient> CreateApiClientAsync(CancellationToken ct) => ApiClient((await CreateApiKeyAsync(ct)).ApiKey);
+
+    public HttpClient ApiClient(string apiKey)
+    {
         var client = CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", created.GetProperty("apiKey").GetString());
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         return client;
     }
 

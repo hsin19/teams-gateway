@@ -27,6 +27,9 @@ public sealed class GatewayOptions
     /// <summary>已發事件（SSE 斷線補收用）留幾天；斷線比這還久的訂閱者重連時就從現在開始收。</summary>
     public int EventRetentionDays { get; set; } = 7;
 
+    /// <summary>SSE 閒置時每隔幾秒送一次心跳（順便確認 API key 沒被撤銷）；比中間 proxy / NAT 的閒置逾時短才保得住連線。</summary>
+    public int SseHeartbeatSeconds { get; set; } = 20;
+
     /// <summary>
     /// webhook 可不可以打 loopback / 私有網段（訂閱者跟 gateway 在同一台機器、同網段或同一個 docker 網路時要開）。
     /// link-local（雲端 metadata）不管怎樣都不行。

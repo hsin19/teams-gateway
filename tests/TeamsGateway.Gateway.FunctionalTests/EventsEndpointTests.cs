@@ -58,6 +58,44 @@ public sealed class EventsEndpointTests(GatewayAppFixture fx) : IClassFixture<Ga
         Assert.Equal(($"{prefix}-c", firstSeq + 3), (live.Message.Id, live.Seq));
     }
 
+    [Fact]
+    public async Task Idle_stream_sends_heartbeats()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        var client = await fx.CreateApiClientAsync(ct);
+
+        using var resp = await client.GetAsync($"/v1/events?chats=19:idle-{Guid.NewGuid():N}@thread.v2", HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+        using var reader = new StreamReader(await resp.Content.ReadAsStreamAsync(timeout.Token));
+
+        string? line;
+        do
+            line = await reader.ReadLineAsync(timeout.Token);
+        while (line is not null && line != ": ping");
+        Assert.Equal(": ping", line);
+    }
+
+    [Fact]
+    public async Task Revoking_the_key_ends_the_stream()
+    {
+        // 長連線只在連上時驗過 key：撤銷後要在下一次心跳斷掉
+        var ct = TestContext.Current.CancellationToken;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        var (keyId, apiKey) = await fx.CreateApiKeyAsync(ct);
+
+        using var resp = await fx.ApiClient(apiKey).GetAsync("/v1/events", HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+        using var reader = new StreamReader(await resp.Content.ReadAsStreamAsync(timeout.Token));
+        Assert.Equal(": ok", await reader.ReadLineAsync(timeout.Token));
+
+        (await fx.CreateAdminClient().DeleteAsync($"/admin/api-keys/{keyId}", timeout.Token)).EnsureSuccessStatusCode();
+
+        while (await reader.ReadLineAsync(timeout.Token) is not null)
+        {
+        }
+    }
+
     private static async Task<(long Seq, MessageDto Message)> NextAsync(StreamReader reader, CancellationToken ct)
     {
         long? seq = null;

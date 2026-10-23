@@ -42,6 +42,51 @@ public class GatewayEventStreamTests
         Assert.Equal("second", messages[1].Content);
     }
 
+    [Fact]
+    public async Task Silent_connection_times_out_instead_of_hanging()
+    {
+        // half-open 的 TCP：沒資料也沒斷線。沒有逾時的話 ReadLineAsync 會永遠卡住、relay 不會重連
+        var http = new HttpClient(new SilentHandler()) { BaseAddress = new Uri("http://localhost") };
+        var stream = new GatewayEventStream(http, NullLogger<GatewayEventStream>.Instance, idleTimeout: TimeSpan.FromMilliseconds(200));
+
+        await Assert.ThrowsAsync<TimeoutException>(async () =>
+        {
+            await foreach (var _ in stream.ConnectAsync(null, null, TestContext.Current.CancellationToken))
+            {
+            }
+        });
+    }
+
+    private sealed class SilentHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new NeverStream()) });
+    }
+
+    /// <summary>讀了就一直等，直到被取消。</summary>
+    private sealed class NeverStream : Stream
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private sealed class StubHandler(string body) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

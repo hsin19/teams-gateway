@@ -117,7 +117,9 @@ class TeamsGatewayClient:
     def _stream(self, params: dict | None, last_id: str | None) -> Iterator[tuple[str | None, Message]]:
         """yield (事件序號, 訊息)。"""
         headers = {"Last-Event-ID": last_id} if last_id else {}
-        with self._http.stream("GET", "/v1/events", params=params, headers=headers, timeout=None) as resp:
+        # gateway 閒置時每 20s 送心跳：60s 什麼都沒收到就當連線半死，丟 ReadTimeout 讓 events() 重連
+        timeout = httpx.Timeout(30.0, read=60.0)
+        with self._http.stream("GET", "/v1/events", params=params, headers=headers, timeout=timeout) as resp:
             self._raise(resp)
             event_id: str | None = None
             for line in resp.iter_lines():

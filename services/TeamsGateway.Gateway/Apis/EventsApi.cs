@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using TeamsGateway.Gateway.Auth;
 using TeamsGateway.Gateway.Data;
 using TeamsGateway.Gateway.Events;
@@ -22,9 +23,13 @@ public static class EventsApi
             HttpContext http,
             GatewayEventBus bus,
             IDbContextFactory<GatewayDbContext> factory,
+            ApiKeyService keys,
+            IOptions<GatewayOptions> options,
             CancellationToken ct,
             string? chats = null) =>
         {
+            var apiKeyId = ((ApiKey)http.Items[nameof(ApiKey)]!).Id;
+            var heartbeat = TimeSpan.FromSeconds(Math.Max(1, options.Value.SseHeartbeatSeconds));
             var filter = chats?
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToHashSet();
@@ -44,21 +49,54 @@ public static class EventsApi
 
             cursor = await ReplayAsync(http, factory, cursor, upTo: null, Wanted, ct);
 
-            await foreach (var evt in subscription.Reader.ReadAllAsync(ct))
+            var lastBeat = DateTimeOffset.UtcNow;
+            while (true)
             {
-                if (evt.Seq <= cursor)
-                    continue; // 補收時送過了
-                // 序號斷洞：匯流排滿了丟掉舊的、或兩個寫入交錯 publish。洞裡的都已入庫，從 DB 補
-                if (evt.Seq > cursor + 1)
-                    cursor = await ReplayAsync(http, factory, cursor, upTo: evt.Seq - 1, Wanted, ct);
-                if (Wanted(evt.Message.ConversationId))
-                    await WriteAsync(http, evt.Seq, JsonSerializer.Serialize(evt.Message, Web), ct);
-                cursor = evt.Seq;
+                var untilBeat = lastBeat + heartbeat - DateTimeOffset.UtcNow;
+                if (untilBeat > TimeSpan.Zero)
+                {
+                    // 等事件，最多等到下一次心跳
+                    bool open;
+                    using (var beat = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                    {
+                        beat.CancelAfter(untilBeat);
+                        try
+                        {
+                            open = await subscription.Reader.WaitToReadAsync(beat.Token);
+                        }
+                        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                        {
+                            open = true; // 心跳時間到
+                        }
+                    }
+                    if (!open)
+                        return;
+                    while (subscription.Reader.TryRead(out var evt))
+                    {
+                        if (evt.Seq <= cursor)
+                            continue; // 補收時送過了
+                        // 序號斷洞：匯流排滿了丟掉舊的、或兩個寫入交錯 publish。洞裡的都已入庫，從 DB 補
+                        if (evt.Seq > cursor + 1)
+                            cursor = await ReplayAsync(http, factory, cursor, upTo: evt.Seq - 1, Wanted, ct);
+                        if (Wanted(evt.Message.ConversationId))
+                            await WriteAsync(http, evt.Seq, JsonSerializer.Serialize(evt.Message, Web), ct);
+                        cursor = evt.Seq;
+                    }
+                    continue;
+                }
+
+                // 心跳（SSE comment）：沒訊息時中間的 proxy / NAT 不會把連線當閒置砍掉，訂閱者也靠它判斷連線還活著。
+                // 順便確認 key 沒被撤銷——長連線只在連上時驗過一次
+                if (!await keys.IsActiveAsync(apiKeyId, ct))
+                    return;
+                await http.Response.WriteAsync(": ping\n\n", ct);
+                await http.Response.Body.FlushAsync(ct);
+                lastBeat = DateTimeOffset.UtcNow;
             }
         })
         .AddEndpointFilter<ApiKeyFilter>()
         .WithSummary("SSE 即時訊息串流")
-        .WithDescription("連著收即時新訊息（像 Slack Socket Mode）。`chats` 逗號分隔過濾對話、省略 = 全部。SSE `id` 是事件序號；重連帶 `Last-Event-ID`（最後收到的 `id`）會先補回斷線期間發過的事件。")
+        .WithDescription("連著收即時新訊息（像 Slack Socket Mode）。`chats` 逗號分隔過濾對話、省略 = 全部。SSE `id` 是事件序號；重連帶 `Last-Event-ID`（最後收到的 `id`）會先補回斷線期間發過的事件。閒置時定期送 `: ping` 心跳；API key 被撤銷會斷線。")
         .WithTags("Events");
     }
 

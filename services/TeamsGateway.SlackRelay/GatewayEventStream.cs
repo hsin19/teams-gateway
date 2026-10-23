@@ -12,9 +12,13 @@ public readonly record struct StreamEvent(string? Id, MessageDto Message);
 /// 連 gateway 的 <c>GET /v1/events</c>（SSE），解析出 <see cref="StreamEvent"/>。
 /// 一次連線 yield 到斷為止；重連與 <c>Last-Event-ID</c> 的續接由呼叫端（worker）掌控。
 /// </summary>
-public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStream> logger)
+public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStream> logger, TimeSpan? idleTimeout = null)
 {
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
+
+    // gateway 閒置時每 20s 送心跳：這麼久什麼都沒收到 = 連線半死（對方睡眠 / NAT 砍掉），丟例外讓 worker 重連。
+    // 少了這個，half-open 的 TCP 會讓 ReadLineAsync 永遠卡住，relay 默默停擺
+    private readonly TimeSpan _idleTimeout = idleTimeout ?? TimeSpan.FromSeconds(60);
 
     public async IAsyncEnumerable<StreamEvent> ConnectAsync(
         string? chats, string? lastEventId, [EnumeratorCancellation] CancellationToken ct)
@@ -39,10 +43,20 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
         string? eventType = null;
         string? eventId = null;
         var data = new StringBuilder();
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
         while (!ct.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(ct);
+            idle.CancelAfter(_idleTimeout); // 每收到一行就重新計時
+            string? line;
+            try
+            {
+                line = await reader.ReadLineAsync(idle.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException($"gateway SSE {_idleTimeout.TotalSeconds:0}s 沒有任何資料（連心跳都沒有），當作斷線");
+            }
             if (line is null)
                 break; // 連線被對方關掉
 
