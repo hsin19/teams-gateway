@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 
 namespace TeamsGateway.Gateway.Data;
@@ -27,12 +29,40 @@ public static class DataExtensions
         return builder;
     }
 
-    /// <summary>單一實例服務，啟動時直接套用 migration。</summary>
-    public static async Task MigrateGatewayDatabaseAsync(this IServiceProvider services, CancellationToken ct = default)
+    /// <summary>啟動時確認 DB 跟目前的 model 一致（見 <see cref="EnsureSchemaAsync"/>）。</summary>
+    public static Task EnsureGatewayDatabaseAsync(this IServiceProvider services, CancellationToken ct = default) =>
+        EnsureSchemaAsync(services.GetRequiredService<IDbContextFactory<GatewayDbContext>>(), ct);
+
+    /// <summary>
+    /// 正式部署前不做 migration：DB 不存在就照目前的 model 建，並把 schema 雜湊記在 <c>PRAGMA user_version</c>。
+    /// 已存在但雜湊對不上（model 改過、或是舊版 migration 建的）→ 直接停下來說要刪檔重建，
+    /// 不要等跑到一半才噴 <c>no such column</c>。
+    /// </summary>
+    internal static async Task EnsureSchemaAsync(IDbContextFactory<GatewayDbContext> factory, CancellationToken ct)
     {
-        await using var scope = services.CreateAsyncScope();
-        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<GatewayDbContext>>();
         await using var db = await factory.CreateDbContextAsync(ct);
-        await db.Database.MigrateAsync(ct);
+        var expected = SchemaVersion(db);
+        await db.Database.OpenConnectionAsync(ct);
+        if (await db.Database.EnsureCreatedAsync(ct))
+        {
+            await ExecuteAsync(db, $"PRAGMA user_version = {expected}", ct);
+            return;
+        }
+        if (await ExecuteAsync(db, "PRAGMA user_version", ct) is long actual && actual != expected)
+            throw new InvalidOperationException(
+                $"資料庫 schema 跟程式的 model 不一致（{db.Database.GetDbConnection().DataSource}）。" +
+                "正式部署前不做 migration：刪掉這個 SQLite 檔再啟動就會照新 model 重建；" +
+                "裡面的登入 cookie、API key 會一起清掉，要重新 bootstrap（匯入 cookie、建 key）。");
+    }
+
+    /// <summary>model 產生的建表 SQL 的雜湊（正數 int，放得進 user_version）。</summary>
+    private static int SchemaVersion(GatewayDbContext db) =>
+        BitConverter.ToInt32(SHA256.HashData(Encoding.UTF8.GetBytes(db.Database.GenerateCreateScript()))) & int.MaxValue;
+
+    private static async Task<object?> ExecuteAsync(GatewayDbContext db, string sql, CancellationToken ct)
+    {
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        command.CommandText = sql;
+        return await command.ExecuteScalarAsync(ct);
     }
 }

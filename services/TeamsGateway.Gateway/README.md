@@ -12,7 +12,7 @@ aspire run                                        # AppHost：dashboard + gatewa
 dotnet run --project services/TeamsGateway.Gateway   # 只跑 gateway
 ```
 
-migration：`dotnet dotnet-ef migrations add <Name> --project services/TeamsGateway.Gateway --output-dir Data/Migrations`
+DB schema：正式部署前不做 migration，啟動時照 EF model 直接建（`EnsureCreated`）。改了 model 之後啟動會擋下來並提示——把 `.data/gateway.db` 刪掉重啟就會重建，裡面的登入 cookie 與 API key 會一起清掉，要重新 bootstrap（`ops/service.sh bootstrap …`）、relay 也要換新 key。
 
 ## 本機常駐（launchd）
 
