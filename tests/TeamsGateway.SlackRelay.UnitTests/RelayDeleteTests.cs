@@ -17,7 +17,7 @@ public class RelayDeleteTests
         var links = new MessageLinks();
         links.Remember("1792640000000", "C1", "111.222", "*Alice*:\nhello", 1792640000000);
         var worker = new RelayWorker(
-            new GatewayEventStream(new HttpClient(), NullLogger<GatewayEventStream>.Instance),
+            new SseEventSource(new GatewayEventStream(new HttpClient(), NullLogger<GatewayEventStream>.Instance), new MessageLinks(), NullLogger<SseEventSource>.Instance),
             new SlackClient(new HttpClient(slack) { BaseAddress = new Uri("https://slack.com/api/") }, NullLogger<SlackClient>.Instance),
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,

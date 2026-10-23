@@ -24,8 +24,19 @@ public sealed class GatewayOptions
     /// <summary>輪詢保險：每隔幾秒抓一次訂閱對話最近的訊息，補上 Trouter 漏推的新訊息。0 = 關閉。</summary>
     public int PollSeconds { get; set; } = 20;
 
-    /// <summary>已發事件（SSE 斷線補收用）留幾天；斷線比這還久的訂閱者重連時就從現在開始收。</summary>
+    /// <summary>
+    /// 內部事件 log 至少留幾天：超過的事件等所有 sink 都送過才清；SSE 斷線比這還久的訂閱者重連時就從現在開始收。
+    /// webhook 落後超過這麼久還送不出去就停用。
+    /// </summary>
     public int EventRetentionDays { get; set; } = 7;
+
+    /// <summary>
+    /// 事件出口（ADR 0006）：<c>Gateway:Sinks:&lt;名稱&gt;:Enabled</c>，目前只有 <c>Webhook</c>，沒設 = 開。
+    /// 關掉的 sink 不跑、也不擋 pruner 清舊事件。啟動註冊服務時就讀，改了要重啟。
+    /// </summary>
+    public Dictionary<string, SinkSettings> Sinks { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public bool IsSinkEnabled(string name) => !Sinks.TryGetValue(name, out var sink) || sink.Enabled;
 
     /// <summary>SSE 閒置時每隔幾秒送一次心跳（順便確認 API key 沒被撤銷）；比中間 proxy / NAT 的閒置逾時短才保得住連線。</summary>
     public int SseHeartbeatSeconds { get; set; } = 20;
@@ -35,4 +46,9 @@ public sealed class GatewayOptions
     /// link-local（雲端 metadata）不管怎樣都不行。
     /// </summary>
     public bool WebhookAllowPrivateNetworks { get; set; }
+}
+
+public sealed class SinkSettings
+{
+    public bool Enabled { get; set; } = true;
 }

@@ -82,3 +82,11 @@ RelayWorker ── IEventSource ──┬─ SseEventSource     （Last-Event-ID
 1. gateway：內部 log + 各 sink 游標，webhook 換上去。
 2. relay：抽出 `IEventSource`，先把 SSE 搬進去。
 3. 需要時才加 broker 的 sink / source（例如 Kafka）。
+
+## 實作（2026-10-23，1、2 完成）
+
+- bus 只帶「最新序號」的通知、會合併；SSE 與 sink 被叫醒後一律從 `PublishedEvents` 讀，不再有「佇列滿了丟事件、看序號斷洞回 DB 補」那段。
+- sink 介面是 `IEventSink`（`OldestPendingAsync` 給 pruner 算還不能清的序號）。webhook 的游標記在每個 `WebhookSubscription`（`DeliveredSeq`）：一個目標掛了只卡它自己，不擋其他 webhook。登記時從當下最新的序號開始。
+- 補充決定：webhook 落後超過 `EventRetentionDays` 還送不出去就停用。「下游掛幾天也不掉」以保留天數為限，不讓一個死掉的目標撐著 log 無限長大。
+- 契約：`schemaVersion` 與 `raw`（Teams 原始訊息 JSON）加在事件 payload（SSE 的 `data`、webhook 的 body）裡，DTO 型別不變；webhook 另外放 `X-TeamsGateway-Seq`、`X-TeamsGateway-Schema-Version` header，log 也記 `SchemaVersion` 欄位。
+- relay：`SseEventSource` 收進 `Last-Event-ID`、`afterMessage` 續接、重連與退避；`Relay:Source` 目前只有 `Sse`。worker 不依賴跨對話的順序（訊息照版本、表情照序號去重）。

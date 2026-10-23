@@ -77,8 +77,10 @@ public class PublishedEvent
     public string Kind { get; set; } = "message";
     public required string MessageId { get; set; }
     public required string ConversationId { get; set; }
-    /// <summary>發出去的 JSON（<c>MessageDto</c> 或 <c>ReactionDto</c>，看 <see cref="Kind"/>），補收時原樣重送。</summary>
+    /// <summary>發出去的 JSON：<c>MessageDto</c> 或 <c>ReactionDto</c>（看 <see cref="Kind"/>）的欄位 + <c>schemaVersion</c> + <c>raw</c>，各傳輸原樣送出。</summary>
     public required string Payload { get; set; }
+    /// <summary><see cref="Payload"/> 的格式版本（<c>EventSchema.Version</c>）；放 header 的傳輸（webhook、broker）不用解 payload 就知道。</summary>
+    public int SchemaVersion { get; set; }
     public DateTimeOffset PublishedAt { get; set; }
 }
 
@@ -105,6 +107,8 @@ public class WebhookSubscription
     public string? Secret { get; set; }
     public bool Active { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; }
+    /// <summary>投遞游標：送到（或因對話不符略過）的最後一個事件序號。登記時設成當下最新的序號，只收之後的事件。</summary>
+    public long DeliveredSeq { get; set; }
 
     public ApiKey? ApiKey { get; set; }
 }

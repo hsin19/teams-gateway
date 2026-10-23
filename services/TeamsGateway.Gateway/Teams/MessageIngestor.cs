@@ -10,13 +10,14 @@ public enum IngestResult { Inserted, Updated, Unchanged }
 /// <summary>
 /// 把一則訊息 upsert 進 DB（Trouter 即時、回補、慢更新共用）。
 /// 以 Teams 訊息 id 為主鍵；同 id 但 version 更大 = 被編輯 / 刪除 → 更新內容與標記。live 才 publish。
-/// publish 的事件跟訊息同一個交易記進 <see cref="PublishedEvent"/>，SSE 斷線補收靠它。版本變大時也比對表情，有人按 / 收回就發 reaction 事件；
+/// publish 的事件跟訊息同一個交易記進內部 log（<see cref="PublishedEvent"/>），commit 之後才通知 bus 有新事件，
+/// SSE 與各 sink 都從 log 讀（ADR 0006）。版本變大時也比對表情，有人按 / 收回就發 reaction 事件；
 /// 新訊息進來時已經掛著的表情，接在訊息後面當成新按的發。
 /// </summary>
 public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory, GatewayEventBus bus, IPeopleDirectory? people = null)
 {
     // Trouter、輪詢、慢更新、回補會同時寫同一則（先查再插 → 主鍵衝突、編輯的 revision 重複）：寫入一次一筆。
-    // 量很小，串行化沒有成本；也讓事件依序號順序 publish
+    // 量很小，串行化沒有成本；也讓事件序號照寫入順序遞增
     private readonly SemaphoreSlim _writeGate = new(1, 1);
 
     public async Task<bool> IsSubscribedAsync(string conversationId, CancellationToken ct)
@@ -42,7 +43,7 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var existing = await db.MessageEvents.FindAsync([dto.Id], ct);
-        var outgoing = new List<(PublishedEvent Row, GatewayEvent Event)>();
+        var outgoing = new List<PublishedEvent>();
 
         IngestResult result;
         if (existing is null)
@@ -72,11 +73,11 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
                     conv.LastMessageId = dto.Id;
                     conv.UpdatedAt = DateTimeOffset.UtcNow;
                 }
-                outgoing.Add(Record(db, new GatewayEvent(0, Message: dto)));
+                outgoing.Add(Record(db, new GatewayEvent(Message: dto), rawJson));
                 // 晚到的訊息（睡眠 / 停機後才被輪詢、回補補到）第一次看到時可能已經有人按了表情：
                 // 之後的比對都以這版為準，現在不發就永遠發不出去
                 foreach (var reaction in await ReactionChangesAsync(db, beforeJson: "{}", rawJson, dto, ct))
-                    outgoing.Add(Record(db, new GatewayEvent(0, Reaction: reaction)));
+                    outgoing.Add(Record(db, new GatewayEvent(Reaction: reaction), rawJson));
             }
             result = IngestResult.Inserted;
         }
@@ -117,16 +118,16 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
                 existing.UpdatedAt = DateTimeOffset.UtcNow;
                 existing.RawJson = rawJson;
                 if (publish)
-                    outgoing.Add(Record(db, new GatewayEvent(0, Message: dto)));
+                    outgoing.Add(Record(db, new GatewayEvent(Message: dto), rawJson));
                 result = IngestResult.Updated;
             }
             foreach (var reaction in reactions)
-                outgoing.Add(Record(db, new GatewayEvent(0, Reaction: reaction)));
+                outgoing.Add(Record(db, new GatewayEvent(Reaction: reaction), rawJson));
         }
 
         await db.SaveChangesAsync(ct);
-        foreach (var (row, evt) in outgoing)
-            bus.Publish(evt with { Seq = row.Seq });
+        if (outgoing.Count > 0)
+            bus.Notify(outgoing[^1].Seq);
         return result;
     }
 
@@ -192,18 +193,19 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
         return changes.OrderBy(c => c.Time).ThenBy(c => c.Emoji, StringComparer.Ordinal).ToList();
     }
 
-    /// <summary>把要發的事件加進流水帳（跟訊息同一個交易）；SaveChanges 之後 <see cref="PublishedEvent.Seq"/> 才有值。</summary>
-    private static (PublishedEvent Row, GatewayEvent Event) Record(GatewayDbContext db, GatewayEvent evt)
+    /// <summary>把要發的事件加進內部 log（跟訊息同一個交易）；SaveChanges 之後 <see cref="PublishedEvent.Seq"/> 才有值。</summary>
+    private static PublishedEvent Record(GatewayDbContext db, GatewayEvent evt, string rawJson)
     {
         var row = new PublishedEvent
         {
             Kind = evt.Kind,
             MessageId = evt.MessageId,
             ConversationId = evt.ConversationId,
-            Payload = evt.ToJson(),
+            Payload = EventLog.Payload(evt, rawJson),
+            SchemaVersion = EventSchema.Version,
             PublishedAt = DateTimeOffset.UtcNow,
         };
         db.PublishedEvents.Add(row);
-        return (row, evt);
+        return row;
     }
 }

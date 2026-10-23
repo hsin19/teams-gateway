@@ -23,6 +23,12 @@ public static class Extensions
             return new GatewayEventStream(http, sp.GetRequiredService<ILogger<GatewayEventStream>>());
         });
 
+        // 收事件的來源（ADR 0006）：換傳輸 = 多一個 IEventSource 實作 + Relay:Source，RelayWorker 不用改
+        var source = builder.Configuration["Relay:Source"] ?? "Sse";
+        if (!string.Equals(source, "Sse", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"不支援的 Relay:Source「{source}」（目前只有 Sse）");
+        builder.Services.AddSingleton<IEventSource, SseEventSource>();
+
         // Slack 是短請求，走 factory：resilience 的 transient retry 反而有用
         builder.Services.AddHttpClient<SlackClient>((sp, http) =>
         {

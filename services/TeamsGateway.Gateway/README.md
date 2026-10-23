@@ -81,11 +81,13 @@ API 文件在 `/scalar`（OpenAPI 文件 `/openapi/v1.json`），根目錄 `/` �
 | `POST /v1/chats/{id}/messages` `{"text":"..."}` | 發話 |
 | `GET /v1/messages/{id}/revisions` | 一則訊息的編輯歷史：`current`（目前版本）+ `revisions`（被取代的舊版本，由舊到新，含 `content` / `superseded_at`） |
 | `GET /v1/media?url=<圖片網址>` | 代抓訊息內嵌圖片（`<img src>` 指向 `*.asm.skype.com`，要 Teams 登入才拿得到）；只接受這個網域 |
-| `GET /v1/events?chats=<id>,<id>` | **SSE** 即時事件串流（像 Slack Socket Mode）；`chats` 省略 = 全部。事件兩種：`event: message`（新訊息 / 編輯 / 刪除，`MessageDto`）、`event: reaction`（有人按 / 收回表情，`ReactionDto`：誰、哪個表情、還剩幾個人）。SSE `id` 是事件序號（不是訊息 id，編輯會沿用訊息 id）；重連帶 `Last-Event-ID`（上次收到的 `id`）會先補回斷線期間發過的事件（保留 `Gateway:EventRetentionDays`，預設 7 天）；訂閱者重啟、沒留序號時可帶 `afterMessage=<Teams 訊息 id>`（最後處理的那則），從它第一次發出之後補（之後的編輯也會重送，照 `version` 去重）。閒置時每 `Gateway:SseHeartbeatSeconds`（預設 20）秒送 `: ping` 心跳，訂閱者可據此判斷連線半死；API key 被撤銷時會斷線 |
+| `GET /v1/events?chats=<id>,<id>` | **SSE** 即時事件串流（像 Slack Socket Mode）；`chats` 省略 = 全部。事件兩種：`event: message`（新訊息 / 編輯 / 刪除，`MessageDto`）、`event: reaction`（有人按 / 收回表情，`ReactionDto`：誰、哪個表情、還剩幾個人）。`data` 是 DTO 的欄位再加 `schemaVersion`（目前 1）與 `raw`（Teams 原始訊息 JSON），照 DTO 解析的可以忽略它們。SSE `id` 是事件序號（不是訊息 id，編輯會沿用訊息 id）；重連帶 `Last-Event-ID`（上次收到的 `id`）會先補回斷線期間發過的事件（保留 `Gateway:EventRetentionDays`，預設 7 天）；訂閱者重啟、沒留序號時可帶 `afterMessage=<Teams 訊息 id>`（最後處理的那則），從它第一次發出之後補（之後的編輯也會重送，照 `version` 去重）。閒置時每 `Gateway:SseHeartbeatSeconds`（預設 20）秒送 `: ping` 心跳，訂閱者可據此判斷連線半死；API key 被撤銷時會斷線 |
 | `POST /mcp` | **MCP** server（Streamable HTTP）：`list_chats` / `read_messages` / `send_message`，給 agent 用。接法見 `clients/mcp/` |
-| `POST/GET/DELETE /v1/webhooks` | 登記 / 列 / 刪 webhook；有符合的新訊息時 gateway POST 過去，帶 `X-TeamsGateway-Signature: sha256=<hmac>`。`X-TeamsGateway-Event` 是 `message` 或 `reaction`（body 分別是 `MessageDto` / `ReactionDto`）。目標只能是 http(s)，預設不能打 loopback / 私有網段（訂閱者在同機 / 同網段 / 同 docker 網路時設 `Gateway:WebhookAllowPrivateNetworks=true`），link-local（雲端 metadata）一律不行；不跟 redirect |
+| `POST/GET/DELETE /v1/webhooks` | 登記 / 列 / 刪 webhook；只收登記之後的事件，body 跟 SSE 的 `data` 一樣。header：`X-TeamsGateway-Event`（`message` / `reaction`）、`X-TeamsGateway-Seq`（事件序號）、`X-TeamsGateway-Schema-Version`，有設 secret 再帶 `X-TeamsGateway-Signature: sha256=<hmac>`。每個 webhook 有自己的游標，依序送、回 2xx 才推進；失敗就退避（5 秒起、最多 5 分鐘）重送同一筆，所以可能重複，照 `X-TeamsGateway-Seq` 去重。落後超過 `Gateway:EventRetentionDays` 還送不出去就停用，要恢復就重新登記。目標只能是 http(s)，預設不能打 loopback / 私有網段（訂閱者在同機 / 同網段 / 同 docker 網路時設 `Gateway:WebhookAllowPrivateNetworks=true`），link-local（雲端 metadata）一律不行；不跟 redirect |
 
-即時推播由背景的 Trouter 連線收進來，寫進 `MessageEvents` 後 publish 給 SSE。自己發的訊息也會推回來（`from` 是自己）。
+即時推播由背景的 Trouter 連線收進來，跟輪詢 / 回補 / 慢更新一樣經過變更偵測，要發的事件跟訊息同一個交易寫進內部事件 log（`PublishedEvents`），commit 之後通知 SSE 連線與各 sink 從自己的游標往後讀（`docs/adr/0006`）。自己發的訊息也會推回來（`from` 是自己）。
+
+事件 log 至少留 `Gateway:EventRetentionDays`（預設 7）天，超過的要等所有啟用中的 sink 都送過才清；SSE 的游標在 client，斷線比保留期還久就從現在開始收。sink 用 `Gateway:Sinks:<名稱>:Enabled` 開關（目前只有 `Webhook`，沒設 = 開）。
 
 ```
 curl -N -H "Authorization: Bearer $KEY" "$BASE/v1/events?chats=19:...@thread.v2"

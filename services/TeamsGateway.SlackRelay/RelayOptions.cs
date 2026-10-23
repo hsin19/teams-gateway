@@ -3,6 +3,9 @@ namespace TeamsGateway.SlackRelay;
 /// <summary>綁 <c>Relay</c> 設定區。secret（gateway API key、Slack bot token）走 env / user-secrets，不進 appsettings。</summary>
 public sealed class RelayOptions
 {
+    /// <summary>收事件的來源（ADR 0006，<see cref="IEventSource"/>）：目前只有 <c>Sse</c>（gateway 的 <c>/v1/events</c>）。</summary>
+    public string Source { get; set; } = "Sse";
+
     public GatewaySettings Gateway { get; set; } = new();
     public SlackSettings Slack { get; set; } = new();
     public LinkSettings Links { get; set; } = new();

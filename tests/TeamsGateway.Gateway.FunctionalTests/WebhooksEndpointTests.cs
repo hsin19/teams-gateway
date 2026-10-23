@@ -8,7 +8,7 @@ using TeamsGateway.Gateway.Events;
 
 namespace TeamsGateway.Gateway.FunctionalTests;
 
-/// <summary>webhook 登記：目標網址不能拿 gateway 當跳板打內網 / metadata。</summary>
+/// <summary>webhook 登記：目標網址不能拿 gateway 當跳板打內網 / metadata；只收登記之後的事件。</summary>
 public sealed class WebhooksEndpointTests(GatewayAppFixture fx) : IClassFixture<GatewayAppFixture>
 {
     [Theory]
@@ -45,5 +45,27 @@ public sealed class WebhooksEndpointTests(GatewayAppFixture fx) : IClassFixture<
         var stored = (await db.WebhookSubscriptions.SingleAsync(w => w.Id == id, ct)).Secret;
         Assert.DoesNotContain(secret, stored); // DB 裡不是明文
         Assert.Equal(secret, scope.ServiceProvider.GetRequiredService<WebhookSecretProtector>().Unprotect(stored));
+    }
+
+    // 登記之前就有的事件不補送：游標從登記當下最新的序號開始
+    [Fact]
+    public async Task New_webhook_starts_after_the_latest_event()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var scope = fx.Services.CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<GatewayDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync(ct))
+        {
+            db.PublishedEvents.Add(new PublishedEvent { MessageId = "1", ConversationId = "19:x@thread.v2", Payload = "{}", PublishedAt = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync(ct);
+        }
+        var latest = await EventLog.MaxSeqAsync(factory, ct);
+        var client = await fx.CreateApiClientAsync(ct);
+
+        var resp = await client.PostAsJsonAsync("/v1/webhooks", new { targetUrl = "https://hooks.example.com/later" }, ct);
+
+        var id = (await resp.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("id").GetGuid();
+        await using var check = await factory.CreateDbContextAsync(ct);
+        Assert.Equal(latest, (await check.WebhookSubscriptions.SingleAsync(w => w.Id == id, ct)).DeliveredSeq);
     }
 }

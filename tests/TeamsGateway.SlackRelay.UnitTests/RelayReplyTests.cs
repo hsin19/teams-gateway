@@ -83,7 +83,7 @@ public class RelayReplyTests
         foreach (var (teamsId, ts) in relayed)
             links.Remember(teamsId, "C1", ts, "*Someone*:\nquoted", long.Parse(teamsId));
         var worker = new RelayWorker(
-            new GatewayEventStream(new HttpClient(), NullLogger<GatewayEventStream>.Instance),
+            new SseEventSource(new GatewayEventStream(new HttpClient(), NullLogger<GatewayEventStream>.Instance), new MessageLinks(), NullLogger<SseEventSource>.Instance),
             new SlackClient(new HttpClient(slack) { BaseAddress = new Uri("https://slack.com/api/") }, NullLogger<SlackClient>.Instance),
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,

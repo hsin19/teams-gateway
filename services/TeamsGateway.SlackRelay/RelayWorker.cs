@@ -5,19 +5,17 @@ using TeamsGateway.Contracts;
 namespace TeamsGateway.SlackRelay;
 
 /// <summary>
-/// Phase 1：訂閱 gateway SSE，把 Teams 訊息轉貼進對應 Slack 頻道。
-/// 斷線用 <c>Last-Event-ID</c>（= 最後收到的事件序號）續接，指數退避重連。
+/// Phase 1：從 <see cref="IEventSource"/> 逐筆收 gateway 的事件，把 Teams 訊息轉貼進對應 Slack 頻道。
+/// 游標、續接、重連都在 source 裡（ADR 0006）；這裡處理完一筆才拿下一筆。
 /// </summary>
 public sealed class RelayWorker(
-    GatewayEventStream stream,
+    IEventSource source,
     SlackClient slack,
     GatewayMediaClient media,
     MessageLinks links,
     IOptions<RelayOptions> options,
     ILogger<RelayWorker> logger) : BackgroundService
 {
-    private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
     private const int MaxImagesPerMessage = 10;
 
     // Teams 圖片網址 → 已上傳的 Slack file id：編輯時同一張圖不重傳（訊息是逐則處理，不用 concurrent）。
@@ -47,42 +45,20 @@ public sealed class RelayWorker(
         }
 
         // 有路由就只訂閱那些對話；否則訂全部（走 DefaultChannel）
-        var chats = routes.Count > 0 ? string.Join(',', routes.Keys) : null;
+        IReadOnlyCollection<string>? chats = routes.Count > 0 ? routes.Keys : null;
         logger.LogInformation("relay 啟動：{Count} 條路由，default={Default}", routes.Count, opts.Slack.DefaultChannel ?? "(無)");
 
-        // 從 Slack 歷史回補近期的訊息對應（metadata 夾著 Teams id），重啟後才連得回舊訊息的回覆 / 編輯
+        // 從 Slack 歷史回補近期的訊息對應（metadata 夾著 Teams id），重啟後才連得回舊訊息的回覆 / 編輯；
+        // SSE source 剛啟動時也靠它決定從哪則之後續接，所以要先做完
         await WarmupLinksAsync(routes, opts.Slack.DefaultChannel, opts.Links.RetentionHours, ct);
 
-        var backoff = MinBackoff;
-        string? lastId = null;
-        // 剛重啟沒有事件序號：從 Slack 上最後一則轉過去的訊息之後續接，停機期間的不會漏（重送的照版本去重）
-        var resumeAfter = links.NewestTeamsId();
-
-        while (!ct.IsCancellationRequested)
+        // 單則的失敗在 WithRetryAsync 裡吞掉，不會冒出來中斷串流
+        await foreach (var evt in source.ReadAsync(chats, ct))
         {
-            try
-            {
-                await foreach (var evt in stream.ConnectAsync(chats, lastId, resumeAfter, ct))
-                {
-                    if (evt.Message is { } message)
-                        await RelayWithRetryAsync(message, routes, opts.Slack.DefaultChannel, ct);
-                    else if (evt.Reaction is { } reaction)
-                        await WithRetryAsync($"表情 {reaction.Emoji}（訊息 {reaction.MessageId}）", () => RelayReactionAsync(reaction, Seq(evt.Id), ct), ct);
-                    lastId = evt.Id ?? lastId; // 處理完（或放棄）才往前推
-                    backoff = MinBackoff; // 收得到就重置退避
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "gateway SSE 連線中斷，{Seconds}s 後重連", backoff.TotalSeconds);
-            }
-
-            await Task.Delay(backoff, ct);
-            backoff = TimeSpan.FromSeconds(Math.Min(backoff.TotalSeconds * 2, MaxBackoff.TotalSeconds));
+            if (evt.Message is { } message)
+                await RelayWithRetryAsync(message, routes, opts.Slack.DefaultChannel, ct);
+            else if (evt.Reaction is { } reaction)
+                await WithRetryAsync($"表情 {reaction.Emoji}（訊息 {reaction.MessageId}）", () => RelayReactionAsync(reaction, Seq(evt.Id), ct), ct);
         }
     }
 

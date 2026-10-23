@@ -4,11 +4,8 @@ using TeamsGateway.Contracts;
 
 namespace TeamsGateway.Gateway.Events;
 
-/// <summary>
-/// 發給訂閱者的一個事件：一則訊息（新 / 編輯 / 刪除）或一次表情變動，兩者擇一。
-/// <see cref="Seq"/> 對應 <c>PublishedEvents</c> 表，也是 SSE 的 event id。
-/// </summary>
-public sealed record GatewayEvent(long Seq, MessageDto? Message = null, ReactionDto? Reaction = null)
+/// <summary>要記進內部 log（<c>PublishedEvents</c>）的一個事件：一則訊息（新 / 編輯 / 刪除）或一次表情變動，兩者擇一。</summary>
+public sealed record GatewayEvent(MessageDto? Message = null, ReactionDto? Reaction = null)
 {
     /// <summary>SSE 的 event 名稱 / webhook header（見 <see cref="EventKinds"/>）。</summary>
     public string Kind => Reaction is null ? EventKinds.Message : EventKinds.Reaction;
@@ -23,18 +20,19 @@ public sealed record GatewayEvent(long Seq, MessageDto? Message = null, Reaction
 }
 
 /// <summary>
-/// 行程內的事件 pub/sub。<c>MessageIngestor</c> 寫進 DB 之後 publish（每條收訊息的路都經過它），SSE 連線與 webhook 投遞各自 subscribe。
-/// 單一行程夠用；要拆多實例時再換成真的 broker（見 ADR 0002）。
+/// 行程內「有新事件」的通知（ADR 0006）：<c>MessageIngestor</c> 把事件寫進內部 log、commit 之後 <see cref="Notify"/>，
+/// SSE 連線與各 sink 被叫醒後，自己從 log 讀游標之後的事件。通知會合併、也可能在訂閱前就發過，
+/// 都不會漏事件：內容一律從 log 讀，通知只負責「該去讀了」。
 /// </summary>
 public sealed class GatewayEventBus
 {
     private readonly Lock _lock = new();
-    private readonly List<Channel<GatewayEvent>> _subscribers = [];
+    private readonly List<Channel<long>> _subscribers = [];
 
     public Subscription Subscribe()
     {
-        // 慢的訂閱者滿了就丟最舊的，不要卡住 publish（SSE 看得出序號斷洞，會從 DB 補回）
-        var channel = Channel.CreateBounded<GatewayEvent>(new BoundedChannelOptions(500)
+        // 容量 1、丟舊的：還沒醒的訂閱者只需要知道「有新的」，通知幾次都一樣
+        var channel = Channel.CreateBounded<long>(new BoundedChannelOptions(1)
         {
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
@@ -44,22 +42,44 @@ public sealed class GatewayEventBus
         return new Subscription(this, channel);
     }
 
-    public void Publish(GatewayEvent evt)
+    /// <summary>序號到 <paramref name="seq"/> 為止的事件都已經寫進 log。</summary>
+    public void Notify(long seq)
     {
         lock (_lock)
             foreach (var channel in _subscribers)
-                channel.Writer.TryWrite(evt);
+                channel.Writer.TryWrite(seq);
     }
 
-    private void Remove(Channel<GatewayEvent> channel)
+    private void Remove(Channel<long> channel)
     {
         lock (_lock)
             _subscribers.Remove(channel);
     }
 
-    public sealed class Subscription(GatewayEventBus bus, Channel<GatewayEvent> channel) : IDisposable
+    public sealed class Subscription(GatewayEventBus bus, Channel<long> channel) : IDisposable
     {
-        public ChannelReader<GatewayEvent> Reader => channel.Reader;
+        /// <summary>收到的通知（值是當時最新的序號）；平常用 <see cref="WaitAsync"/>，測試用它看有沒有被通知。</summary>
+        public ChannelReader<long> Reader => channel.Reader;
+
+        /// <summary>等到有新事件（true）或過了 <paramref name="timeout"/>（false）。</summary>
+        public async Task<bool> WaitAsync(TimeSpan timeout, CancellationToken ct)
+        {
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            wait.CancelAfter(timeout);
+            try
+            {
+                if (!await channel.Reader.WaitToReadAsync(wait.Token))
+                    return false;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                return false;
+            }
+            while (channel.Reader.TryRead(out _))
+            {
+            }
+            return true;
+        }
 
         public void Dispose()
         {

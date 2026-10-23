@@ -43,7 +43,7 @@ public class RelayRetryTests
         var links = new MessageLinks();
         var unused = new HttpClient(new FlakySlack(int.MaxValue)) { BaseAddress = new Uri("http://localhost") };
         var worker = new RelayWorker(
-            new GatewayEventStream(unused, NullLogger<GatewayEventStream>.Instance),
+            new SseEventSource(new GatewayEventStream(unused, NullLogger<GatewayEventStream>.Instance), links, NullLogger<SseEventSource>.Instance),
             new SlackClient(new HttpClient(slackHandler) { BaseAddress = new Uri("https://slack.com/api/") }, NullLogger<SlackClient>.Instance),
             new GatewayMediaClient(unused, NullLogger<GatewayMediaClient>.Instance),
             links,

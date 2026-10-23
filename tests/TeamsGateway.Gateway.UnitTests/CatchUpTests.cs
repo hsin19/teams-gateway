@@ -6,7 +6,7 @@ using TeamsGateway.Gateway.Teams;
 
 namespace TeamsGateway.Gateway.UnitTests;
 
-/// <summary>SSE 斷線補收：照事件序號，不是訊息 id。</summary>
+/// <summary>從內部事件 log 補收：照事件序號，不是訊息 id。</summary>
 public class CatchUpTests
 {
     private const string Conv = "19:x@thread.v2";
@@ -35,7 +35,7 @@ public class CatchUpTests
         using var db = new TestDb();
         await SeedAsync(db);
 
-        var missed = await EventsApi.ReadAfterAsync(db, 1, upTo: null, limit: 500, TestContext.Current.CancellationToken);
+        var missed = await EventLog.ReadAfterAsync(db, 1, limit: 500, TestContext.Current.CancellationToken);
 
         Assert.Equal([2L, 3L], missed.Select(e => e.Seq));
         Assert.Equal(["200", "100"], missed.Select(e => e.MessageId)); // 編輯是新事件，排在後面
@@ -48,18 +48,18 @@ public class CatchUpTests
         using var db = new TestDb();
         await SeedAsync(db);
 
-        Assert.Empty(await EventsApi.ReadAfterAsync(db, 3, upTo: null, limit: 500, TestContext.Current.CancellationToken));
+        Assert.Empty(await EventLog.ReadAfterAsync(db, 3, limit: 500, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task UpTo_bounds_the_replay()
+    public async Task Limit_bounds_one_batch()
     {
         using var db = new TestDb();
         await SeedAsync(db);
 
-        var gap = await EventsApi.ReadAfterAsync(db, 0, upTo: 2, limit: 500, TestContext.Current.CancellationToken);
+        var batch = await EventLog.ReadAfterAsync(db, 0, limit: 2, TestContext.Current.CancellationToken);
 
-        Assert.Equal([1L, 2L], gap.Select(e => e.Seq));
+        Assert.Equal([1L, 2L], batch.Select(e => e.Seq));
     }
 
     [Theory]

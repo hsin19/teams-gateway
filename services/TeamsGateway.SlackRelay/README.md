@@ -21,6 +21,7 @@ appsettings 放完整 default，secret 走 env（雙底線覆蓋）或 user-secr
 
 | 設定 | env | 說明 |
 |---|---|---|
+| `Relay:Source` | `Relay__Source` | 收事件的來源（`IEventSource`，ADR 0006）：目前只有 `Sse`（預設），換傳輸 = 多一個實作 |
 | `Relay:Gateway:BaseUrl` | `Relay__Gateway__BaseUrl` | gateway 位址（預設 `http://localhost:5199`） |
 | `Relay:Gateway:ApiKey` | `Relay__Gateway__ApiKey` | gateway 的 API key（gateway 的 `POST /admin/api-keys` 建） |
 | `Relay:Slack:BotToken` | `Relay__Slack__BotToken` | Slack bot token（`xoxb-…`，scope 見 manifest） |

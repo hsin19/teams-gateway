@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using TeamsGateway.Contracts;
 using TeamsGateway.Gateway.Data;
@@ -61,17 +62,15 @@ public class MessageIngestorTests
     {
         using var db = new TestDb();
         await AddConversationAsync(db, subscribed: true);
-        var bus = new GatewayEventBus();
-        using var sub = bus.Subscribe();
-        var ingestor = new MessageIngestor(db, bus);
+        var events = new NewEvents(db);
+        var ingestor = new MessageIngestor(db, new GatewayEventBus());
         var ct = TestContext.Current.CancellationToken;
 
         await ingestor.UpsertAsync(Msg("100", version: 100, content: "hi"), "{}", publish: true, ct);
         var reacted = await ingestor.UpsertAsync(Msg("100", version: 200, content: "hi"), "{}", publish: true, ct);
 
         Assert.Equal(IngestResult.Unchanged, reacted);
-        Assert.True(sub.Reader.TryRead(out _));   // 新訊息那一則
-        Assert.False(sub.Reader.TryRead(out _));  // 表情那次沒發
+        Assert.Single(events.Take()); // 只有新訊息那一則，表情那次沒發
         await using (var ctx = db.CreateDbContext())
         {
             Assert.Empty(ctx.MessageRevisions);
@@ -82,8 +81,7 @@ public class MessageIngestorTests
         Assert.Equal(IngestResult.Updated, await ingestor.UpsertAsync(Msg("100", version: 300, content: "改過", edited: true), "{}", publish: true, ct));
         await using (var ctx = db.CreateDbContext())
             Assert.Equal(200, ctx.MessageRevisions.Single().Version);
-        Assert.True(sub.Reader.TryRead(out var edit));
-        Assert.Equal("改過", edit!.Message!.Content);
+        Assert.Equal("改過", MessageOf(Assert.Single(events.Take())).Content);
     }
 
     // 按 / 收回表情：發 reaction 事件（不是編輯），帶誰、什麼表情、還剩幾個人
@@ -92,30 +90,27 @@ public class MessageIngestorTests
     {
         using var db = new TestDb();
         await AddConversationAsync(db, subscribed: true);
-        var bus = new GatewayEventBus();
-        using var sub = bus.Subscribe();
-        var ingestor = new MessageIngestor(db, bus);
+        var events = new NewEvents(db);
+        var ingestor = new MessageIngestor(db, new GatewayEventBus());
         var ct = TestContext.Current.CancellationToken;
         await ingestor.UpsertAsync(Msg("50", version: 50) with { From = "8:alice", FromName = "Alice" }, "{}", publish: false, ct); // Alice 講過話
         await ingestor.UpsertAsync(Msg("100", version: 100), "{}", publish: true, ct);
-        Assert.True(sub.Reader.TryRead(out _));
+        Assert.Single(events.Take());
 
         const string heart = """{"properties":{"emotions":[{"key":"heart","users":[{"mri":"8:alice","time":1792640000000}]}]}}""";
         Assert.Equal(IngestResult.Unchanged, await ingestor.UpsertAsync(Msg("100", version: 200), heart, publish: true, ct));
 
-        Assert.True(sub.Reader.TryRead(out var added));
-        Assert.Null(added!.Message);
+        var added = Assert.Single(events.Take());
+        Assert.Equal(EventKinds.Reaction, added.Kind);
         Assert.Equal(
             new ReactionDto("100", "19:x@thread.v2", "heart", "8:alice", "Alice", Added: true, DateTimeOffset.FromUnixTimeMilliseconds(1792640000000), Count: 1),
-            added.Reaction);
+            ReactionOf(added));
 
         // Alice 收回 ❤️、Bob 按 👀（Bob 沒講過話，名字查不到）
         const string eyes = """{"properties":{"emotions":"[{\"key\":\"1f440_eyes\",\"users\":[{\"mri\":\"8:bob\",\"time\":1792640100000}]}]"}}""";
         await ingestor.UpsertAsync(Msg("100", version: 300), eyes, publish: true, ct);
 
-        var changes = new List<ReactionDto>();
-        while (sub.Reader.TryRead(out var evt))
-            changes.Add(evt.Reaction!);
+        var changes = events.Take().Select(ReactionOf).ToList();
         Assert.Equal(
             [("1f440_eyes", "8:bob", (string?)null, true, 1), ("heart", "8:alice", "Alice", false, 0)],
             changes.Select(c => (c.Emoji, c.UserMri, c.UserName, c.Added, c.Count)).OrderBy(c => c.Emoji));
@@ -131,33 +126,29 @@ public class MessageIngestorTests
     {
         using var db = new TestDb();
         await AddConversationAsync(db, subscribed: true);
-        var bus = new GatewayEventBus();
-        using var sub = bus.Subscribe();
-        var ingestor = new MessageIngestor(db, bus);
+        var events = new NewEvents(db);
+        var ingestor = new MessageIngestor(db, new GatewayEventBus());
         var ct = TestContext.Current.CancellationToken;
         await ingestor.UpsertAsync(Msg("50", version: 50) with { From = "8:alice", FromName = "Alice" }, "{}", publish: false, ct);
 
         const string pinned = """{"properties":{"emotions":[{"key":"1f4cc_pushpin","users":[{"mri":"8:alice","time":1792726751315}]}]}}""";
         Assert.Equal(IngestResult.Inserted, await ingestor.UpsertAsync(Msg("100", version: 200), pinned, publish: true, ct));
 
-        Assert.True(sub.Reader.TryRead(out var message));
-        Assert.Equal("100", message!.Message!.Id);
-        Assert.True(sub.Reader.TryRead(out var reaction));
-        Assert.True(reaction!.Seq > message.Seq); // relay 先貼訊息，表情才有地方掛
+        var published = events.Take();
+        Assert.Equal([EventKinds.Message, EventKinds.Reaction], published.Select(e => e.Kind));
+        Assert.Equal("100", MessageOf(published[0]).Id);
+        Assert.True(published[1].Seq > published[0].Seq); // relay 先貼訊息，表情才有地方掛
         Assert.Equal(
             new ReactionDto("100", "19:x@thread.v2", "1f4cc_pushpin", "8:alice", "Alice", Added: true, DateTimeOffset.FromUnixTimeMilliseconds(1792726751315), Count: 1),
-            reaction.Reaction);
-        Assert.False(sub.Reader.TryRead(out _));
+            ReactionOf(published[1]));
 
         // 同一版又來一次（Trouter 晚到、下一輪輪詢）：不重發
         Assert.Equal(IngestResult.Unchanged, await ingestor.UpsertAsync(Msg("100", version: 200), pinned, publish: true, ct));
-        Assert.False(sub.Reader.TryRead(out _));
+        Assert.Empty(events.Take());
 
         // 只存不發的回補：表情也不發
         await ingestor.UpsertAsync(Msg("101", version: 101), pinned, publish: false, ct);
-        Assert.False(sub.Reader.TryRead(out _));
-        await using var ctx = db.CreateDbContext();
-        Assert.Equal(["message", "reaction"], ctx.PublishedEvents.OrderBy(e => e.Seq).Select(e => e.Kind));
+        Assert.Empty(events.Take());
     }
 
     // 只按表情、沒在訂閱群組講過話的人：DB 查不到名字，改問 Teams；DB 有的就不問
@@ -166,10 +157,9 @@ public class MessageIngestorTests
     {
         using var db = new TestDb();
         await AddConversationAsync(db, subscribed: true);
-        var bus = new GatewayEventBus();
-        using var sub = bus.Subscribe();
+        var events = new NewEvents(db);
         var people = new FakePeople(new Dictionary<string, string> { ["8:bob"] = "Bob Lin" });
-        var ingestor = new MessageIngestor(db, bus, people);
+        var ingestor = new MessageIngestor(db, new GatewayEventBus(), people);
         var ct = TestContext.Current.CancellationToken;
         await ingestor.UpsertAsync(Msg("50", version: 50) with { From = "8:alice", FromName = "Alice" }, "{}", publish: false, ct);
         await ingestor.UpsertAsync(Msg("100", version: 100), "{}", publish: false, ct);
@@ -177,9 +167,7 @@ public class MessageIngestorTests
         const string reacted = """{"properties":{"emotions":[{"key":"like","users":[{"mri":"8:alice","time":1792640000000},{"mri":"8:bob","time":1792640000000},{"mri":"8:carol","time":1792640000000}]}]}}""";
         await ingestor.UpsertAsync(Msg("100", version: 200), reacted, publish: true, ct);
 
-        var names = new Dictionary<string, string?>();
-        while (sub.Reader.TryRead(out var evt))
-            names[evt.Reaction!.UserMri] = evt.Reaction.UserName;
+        var names = events.Take().Select(ReactionOf).ToDictionary(r => r.UserMri, r => r.UserName);
         Assert.Equal(new Dictionary<string, string?> { ["8:alice"] = "Alice", ["8:bob"] = "Bob Lin", ["8:carol"] = null }, names);
         Assert.Equal(["8:bob", "8:carol"], people.Asked.Order());
     }
@@ -210,8 +198,9 @@ public class MessageIngestorTests
         Assert.True(ctx.MessageEvents.Single().Deleted);
     }
 
+    // 事件內容只進 log；commit 之後才通知 bus，帶的是當下最新的序號（ADR 0006）
     [Fact]
-    public async Task Publish_records_event_and_sends_its_sequence()
+    public async Task Publish_records_event_then_notifies_its_sequence()
     {
         using var db = new TestDb();
         await AddConversationAsync(db, subscribed: true);
@@ -221,14 +210,52 @@ public class MessageIngestorTests
         var ct = TestContext.Current.CancellationToken;
 
         await ingestor.UpsertAsync(Msg("100", version: 100), "{}", publish: true, ct);
-        await ingestor.UpsertAsync(Msg("100", version: 200, content: "改過", edited: true), "{}", publish: true, ct);
-
         Assert.True(sub.Reader.TryRead(out var inserted));
+        await ingestor.UpsertAsync(Msg("100", version: 200, content: "改過", edited: true), "{}", publish: true, ct);
         Assert.True(sub.Reader.TryRead(out var edited));
-        Assert.True(edited!.Seq > inserted!.Seq); // 編輯同訊息 id，但是新的事件序號
+
+        Assert.True(edited > inserted); // 編輯同訊息 id，但是新的事件序號
         await using var ctx = db.CreateDbContext();
-        Assert.Equal([inserted.Seq, edited.Seq], ctx.PublishedEvents.OrderBy(e => e.Seq).Select(e => e.Seq));
+        Assert.Equal([inserted, edited], ctx.PublishedEvents.OrderBy(e => e.Seq).Select(e => e.Seq));
     }
+
+    // 事件契約：payload 是 DTO 的欄位 + schemaVersion + raw（Teams 原始 JSON），照 DTO 解析的 consumer 不受影響
+    [Fact]
+    public async Task Event_payload_carries_schema_version_and_raw_json()
+    {
+        using var db = new TestDb();
+        await AddConversationAsync(db, subscribed: true);
+        var events = new NewEvents(db);
+        var ingestor = new MessageIngestor(db, new GatewayEventBus());
+
+        await ingestor.UpsertAsync(Msg("100", version: 100), """{"id":"100","properties":{"importance":"high"}}""", publish: true, TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(events.Take());
+        Assert.Equal(EventSchema.Version, row.SchemaVersion);
+        using var payload = JsonDocument.Parse(row.Payload);
+        Assert.Equal(EventSchema.Version, payload.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("high", payload.RootElement.GetProperty("raw").GetProperty("properties").GetProperty("importance").GetString());
+        Assert.Equal("100", MessageOf(row).Id);
+    }
+
+    /// <summary>從內部 log 讀上次之後新寫進去的事件（事件內容不經過 bus）。</summary>
+    private sealed class NewEvents(TestDb db)
+    {
+        private long _seen;
+
+        public List<PublishedEvent> Take()
+        {
+            using var ctx = db.CreateDbContext();
+            var rows = ctx.PublishedEvents.Where(e => e.Seq > _seen).OrderBy(e => e.Seq).ToList();
+            if (rows.Count > 0)
+                _seen = rows[^1].Seq;
+            return rows;
+        }
+    }
+
+    private static MessageDto MessageOf(PublishedEvent e) => JsonSerializer.Deserialize(e.Payload, ContractsJsonContext.Default.MessageDto)!;
+
+    private static ReactionDto ReactionOf(PublishedEvent e) => JsonSerializer.Deserialize(e.Payload, ContractsJsonContext.Default.ReactionDto)!;
 
     [Fact]
     public async Task Concurrent_upserts_of_the_same_message_insert_once()

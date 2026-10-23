@@ -43,6 +43,16 @@ public static class EventKinds
 }
 
 /// <summary>
+/// 事件 payload 的格式版本（ADR 0006 的事件契約）。SSE 的 <c>data</c>、webhook 的 body 是 DTO 的欄位，
+/// 再加上 <c>schemaVersion</c> 與 <c>raw</c>（Teams 原始訊息 JSON）；webhook 另外放在 <c>X-TeamsGateway-Schema-Version</c> header。
+/// 只有不相容的改動才升版；只加欄位不升（consumer 本來就要略過不認得的欄位）。
+/// </summary>
+public static class EventSchema
+{
+    public const int Version = 1;
+}
+
+/// <summary>
 /// 有人在一則訊息上按或收回表情。<c>Emoji</c> 是 Teams 的表情代碼，例如 <c>heart</c>、<c>like-tone2</c>（膚色）、
 /// <c>1f440_eyes</c>（Unicode 碼位 + 名稱）。<c>UserName</c> 查不到時是 null。
 /// <c>Count</c> 是這個表情變動後還有幾個人按著（收回後是 0 = 已經沒人按了）。

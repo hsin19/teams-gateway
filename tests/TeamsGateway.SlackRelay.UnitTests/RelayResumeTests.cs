@@ -60,7 +60,7 @@ public class RelayResumeTests
         var slack = new RecordingSlack();
         var links = new MessageLinks();
         var worker = new RelayWorker(
-            new GatewayEventStream(new HttpClient(), NullLogger<GatewayEventStream>.Instance),
+            new SseEventSource(new GatewayEventStream(new HttpClient(), NullLogger<GatewayEventStream>.Instance), new MessageLinks(), NullLogger<SseEventSource>.Instance),
             new SlackClient(new HttpClient(slack) { BaseAddress = new Uri("https://slack.com/api/") }, NullLogger<SlackClient>.Instance),
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,

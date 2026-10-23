@@ -39,16 +39,29 @@ public static class Extensions
         builder.Services.AddSingleton<GatewayMetrics>();
         builder.Services.AddOpenTelemetry().WithMetrics(metrics => metrics.AddMeter(GatewayMetrics.MeterName));
 
-        // 即時推播：Trouter 背景連線 → 行程內匯流排 → SSE
+        // 收訊息 → 寫進內部事件 log（PublishedEvents）→ bus 通知「有新的」→ SSE / 各 sink 從自己的游標讀（ADR 0006）
         builder.Services.AddSingleton<GatewayEventBus>();
         builder.Services.AddSingleton<MessageIngestor>();
         builder.Services.AddSingleton<TrouterClient>();
         builder.Services.AddHostedService<TrouterBackgroundService>();
-        builder.Services.AddHostedService<WebhookDeliveryService>();
+
+        // 事件出口：Gateway:Sinks:<名稱>:Enabled 可關（沒設 = 開）
+        var gatewayOptions = builder.Configuration.GetSection("Gateway").Get<GatewayOptions>() ?? new GatewayOptions();
+        if (gatewayOptions.IsSinkEnabled(WebhookSink.SinkName))
+        {
+            builder.Services.AddSingleton<WebhookSink>();
+            builder.Services.AddSingleton<IEventSink>(sp => sp.GetRequiredService<WebhookSink>());
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<WebhookSink>());
+        }
         builder.Services.AddSingleton<WebhookSecretProtector>();
-        // webhook 目標是訂閱者自己填的：連線時檢查 IP（擋內網 / metadata）、不走 proxy（不然檢查到的是 proxy）、不跟 redirect
-        builder.Services.AddHttpClient(WebhookDeliveryService.HttpClientName)
-            .ConfigurePrimaryHttpMessageHandler(sp =>
+        // webhook 目標是訂閱者自己填的：連線時檢查 IP（擋內網 / metadata）、不走 proxy（不然檢查到的是 proxy）、不跟 redirect。
+        // 失敗重送由 WebhookSink 自己管：拿掉預設的 resilience——它的 circuit breaker 是整個 named client 共用，
+        // 一個掛掉的目標會連累其他目標
+        var webhookHttp = builder.Services.AddHttpClient(WebhookSink.HttpClientName, http => http.Timeout = TimeSpan.FromSeconds(30));
+#pragma warning disable EXTEXP0001 // 實驗性 API；要拿掉 ConfigureHttpClientDefaults 加的 handler 只有它
+        webhookHttp.RemoveAllResilienceHandlers();
+#pragma warning restore EXTEXP0001
+        webhookHttp.ConfigurePrimaryHttpMessageHandler(sp =>
             {
                 var allowPrivate = sp.GetRequiredService<IOptions<GatewayOptions>>().Value.WebhookAllowPrivateNetworks;
                 return new SocketsHttpHandler
