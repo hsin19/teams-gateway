@@ -41,6 +41,20 @@ public class TeamsTextTests
     [Fact]
     public void Null_is_safe() => Assert.Equal("", TeamsText.ToSlack(null));
 
+    // @提及要看得出是在叫人：粗體 + @。內容是合成的假名字
+    private const string Mention = "<span itemtype=\"http://schema.skype.com/Mention\" itemscope=\"\" itemid=\"0\">";
+
+    [Theory]
+    [InlineData($"<p>{Mention}Alice 🚀</span>&nbsp;{Mention}Bob Lee</span></p>", "*@Alice 🚀* *@Bob Lee*")]
+    [InlineData($"<p>Loop {Mention}Carol Wu</span></p>", "Loop *@Carol Wu*")]
+    [InlineData($"<p>Hi {Mention}Someone</span>, see this.</p>", "Hi *@Someone*, see this.")]
+    [InlineData($"<p>{Mention}A</span>{Mention}B</span></p>", "*@A* *@B*")]                    // 緊貼的兩個提及中間補空格
+    [InlineData($"<p>請{Mention}小明</span>看一下</p>", "請 *@小明* 看一下")]                      // 貼著中文字：補空格粗體才會生效
+    [InlineData($"<p>{Mention}A &amp; &lt;B&gt;</span></p>", "*@A &amp; &lt;B&gt;*")]           // 名字一樣要跳脫
+    [InlineData($"<p>{Mention}&nbsp;</span>hi</p>", "hi")]                                       // 空的提及就拿掉
+    public void Mentions_are_bold_with_at_sign(string html, string expected) =>
+        Assert.Equal(expected, TeamsText.ToSlack(html));
+
     // Teams 那端打的 Slack 語法不能在 Slack 生效：@channel、偽裝連結、使用者提及
     [Theory]
     [InlineData("<p>&lt;!channel&gt; urgent</p>", "&lt;!channel&gt; urgent")]

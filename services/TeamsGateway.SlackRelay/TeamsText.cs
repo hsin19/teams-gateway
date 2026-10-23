@@ -7,7 +7,7 @@ namespace TeamsGateway.SlackRelay;
 
 /// <summary>
 /// Teams 的 RichText/Html 訊息內容轉成 Slack 看得順的文字：
-/// 回覆引用（blockquote）→ <c>&gt; *發話者*</c> + <c>&gt; 內容</c>、區塊標籤 → 換行、去標籤、decode HTML entity。
+/// 回覆引用（blockquote）→ <c>&gt; *發話者*</c> + <c>&gt; 內容</c>、@提及 → <c>*@名字*</c>、區塊標籤 → 換行、去標籤、decode HTML entity。
 /// decode 完的內容一律再跳脫 Slack 的控制字元（<c>&amp; &lt; &gt;</c>），不然 Teams 那端打的
 /// <c>&lt;!channel&gt;</c>、<c>&lt;https://釣魚|看起來正常的網址&gt;</c> 到 Slack 會變成真的 @channel / 偽裝連結。
 /// 純文字訊息沒有標籤 / entity，只會被跳脫。
@@ -41,13 +41,36 @@ public static partial class TeamsText
     public static string EscapeMrkdwn(string s) =>
         s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
+    // @提及的頭尾記號（控制字元，訊息裡不會出現）：先標起來，等 decode / 跳脫完才換成 Slack 粗體
+    private const char MentionStart = '\u0001';
+    private const char MentionEnd = '\u0002';
+
     /// <summary>一段非引用的 HTML → Slack 文字。</summary>
     private static string PlainText(string html)
     {
-        var text = BlockBreakRegex().Replace(html, "\n"); // <br> / </p> / </div> / </li> → 換行
-        text = TagRegex().Replace(text, "");              // 其餘標籤去掉
-        return EscapeMrkdwn(Decode(text));                // &nbsp; &quot; &#128640; 之類，再跳脫
+        var text = MentionRegex().Replace(html, m => $"{MentionStart}{m.Groups[1].Value}{MentionEnd}");
+        text = BlockBreakRegex().Replace(text, "\n"); // <br> / </p> / </div> / </li> → 換行
+        text = TagRegex().Replace(text, "");          // 其餘標籤去掉
+        return Mentions(EscapeMrkdwn(Decode(text)));  // &nbsp; &quot; &#128640; 之類，再跳脫
     }
+
+    /// <summary>
+    /// 標起來的 @提及 → Slack 粗體 <c>*@名字*</c>，不然名字混在內文裡看不出是在叫人。
+    /// Slack 的粗體前後要是空白或標點才會生效（貼著中文字 / emoji 會直接顯示星號），貼著別的字就補一個空格。
+    /// </summary>
+    private static string Mentions(string text) => MentionMarkRegex().Replace(text, m =>
+    {
+        var name = m.Groups[1].Value.Trim();
+        if (name.Length == 0)
+            return "";
+        var end = m.Index + m.Length;
+        // 前一個是另一個提及的結尾時不補：那邊已經在後面補過了
+        var before = m.Index > 0 && text[m.Index - 1] != MentionEnd && !IsBoldBoundary(text[m.Index - 1]) ? " " : "";
+        var after = end < text.Length && !IsBoldBoundary(text[end]) ? " " : "";
+        return $"{before}*@{name}*{after}";
+    });
+
+    private static bool IsBoldBoundary(char c) => char.IsWhiteSpace(c) || (c < 128 && char.IsPunctuation(c));
 
     /// <summary>回覆引用：抽出「發話者 + 被引用內容」，渲染成兩行 Slack blockquote。</summary>
     private static string Quote(string inner)
@@ -145,6 +168,12 @@ public static partial class TeamsText
 
     [GeneratedRegex(@"itemprop=""preview""[^>]*>(.*?)</", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex PreviewRegex();
+
+    [GeneratedRegex(@"<span\b[^>]*\bitemtype=""http://schema\.skype\.com/Mention""[^>]*>(.*?)</span>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex MentionRegex();
+
+    [GeneratedRegex("\u0001([^\u0002]*)\u0002")]
+    private static partial Regex MentionMarkRegex();
 
     [GeneratedRegex(@"<\s*(br|/p|/div|/li)\s*/?\s*>", RegexOptions.IgnoreCase)]
     private static partial Regex BlockBreakRegex();
