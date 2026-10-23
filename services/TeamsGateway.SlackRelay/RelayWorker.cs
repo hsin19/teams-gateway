@@ -213,20 +213,23 @@ public sealed class RelayWorker(
 
     private async Task<SlackContent> FormatAsync(MessageDto message, string channel, CancellationToken ct)
     {
-        // 若是回覆、且被引用那則我們轉過：接一個指向它的 permalink（Slack 會 unfurl 成原生引用），不再畫 blockquote。
-        // 連結用文字標籤，不貼裸網址
-        string? replyLink = null;
-        if (TeamsText.QuotedMessageId(message.Content) is { } quotedId
-            && links.Lookup(quotedId) is { } slackRef
-            && await slack.GetPermalinkAsync(slackRef.Channel, slackRef.Ts, ct) is { } permalink)
+        // 回覆：被引用的每一則若我們轉過，就在第一行接一個指向它的 permalink（Slack 會 unfurl 成原生引用）、不再畫 blockquote；
+        // 沒轉過的照樣畫成 blockquote。連結用作者名當標籤，不貼裸網址
+        var replyLinks = new List<string>();
+        var linkedQuotes = new HashSet<string>();
+        foreach (var quote in TeamsText.Quotes(message.Content))
         {
-            var author = TeamsText.QuotedAuthorName(message.Content);
-            replyLink = $"<{permalink}|Reply{(author is null ? "" : $" {TeamsText.EscapeMrkdwn(author)}")}>";
+            if (links.Lookup(quote.Id) is { } slackRef
+                && await slack.GetPermalinkAsync(slackRef.Channel, slackRef.Ts, ct) is { } permalink)
+            {
+                replyLinks.Add($"<{permalink}|{TeamsText.EscapeMrkdwn(quote.Author ?? "message")}>");
+                linkedQuotes.Add(quote.Id);
+            }
         }
 
-        var body = TeamsText.ToSlack(message.Content, includeQuote: replyLink is null);
-        // 回覆的第一行讀起來是一句話：「*Bob* Reply Alice」（不加冒號），內容在下一行
-        var header = replyLink is null ? Header(message) : $"{Name(message)} {replyLink}";
+        var body = TeamsText.ToSlack(message.Content, linkedQuotes);
+        // 回覆的第一行讀起來是一句話：「*Bob* Reply Alice, Carol」（不加冒號），內容在下一行
+        var header = replyLinks.Count == 0 ? Header(message) : $"{Name(message)} Reply {string.Join(", ", replyLinks)}";
 
         var text = Compose(header, body).TrimEnd();
 

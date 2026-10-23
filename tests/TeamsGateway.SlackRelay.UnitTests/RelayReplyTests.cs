@@ -5,17 +5,55 @@ using TeamsGateway.SlackRelay;
 
 namespace TeamsGateway.SlackRelay.UnitTests;
 
-/// <summary>回覆一則轉過的訊息：第一行「*Bob* Reply Alice」（連回被引用那則、不加冒號），內容在下一行。內容是合成的假資料。</summary>
+/// <summary>
+/// 回覆轉過的訊息：第一行「*Bob* Reply Alice」（名字連回被引用那則、不加冒號），內容在下一行。
+/// Teams 可以一次引用好幾則，每一則都要接得上。內容是合成的假資料。
+/// </summary>
 public class RelayReplyTests
 {
     private const string Conv = "19:x@thread.v2";
 
+    private static string QuoteHtml(string id, string author, string preview) =>
+        $"<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"{id}\">" +
+        $"<strong itemprop=\"mri\" itemid=\"8:{author.ToLowerInvariant()}\">{author}</strong><span itemprop=\"time\" itemid=\"{id}\"></span>" +
+        $"<p itemprop=\"preview\">{preview}</p></blockquote>";
+
     [Fact]
-    public async Task Reply_header_reads_name_then_reply_link()
+    public async Task Single_reply_header_reads_name_then_reply_link()
+    {
+        var text = await RelayAsync(QuoteHtml("100", "Alice", "hello") + "<p>thanks</p>", ("100", "111.100"));
+
+        Assert.Equal($"*Bob* Reply <{RecordingSlack.Permalink("111.100")}|Alice>\nthanks", text);
+    }
+
+    [Fact]
+    public async Task Every_quoted_message_gets_a_link()
+    {
+        var text = await RelayAsync(
+            QuoteHtml("100", "Alice", "123") + "<p></p>" + QuoteHtml("200", "Carol", "456") + "<p>789</p>",
+            ("100", "111.100"), ("200", "111.200"));
+
+        Assert.Equal($"*Bob* Reply <{RecordingSlack.Permalink("111.100")}|Alice>, <{RecordingSlack.Permalink("111.200")}|Carol>\n789", text);
+    }
+
+    // 引用的其中一則沒轉過：有轉過的接連結，沒轉過的照樣畫成 blockquote
+    [Fact]
+    public async Task Unrelayed_quote_stays_a_blockquote()
+    {
+        var text = await RelayAsync(
+            QuoteHtml("100", "Alice", "123") + "<p></p>" + QuoteHtml("200", "Carol", "456") + "<p>789</p>",
+            ("100", "111.100"));
+
+        Assert.Equal($"*Bob* Reply <{RecordingSlack.Permalink("111.100")}|Alice>\n> *Carol*\n> 456\n789", text);
+    }
+
+    /// <summary>轉一則 Bob 的回覆，回傳貼到 Slack 的文字；<paramref name="relayed"/> 是已經轉過的（Teams id, Slack ts）。</summary>
+    private static async Task<string?> RelayAsync(string content, params (string TeamsId, string Ts)[] relayed)
     {
         var slack = new RecordingSlack();
         var links = new MessageLinks();
-        links.Remember("1792640000000", "C1", "111.222", "*Alice*:\nhello", 1792640000000);
+        foreach (var (teamsId, ts) in relayed)
+            links.Remember(teamsId, "C1", ts, "*Someone*:\nquoted", long.Parse(teamsId));
         var worker = new RelayWorker(
             new GatewayEventStream(new HttpClient(), NullLogger<GatewayEventStream>.Instance),
             new SlackClient(new HttpClient(slack) { BaseAddress = new Uri("https://slack.com/api/") }, NullLogger<SlackClient>.Instance),
@@ -23,15 +61,10 @@ public class RelayReplyTests
             links,
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance);
-        const string content =
-            "<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"1792640000000\">" +
-            "<strong itemprop=\"mri\" itemid=\"8:alice\">Alice</strong><span itemprop=\"time\" itemid=\"1792640000000\"></span>" +
-            "<p itemprop=\"preview\">hello</p></blockquote><p>thanks</p>";
         var reply = new MessageDto("1792640099000", Conv, "8:bob", "Bob", "RichText/Html", content, 2, DateTimeOffset.UtcNow, 1792640099000);
 
         await worker.RelayWithRetryAsync(reply, new Dictionary<string, string> { [Conv] = "C1" }, null, TestContext.Current.CancellationToken);
 
-        var post = slack.Requests.Single(r => r.Method == "chat.postMessage");
-        Assert.Equal($"*Bob* <{RecordingSlack.Permalink}|Reply Alice>\nthanks", post.Body.GetProperty("text").GetString());
+        return slack.Requests.Single(r => r.Method == "chat.postMessage").Body.GetProperty("text").GetString();
     }
 }

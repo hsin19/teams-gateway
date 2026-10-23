@@ -14,8 +14,11 @@ namespace TeamsGateway.SlackRelay;
 /// </summary>
 public static partial class TeamsText
 {
-    /// <summary><paramref name="includeQuote"/>=false 時連 blockquote 一起拿掉（呼叫端改用 Slack permalink 連回引用）。</summary>
-    public static string ToSlack(string? content, bool includeQuote = true)
+    /// <summary>
+    /// <paramref name="linkedQuotes"/>：已經改用 Slack permalink 連回去的引用（Teams 訊息 id），這些 blockquote 就不再畫；
+    /// 其餘引用照樣畫成 Slack blockquote。Teams 一則訊息可以同時引用好幾則。
+    /// </summary>
+    public static string ToSlack(string? content, IReadOnlySet<string>? linkedQuotes = null)
     {
         if (string.IsNullOrWhiteSpace(content))
             return content ?? "";
@@ -28,7 +31,7 @@ public static partial class TeamsText
         foreach (Match match in BlockquoteRegex().Matches(content))
         {
             text.Append(PlainText(content[last..match.Index]));
-            if (includeQuote)
+            if (linkedQuotes is null || QuoteIdRegex().Match(match.Value) is not { Success: true } id || !linkedQuotes.Contains(id.Groups[1].Value))
                 text.Append(Quote(match.Groups[1].Value));
             last = match.Index + match.Length;
         }
@@ -113,22 +116,19 @@ public static partial class TeamsText
     private static readonly HashSet<string> ImageFileTypes =
         new(["jpg", "jpeg", "png", "gif", "bmp", "webp", "heic", "heif", "tif", "tiff"], StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>若是回覆，回傳被引用的那則 Teams 訊息 id（blockquote 的 itemid）；不是回覆則 null。</summary>
-    public static string? QuotedMessageId(string? content)
-    {
-        if (string.IsNullOrEmpty(content))
-            return null;
-        var m = QuoteIdRegex().Match(content);
-        return m.Success ? m.Groups[1].Value : null;
-    }
+    /// <summary>被引用的一則：Teams 訊息 id（blockquote 的 itemid）與發話者名稱（沒帶就 null）。</summary>
+    public readonly record struct QuotedMessage(string Id, string? Author);
 
-    /// <summary>若是回覆，回傳被引用那則的發話者名稱；不是回覆或沒帶名稱則 null。</summary>
-    public static string? QuotedAuthorName(string? content)
+    /// <summary>這則回覆引用了哪些訊息，照出現順序（Teams 可以一次引用好幾則）；不是回覆就是空的。</summary>
+    public static IReadOnlyList<QuotedMessage> Quotes(string? content)
     {
         if (string.IsNullOrEmpty(content))
-            return null;
-        var m = BlockquoteRegex().Match(content);
-        return m.Success ? QuotedAuthor(m.Groups[1].Value) : null;
+            return [];
+        return BlockquoteRegex().Matches(content)
+            .Select(m => (Id: QuoteIdRegex().Match(m.Value), Inner: m.Groups[1].Value))
+            .Where(q => q.Id.Success)
+            .Select(q => new QuotedMessage(q.Id.Groups[1].Value, QuotedAuthor(q.Inner)))
+            .ToList();
     }
 
     /// <summary>引用的發話者（itemprop="mri" 元素的文字）。要完整 decode + trim，不然尾端空白會讓 Slack 粗體失效。</summary>

@@ -86,37 +86,49 @@ public class TeamsTextTests
         Assert.DoesNotContain("<!", result);
     }
 
+    private static string QuoteHtml(string id, string author, string preview) =>
+        $"<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"{id}\">" +
+        $"<strong itemprop=\"mri\">{author}</strong><span itemprop=\"time\" itemid=\"{id}\"></span><p itemprop=\"preview\">{preview}</p></blockquote>";
+
     [Fact]
-    public void QuotedMessageId_reads_blockquote_itemid()
+    public void Quotes_reads_id_and_trimmed_author()
     {
-        const string html =
-            "<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"1792522584402\">" +
-            "<strong itemprop=\"mri\">Bob</strong><p itemprop=\"preview\">x</p></blockquote><p>reply</p>";
-        Assert.Equal("1792522584402", TeamsText.QuotedMessageId(html));
+        Assert.Equal([new TeamsText.QuotedMessage("1792522584402", "Bob")], TeamsText.Quotes(QuoteHtml("1792522584402", "Bob", "x") + "<p>reply</p>"));
+        Assert.Equal("Alice", TeamsText.Quotes(ReplyHtml).Single().Author); // 尾端 &nbsp; 要去掉
     }
 
     [Fact]
-    public void QuotedAuthorName_reads_trimmed_author()
+    public void Quotes_empty_when_not_a_reply()
     {
-        Assert.Equal("Alice", TeamsText.QuotedAuthorName(ReplyHtml)); // 尾端 &nbsp; 要去掉
-        Assert.Null(TeamsText.QuotedAuthorName("<p>just a message</p>"));
-        Assert.Null(TeamsText.QuotedAuthorName(null));
+        Assert.Empty(TeamsText.Quotes("<p>just a message</p>"));
+        Assert.Empty(TeamsText.Quotes(null));
+    }
+
+    // Teams 一則可以同時引用好幾則：每一則都要讀到，照出現順序
+    [Fact]
+    public void Quotes_reads_every_quoted_message_in_order()
+    {
+        var html = QuoteHtml("100", "Alice", "123") + "<p></p>" + QuoteHtml("200", "Bob", "456") + "<p>789</p>";
+
+        Assert.Equal(["100", "200"], TeamsText.Quotes(html).Select(q => q.Id));
+    }
+
+    // 已經改用連結的引用不畫；沒連結的（例如沒轉過）照樣畫成 blockquote，不能整個消失
+    [Fact]
+    public void Only_linked_quotes_are_dropped()
+    {
+        var html = QuoteHtml("100", "Alice", "123") + "<p></p>" + QuoteHtml("200", "Bob", "456") + "<p>789</p>";
+
+        Assert.Equal("> *Bob*\n> 456\n789", TeamsText.ToSlack(html, new HashSet<string> { "100" }));
     }
 
     [Fact]
-    public void QuotedMessageId_null_when_not_a_reply()
-    {
-        Assert.Null(TeamsText.QuotedMessageId("<p>just a message</p>"));
-        Assert.Null(TeamsText.QuotedMessageId(null));
-    }
-
-    [Fact]
-    public void Drops_quote_when_includeQuote_false()
+    public void Drops_linked_quote()
     {
         const string html =
             "<blockquote itemscope=\"\" itemid=\"1\"><strong itemprop=\"mri\">Bob</strong>" +
             "<p itemprop=\"preview\">quoted</p></blockquote><p>my reply</p>";
-        var result = TeamsText.ToSlack(html, includeQuote: false);
+        var result = TeamsText.ToSlack(html, new HashSet<string> { "1" });
 
         Assert.DoesNotContain(">", result);     // 完全沒有引用
         Assert.DoesNotContain("quoted", result);
@@ -175,7 +187,7 @@ public class TeamsTextTests
         var urls = TeamsText.ImageUrls(html);
 
         Assert.Equal(["https://us-api.asm.skype.com/v1/objects/0-ea-d4-abc/views/imgo"], urls); // 重複的只算一次
-        Assert.Equal("look", TeamsText.ToSlack(html, includeQuote: false));
+        Assert.Equal("look", TeamsText.ToSlack(html, new HashSet<string> { "1" }));
     }
 
     // 附件：圖片類型 + 有預覽圖才當圖片；影片有縮圖也算一般檔案、沒預覽圖的圖也轉不了
