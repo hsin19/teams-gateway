@@ -10,10 +10,36 @@ namespace TeamsGateway.SlackRelay;
 /// </summary>
 public sealed class MessageLinks
 {
-    private readonly ConcurrentDictionary<string, SlackRef> _byTeamsId = new();
+    /// <summary>記多久：比重啟回補（預設 24h）長，常駐時舊一點的訊息被編輯也能原地更新；再舊就放掉，記憶體不會一直長。</summary>
+    internal static readonly TimeSpan MaxAge = TimeSpan.FromDays(7);
+    private const int PruneEvery = 500;
 
-    public void Remember(string teamsMessageId, string channel, string ts, string text, long? version, IReadOnlyList<string>? images = null) =>
+    private readonly ConcurrentDictionary<string, SlackRef> _byTeamsId = new();
+    private int _sincePrune;
+
+    public void Remember(string teamsMessageId, string channel, string ts, string text, long? version, IReadOnlyList<string>? images = null)
+    {
         _byTeamsId[teamsMessageId] = new SlackRef(channel, ts, text, version, images ?? []);
+        if (Interlocked.Increment(ref _sincePrune) >= PruneEvery)
+        {
+            Interlocked.Exchange(ref _sincePrune, 0);
+            PruneOlderThan(DateTimeOffset.UtcNow - MaxAge);
+        }
+    }
+
+    /// <summary>丟掉 Slack 訊息時間（ts）早於 <paramref name="cutoff"/> 的對應。</summary>
+    internal void PruneOlderThan(DateTimeOffset cutoff)
+    {
+        foreach (var (teamsId, slackRef) in _byTeamsId)
+            if (PostedAt(slackRef.Ts) < cutoff)
+                _byTeamsId.TryRemove(teamsId, out _);
+    }
+
+    /// <summary>Slack ts（<c>1729000000.000100</c>）是 unix 秒；看不懂就當很新，不刪。</summary>
+    private static DateTimeOffset PostedAt(string ts) =>
+        double.TryParse(ts, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds)
+            ? DateTimeOffset.FromUnixTimeMilliseconds((long)(seconds * 1000))
+            : DateTimeOffset.MaxValue;
 
     public SlackRef? Lookup(string teamsMessageId) =>
         _byTeamsId.TryGetValue(teamsMessageId, out var slackRef) ? slackRef : null;

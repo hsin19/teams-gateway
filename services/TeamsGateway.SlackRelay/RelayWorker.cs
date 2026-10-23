@@ -20,8 +20,10 @@ public sealed class RelayWorker(
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
     private const int MaxImagesPerMessage = 10;
 
-    // Teams 圖片網址 → 已上傳的 Slack file id：編輯時同一張圖不重傳（訊息是逐則處理，不用 concurrent）
+    // Teams 圖片網址 → 已上傳的 Slack file id：編輯時同一張圖不重傳（訊息是逐則處理，不用 concurrent）。
+    // 滿了就整個清掉：代價只是很舊的訊息被編輯時圖再傳一次，換來常駐時記憶體不會一直長
     private readonly Dictionary<string, string> _uploadedImages = new();
+    private const int MaxUploadedImages = 2000;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -231,6 +233,8 @@ public sealed class RelayWorker(
                 fileId = await UploadImageAsync(url, ct);
                 if (fileId is null)
                     continue;
+                if (_uploadedImages.Count >= MaxUploadedImages)
+                    _uploadedImages.Clear();
                 _uploadedImages[url] = fileId;
             }
             fileIds.Add(fileId);
