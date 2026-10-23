@@ -25,10 +25,15 @@ public static class EventsApi
             IDbContextFactory<GatewayDbContext> factory,
             ApiKeyService keys,
             IOptions<GatewayOptions> options,
+            IHostApplicationLifetime lifetime,
             CancellationToken ct,
             string? chats = null,
             string? afterMessage = null) =>
         {
+            // 程式要關就斷掉連線：不然 Kestrel 會等這條長連線到 ShutdownTimeout（預設 30 秒）才停得下來，
+            // Aspire 的停止 / rebuild 等不到就放棄。斷掉走的是跟訂閱者斷線同一條路（ct 取消），訂閱者重連帶 Last-Event-ID 補回
+            using var stopping = lifetime.ApplicationStopping.Register(http.Abort);
+
             var apiKeyId = ((ApiKey)http.Items[nameof(ApiKey)]!).Id;
             var heartbeat = TimeSpan.FromSeconds(Math.Max(1, options.Value.SseHeartbeatSeconds));
             var filter = chats?

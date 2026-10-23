@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -134,6 +135,27 @@ public sealed class EventsEndpointTests(GatewayAppFixture fx) : IClassFixture<Ga
         while (await reader.ReadLineAsync(timeout.Token) is not null)
         {
         }
+    }
+
+    [Fact]
+    public async Task Stopping_the_app_ends_open_streams()
+    {
+        // 程式要關時 SSE 要跟著結束：不然 Kestrel 會等這條長連線到 ShutdownTimeout（預設 30 秒），
+        // Aspire 的停止 / rebuild 只等約 10 秒就放棄。真的 Kestrel 才會等進行中的請求（TestServer 不會），所以不共用 fixture
+        var ct = TestContext.Current.CancellationToken;
+        await using var app = new GatewayAppFixture();
+        app.UseKestrel();
+        app.StartServer();
+        var client = await app.CreateApiClientAsync(ct);
+
+        using var resp = await client.GetAsync("/v1/events", HttpCompletionOption.ResponseHeadersRead, ct);
+        using var reader = new StreamReader(await resp.Content.ReadAsStreamAsync(ct));
+        Assert.Equal(": ok", await reader.ReadLineAsync(ct));
+
+        var stopwatch = Stopwatch.StartNew();
+        await app.DisposeAsync();
+
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), $"關閉花了 {stopwatch.Elapsed.TotalSeconds:F1} 秒");
     }
 
     private static async Task<(long Seq, MessageDto Message)> NextAsync(StreamReader reader, CancellationToken ct)
