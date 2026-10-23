@@ -270,7 +270,7 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         req.Headers.TryAddWithoutValidation("x-skypetoken", token);
         req.Headers.TryAddWithoutValidation("authentication", $"skypetoken={token}");
         req.Headers.TryAddWithoutValidation("x-ms-client-type", "cdlworker");
-        req.Headers.TryAddWithoutValidation("x-ms-client-version", "1415/26082021043");
+        req.Headers.TryAddWithoutValidation("x-ms-client-version", TeamsAuthConstants.ChatsvcClientVersion);
         req.Headers.TryAddWithoutValidation("x-ms-user-type", "real-user");
         req.Headers.TryAddWithoutValidation("ms-ic3-product", "tfl");
         req.Headers.TryAddWithoutValidation("ms-ic3-additional-product", "Sfl");

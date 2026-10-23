@@ -19,7 +19,14 @@ internal static class TeamsAuthConstants
     public const string UserAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
 
+    /// <summary>auth / Trouter 註冊帶的版本（spike/http_refresh.py、trouter_client.py 抓到的）。</summary>
     public const string ClientVersion = "1415/26100816141";
+
+    /// <summary>
+    /// chatsvc 請求（<c>x-ms-client-type: cdlworker</c>）帶的版本，抓自 spike/teams_api.py 那次的流量，跟 <see cref="ClientVersion"/> 不同。
+    /// 刻意沒統一：chatsvc 用這個值驗證過可用；Microsoft 改版要調時兩個一起看。
+    /// </summary>
+    public const string ChatsvcClientVersion = "1415/26082021043";
 
     /// <summary>skypetoken 剩多久以內就提前換。</summary>
     public static readonly TimeSpan RefreshSkew = TimeSpan.FromMinutes(10);
