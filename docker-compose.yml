@@ -17,7 +17,7 @@ services:
     ports:
       - "5199:8080"                 # bootstrap / admin / 給同網段的訂閱者；內網才開
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]   # 含 DB 檢查
       interval: 30s
       timeout: 5s
       retries: 3
@@ -27,6 +27,9 @@ services:
       replicas: 1                    # 單一 Trouter 連線 / 單一 SQLite writer，不可多副本
       restart_policy:
         condition: any
+      # Swarm：gateway-data 是 node 本機 volume，換 node 就是空的（要重新 bootstrap）。正式上把它釘在固定 node：
+      # placement:
+      #   constraints: [node.labels.teams-gateway == true]
 
   relay:
     build:

@@ -36,7 +36,7 @@ ops/service.sh status | logs | restart | uninstall
 ```
 curl -X PUT  -H "X-Admin-Token: $TOKEN" --data-binary @login_cookies.json  $BASE/admin/login-cookies
 curl -X POST -H "X-Admin-Token: $TOKEN"                                     $BASE/admin/auth/refresh   # 換一次 token 驗證
-curl -X POST -H "X-Admin-Token: $TOKEN" -d '{"name":"client"}'              $BASE/admin/api-keys       # 建 API key，回的 apiKey 只出現一次
+curl -X POST -H "X-Admin-Token: $TOKEN" -H "Content-Type: application/json" -d '{"name":"client"}' $BASE/admin/api-keys       # 建 API key，回的 apiKey 只出現一次
 ```
 
 cookie 與 token 以 DataProtection 加密後存進 SQLite（`SecureValues` 表），key 在 `.data/keys/`。
@@ -64,7 +64,7 @@ dnx dotnet-counters monitor -p $(pgrep -f TeamsGateway.Gateway.dll) --counters T
 ```
 
 ```
-curl -X PUT    -H "X-Admin-Token: $T" -d '{"chat":"General Chat"}' $BASE/admin/subscriptions  # chat 可給 id 或群名
+curl -X PUT    -H "X-Admin-Token: $T" -H "Content-Type: application/json" -d '{"chat":"General Chat"}' $BASE/admin/subscriptions  # chat 可給 id 或群名
 curl           -H "X-Admin-Token: $T"                                        $BASE/admin/subscriptions  # 列訂閱
 curl -X DELETE -H "X-Admin-Token: $T"  $BASE/admin/subscriptions/<id>                                    # 取消（保留已存歷史）
 ```
