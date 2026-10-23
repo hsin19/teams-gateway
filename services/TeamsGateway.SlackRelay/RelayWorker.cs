@@ -202,9 +202,11 @@ public sealed class RelayWorker(
         logger.LogInformation("從 Slack 回補 {Count} 筆訊息對應（近 {Hours}h）", links.Count, retentionHours);
     }
 
+    private static string Header(MessageDto message) => $"{Name(message)}:";
+
     // 顯示名稱是對方自己取的，要跳脫，不然名稱裡的 <!channel> 之類會變成 Slack 語法
-    private static string Header(MessageDto message) =>
-        $"*{TeamsText.EscapeMrkdwn(string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName)}*:";
+    private static string Name(MessageDto message) =>
+        $"*{TeamsText.EscapeMrkdwn(string.IsNullOrWhiteSpace(message.FromName) ? message.From ?? "unknown" : message.FromName)}*";
 
     /// <summary>發話者那行 + 內文：內文一律另起一行（單行、多行、回覆看起來都一致）；沒內文（只有圖 / 附件）就只有發話者。</summary>
     internal static string Compose(string header, string body) => body.Length > 0 ? $"{header}\n{body}" : header;
@@ -223,7 +225,8 @@ public sealed class RelayWorker(
         }
 
         var body = TeamsText.ToSlack(message.Content, includeQuote: replyLink is null);
-        var header = replyLink is null ? Header(message) : $"{Header(message)} {replyLink}";
+        // 回覆的第一行讀起來是一句話：「*Bob* Reply Alice」（不加冒號），內容在下一行
+        var header = replyLink is null ? Header(message) : $"{Name(message)} {replyLink}";
 
         var text = Compose(header, body).TrimEnd();
 

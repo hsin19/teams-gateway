@@ -1,6 +1,3 @@
-using System.Net;
-using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TeamsGateway.Contracts;
@@ -35,20 +32,5 @@ public class RelayDeleteTests
         var reply = slack.Requests.Single(r => r.Method == "chat.postMessage");
         Assert.Equal("111.222", reply.Body.GetProperty("thread_ts").GetString());
         Assert.Contains("*Alice*:\nhello", reply.Body.GetProperty("text").GetString());
-    }
-
-    private sealed class RecordingSlack : HttpMessageHandler
-    {
-        public List<(string Method, JsonElement Body)> Requests { get; } = [];
-
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken)).RootElement.Clone();
-            Requests.Add((request.RequestUri!.Segments[^1], body));
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("""{"ok":true,"ts":"111.333"}""", Encoding.UTF8, "application/json"),
-            };
-        }
     }
 }
