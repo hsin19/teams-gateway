@@ -6,8 +6,10 @@ public class GatewayDbContext(DbContextOptions<GatewayDbContext> options) : DbCo
 {
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
     {
-        // 時間存成 Unix 毫秒（INTEGER）：SQLite 沒有時間型別，EF 預設存帶 offset 的 TEXT，連 ORDER BY / 比較都不支援
-        builder.Properties<DateTimeOffset>().HaveConversion<UnixMillisecondsConverter>();
+        // SQLite 沒有時間型別，EF 預設存帶 offset 的 TEXT，連 ORDER BY / 比較都不支援：存成 Unix 毫秒（INTEGER）。
+        // 有原生時間型別的 provider（例如 Postgres 的 timestamptz）就用它自己的，不轉
+        if (Database.IsSqlite())
+            builder.Properties<DateTimeOffset>().HaveConversion<UnixMillisecondsConverter>();
     }
 
     public DbSet<Conversation> Conversations => Set<Conversation>();
