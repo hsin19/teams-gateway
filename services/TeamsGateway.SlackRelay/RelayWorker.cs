@@ -45,12 +45,14 @@ public sealed class RelayWorker(
 
         var backoff = MinBackoff;
         string? lastId = null;
+        // 剛重啟沒有事件序號：從 Slack 上最後一則轉過去的訊息之後續接，停機期間的不會漏（重送的照版本去重）
+        var resumeAfter = links.NewestTeamsId();
 
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                await foreach (var evt in stream.ConnectAsync(chats, lastId, ct))
+                await foreach (var evt in stream.ConnectAsync(chats, lastId, resumeAfter, ct))
                 {
                     await RelayWithRetryAsync(evt.Message, routes, opts.Slack.DefaultChannel, ct);
                     lastId = evt.Id ?? lastId; // 處理完（或放棄）才往前推

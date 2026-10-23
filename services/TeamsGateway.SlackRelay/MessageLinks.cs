@@ -35,6 +35,20 @@ public sealed class MessageLinks
                 _byTeamsId.TryRemove(teamsId, out _);
     }
 
+    /// <summary>最後轉出去（Slack 上最新）的那則 Teams 訊息 id；重啟後沒有事件序號時，從它之後續接。</summary>
+    public string? NewestTeamsId()
+    {
+        string? newest = null;
+        var newestAt = DateTimeOffset.MinValue;
+        foreach (var (teamsId, slackRef) in _byTeamsId)
+        {
+            var at = PostedAt(slackRef.Ts);
+            if (at != DateTimeOffset.MaxValue && at > newestAt)
+                (newest, newestAt) = (teamsId, at);
+        }
+        return newest;
+    }
+
     /// <summary>Slack ts（<c>1729000000.000100</c>）是 unix 秒；看不懂就當很新，不刪。</summary>
     private static DateTimeOffset PostedAt(string ts) =>
         double.TryParse(ts, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds)

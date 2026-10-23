@@ -22,6 +22,21 @@ public class MessageLinksTests
         Assert.NotNull(links.Lookup("weird"));
     }
 
+    [Fact]
+    public void NewestTeamsId_is_the_latest_slack_post()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var links = new MessageLinks();
+        Assert.Null(links.NewestTeamsId());
+
+        links.Remember("a", "C1", Ts(now.AddHours(-2)), "x", 1);
+        links.Remember("b", "C2", Ts(now.AddMinutes(-5)), "x", 2);
+        links.Remember("c", "C1", Ts(now.AddHours(-1)), "x", 3);
+        links.Remember("weird", "C1", "not-a-ts", "x", 4);
+
+        Assert.Equal("b", links.NewestTeamsId());
+    }
+
     // 常駐很久也不會一直長：記到一定量會自動清舊的
     [Fact]
     public void Remember_prunes_periodically()

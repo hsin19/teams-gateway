@@ -74,13 +74,27 @@ public class CatchUpTests
         using var db = new TestDb();
         await SeedAsync(db);
 
-        Assert.Equal(expected, await EventsApi.StartCursorAsync(db, lastEventId, TestContext.Current.CancellationToken));
+        Assert.Equal(expected, await EventsApi.StartCursorAsync(db, lastEventId, afterMessage: null, TestContext.Current.CancellationToken));
+    }
+
+    // 訂閱者重啟：沒有序號，但知道最後轉出去的是哪則 → 從那則第一次發出之後補（A 的編輯、B 都會重送）
+    [Theory]
+    [InlineData(null, "100", 1)]
+    [InlineData(null, "200", 2)]
+    [InlineData(null, "unknown", 3)] // 找不到（太舊被清掉了）→ 從現在開始
+    [InlineData("2", "100", 2)]      // 有合法序號就用序號
+    public async Task Start_cursor_can_resume_after_a_message(string? lastEventId, string afterMessage, long expected)
+    {
+        using var db = new TestDb();
+        await SeedAsync(db);
+
+        Assert.Equal(expected, await EventsApi.StartCursorAsync(db, lastEventId, afterMessage, TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task Start_cursor_is_zero_on_empty_log()
     {
         using var db = new TestDb();
-        Assert.Equal(0, await EventsApi.StartCursorAsync(db, null, TestContext.Current.CancellationToken));
+        Assert.Equal(0, await EventsApi.StartCursorAsync(db, null, afterMessage: null, TestContext.Current.CancellationToken));
     }
 }

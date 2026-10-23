@@ -20,12 +20,16 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
     // 少了這個，half-open 的 TCP 會讓 ReadLineAsync 永遠卡住，relay 默默停擺
     private readonly TimeSpan _idleTimeout = idleTimeout ?? TimeSpan.FromSeconds(60);
 
+    /// <param name="afterMessage">沒有 <paramref name="lastEventId"/> 時（剛重啟），從這則 Teams 訊息之後續接。</param>
     public async IAsyncEnumerable<StreamEvent> ConnectAsync(
-        string? chats, string? lastEventId, [EnumeratorCancellation] CancellationToken ct)
+        string? chats, string? lastEventId, string? afterMessage, [EnumeratorCancellation] CancellationToken ct)
     {
-        var url = "/v1/events";
+        var query = new List<string>();
         if (!string.IsNullOrEmpty(chats))
-            url += "?chats=" + Uri.EscapeDataString(chats);
+            query.Add("chats=" + Uri.EscapeDataString(chats));
+        if (string.IsNullOrEmpty(lastEventId) && !string.IsNullOrEmpty(afterMessage))
+            query.Add("afterMessage=" + Uri.EscapeDataString(afterMessage));
+        var url = query.Count == 0 ? "/v1/events" : "/v1/events?" + string.Join('&', query);
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.TryAddWithoutValidation("Accept", "text/event-stream");

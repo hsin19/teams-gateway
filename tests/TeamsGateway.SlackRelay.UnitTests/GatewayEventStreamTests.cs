@@ -31,7 +31,7 @@ public class GatewayEventStreamTests
         var stream = new GatewayEventStream(http, NullLogger<GatewayEventStream>.Instance);
 
         var events = new List<StreamEvent>();
-        await foreach (var evt in stream.ConnectAsync(null, null, TestContext.Current.CancellationToken))
+        await foreach (var evt in stream.ConnectAsync(null, null, null, TestContext.Current.CancellationToken))
             events.Add(evt);
         var messages = events.Select(e => e.Message).ToList();
 
@@ -40,6 +40,25 @@ public class GatewayEventStreamTests
         Assert.Equal("hi", messages[0].Content);
         Assert.Equal("Me", messages[0].FromName);
         Assert.Equal("second", messages[1].Content);
+    }
+
+    // 剛重啟沒有序號才帶 afterMessage；有序號就只用序號
+    [Theory]
+    [InlineData(null, "1792640000000", "/v1/events?chats=19%3Ax%40thread.v2&afterMessage=1792640000000")]
+    [InlineData("42", "1792640000000", "/v1/events?chats=19%3Ax%40thread.v2")]
+    [InlineData(null, null, "/v1/events?chats=19%3Ax%40thread.v2")]
+    public async Task Resume_parameters(string? lastEventId, string? afterMessage, string expectedPathAndQuery)
+    {
+        var handler = new StubHandler("");
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        var stream = new GatewayEventStream(http, NullLogger<GatewayEventStream>.Instance);
+
+        await foreach (var _ in stream.ConnectAsync("19:x@thread.v2", lastEventId, afterMessage, TestContext.Current.CancellationToken))
+        {
+        }
+
+        Assert.Equal(expectedPathAndQuery, handler.LastRequest!.RequestUri!.PathAndQuery);
+        Assert.Equal(lastEventId, handler.LastRequest.Headers.TryGetValues("Last-Event-ID", out var v) ? v.Single() : null);
     }
 
     [Fact]
@@ -51,7 +70,7 @@ public class GatewayEventStreamTests
 
         await Assert.ThrowsAsync<TimeoutException>(async () =>
         {
-            await foreach (var _ in stream.ConnectAsync(null, null, TestContext.Current.CancellationToken))
+            await foreach (var _ in stream.ConnectAsync(null, null, null, TestContext.Current.CancellationToken))
             {
             }
         });
@@ -68,7 +87,7 @@ public class GatewayEventStreamTests
         var stream = new GatewayEventStream(http, NullLogger<GatewayEventStream>.Instance, idleTimeout: TimeSpan.FromMilliseconds(200));
 
         var ids = new List<string?>();
-        await foreach (var evt in stream.ConnectAsync(null, null, TestContext.Current.CancellationToken))
+        await foreach (var evt in stream.ConnectAsync(null, null, null, TestContext.Current.CancellationToken))
         {
             ids.Add(evt.Id);
             await Task.Delay(500, TestContext.Current.CancellationToken);
@@ -133,10 +152,15 @@ public class GatewayEventStreamTests
 
     private sealed class StubHandler(string body) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        public HttpRequestMessage? LastRequest { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(body, Encoding.UTF8, "text/event-stream"),
             });
+        }
     }
 }

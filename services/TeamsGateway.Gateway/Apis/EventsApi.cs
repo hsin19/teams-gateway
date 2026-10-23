@@ -26,7 +26,8 @@ public static class EventsApi
             ApiKeyService keys,
             IOptions<GatewayOptions> options,
             CancellationToken ct,
-            string? chats = null) =>
+            string? chats = null,
+            string? afterMessage = null) =>
         {
             var apiKeyId = ((ApiKey)http.Items[nameof(ApiKey)]!).Id;
             var heartbeat = TimeSpan.FromSeconds(Math.Max(1, options.Value.SseHeartbeatSeconds));
@@ -40,7 +41,7 @@ public static class EventsApi
             http.Response.Headers["X-Accel-Buffering"] = "no";
 
             // 游標 = 已處理到的序號。先讀游標再訂閱：中間發的事件會在下面的補收從 DB 撈到，不會漏
-            var cursor = await StartCursorAsync(factory, http.Request.Headers["Last-Event-ID"].ToString(), ct);
+            var cursor = await StartCursorAsync(factory, http.Request.Headers["Last-Event-ID"].ToString(), afterMessage, ct);
             using var subscription = bus.Subscribe();
 
             // 立刻 flush header（SSE comment），訂閱者一連上就確定連線成立，不用等第一則訊息
@@ -96,18 +97,28 @@ public static class EventsApi
         })
         .AddEndpointFilter<ApiKeyFilter>()
         .WithSummary("SSE 即時訊息串流")
-        .WithDescription("連著收即時新訊息（像 Slack Socket Mode）。`chats` 逗號分隔過濾對話、省略 = 全部。SSE `id` 是事件序號；重連帶 `Last-Event-ID`（最後收到的 `id`）會先補回斷線期間發過的事件。閒置時定期送 `: ping` 心跳；API key 被撤銷會斷線。")
+        .WithDescription("連著收即時新訊息（像 Slack Socket Mode）。`chats` 逗號分隔過濾對話、省略 = 全部。SSE `id` 是事件序號；重連帶 `Last-Event-ID`（最後收到的 `id`）會先補回斷線期間發過的事件；沒有序號時可帶 `afterMessage`（最後處理的 Teams 訊息 id）從那則之後補。閒置時定期送 `: ping` 心跳；API key 被撤銷會斷線。")
         .WithTags("Events");
     }
 
     /// <summary>
-    /// 從哪個序號之後開始送。沒帶 / 看不懂 / 比目前最大序號還大（例如舊 client 帶的訊息 id）→ 從現在開始、不補。
+    /// 從哪個序號之後開始送：
+    /// 1. 合法的 <c>Last-Event-ID</c>（斷線重連）；
+    /// 2. 沒有的話看 <paramref name="afterMessage"/>：訂閱者重啟、序號沒留下來，但知道自己最後轉出去的是哪則訊息
+    ///    （例如 relay 從 Slack 讀回來的）→ 從那則第一次發出之後補（之後的編輯也會重送，訂閱者照版本去重）；
+    /// 3. 都沒有 / 看不懂 / 比目前最大序號還大（例如舊 client 帶的訊息 id）→ 從現在開始、不補。
     /// </summary>
-    internal static async Task<long> StartCursorAsync(IDbContextFactory<GatewayDbContext> factory, string? lastEventId, CancellationToken ct)
+    internal static async Task<long> StartCursorAsync(
+        IDbContextFactory<GatewayDbContext> factory, string? lastEventId, string? afterMessage, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var max = await db.PublishedEvents.MaxAsync(e => (long?)e.Seq, ct) ?? 0;
-        return long.TryParse(lastEventId, out var last) && last >= 0 && last <= max ? last : max;
+        if (long.TryParse(lastEventId, out var last) && last >= 0 && last <= max)
+            return last;
+        if (!string.IsNullOrEmpty(afterMessage)
+            && await db.PublishedEvents.Where(e => e.MessageId == afterMessage).MinAsync(e => (long?)e.Seq, ct) is { } first)
+            return first;
+        return max;
     }
 
     /// <summary>序號在 (<paramref name="after"/>, <paramref name="upTo"/>] 的事件，由舊到新，最多 <paramref name="limit"/> 筆。</summary>
