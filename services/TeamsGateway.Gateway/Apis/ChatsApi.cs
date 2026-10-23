@@ -15,14 +15,12 @@ public static class ChatsApi
         var v1 = app.MapGroup("/v1").AddEndpointFilter<ApiKeyFilter>();
 
         // Teams 認證健康：給訂閱者（relay）偵測 cookie 失效並告警
-        v1.MapGet("/status", (SkypeTokenProvider tokens) => Results.Ok(new
-        {
-            teamsAuth = tokens.Healthy ? "ok" : "failed",
-            lastTokenAt = tokens.LastSuccessAt,
-            lastFailureAt = tokens.LastFailureAt,
-            lastError = tokens.Healthy ? null : tokens.LastError,
-            tokenExpiresAt = tokens.Current?.ExpiresAt,
-        }))
+        v1.MapGet("/status", (SkypeTokenProvider tokens) => TypedResults.Ok(new AuthStatusDto(
+            TeamsAuth: tokens.Healthy ? "ok" : "failed",
+            LastTokenAt: tokens.LastSuccessAt,
+            LastFailureAt: tokens.LastFailureAt,
+            LastError: tokens.Healthy ? null : tokens.LastError,
+            TokenExpiresAt: tokens.Current?.ExpiresAt)))
         .WithSummary("Teams 認證健康")
         .WithDescription("回報 gateway 與 Teams 的連線認證是否正常（relay 用來偵測登入 cookie 失效並告警）。")
         .WithTags("Status");

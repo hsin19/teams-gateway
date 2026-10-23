@@ -32,4 +32,15 @@ public sealed record MessagePage(IReadOnlyList<MessageDto> Messages, string? Nex
 
 public sealed record SendMessageRequest(string Text);
 
+/// <summary>
+/// <c>GET /v1/status</c>：gateway 與 Teams 的認證健康。<c>TeamsAuth</c> 是 <c>ok</c> 或 <c>failed</c>；
+/// 訂閱者（relay）拿來偵測登入 cookie 失效並告警。
+/// </summary>
+public sealed record AuthStatusDto(
+    string TeamsAuth,
+    DateTimeOffset? LastTokenAt,
+    DateTimeOffset? LastFailureAt,
+    string? LastError,
+    DateTimeOffset? TokenExpiresAt);
+
 public sealed record SendMessageResult(string ClientMessageId);

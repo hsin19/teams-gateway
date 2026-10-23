@@ -38,6 +38,18 @@ public class ContractsJsonContextTests
         Assert.Equal(JsonSerializer.Serialize(chats, Reflection), JsonSerializer.Serialize(chats, ContractsJsonContext.Default.IReadOnlyListConversationDto));
     }
 
+    // /v1/status 原本回匿名物件：改成 contract record 後輸出不能變（relay 與外部訂閱者都在讀）
+    [Fact]
+    public void Auth_status_matches_previous_anonymous_output()
+    {
+        var at = new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero);
+        var previous = new { teamsAuth = "failed", lastTokenAt = (DateTimeOffset?)at, lastFailureAt = (DateTimeOffset?)at.AddHours(1), lastError = "cookie 過期", tokenExpiresAt = (DateTimeOffset?)null };
+
+        Assert.Equal(
+            JsonSerializer.Serialize(previous, Reflection),
+            JsonSerializer.Serialize(new AuthStatusDto("failed", at, at.AddHours(1), "cookie 過期", null), ContractsJsonContext.Default.AuthStatusDto));
+    }
+
     // 舊 payload / 舊 client 可能沒帶 version 之後加的欄位：用建構子的預設值
     [Fact]
     public void Missing_optional_fields_take_defaults()

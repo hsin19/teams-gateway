@@ -8,7 +8,7 @@ public class SlackImageBlocksTests
     [Fact]
     public void Text_section_then_one_image_block_per_file()
     {
-        using var json = JsonDocument.Parse(JsonSerializer.Serialize(SlackClient.ImageBlocks("*Alice*: look", ["F1", "F2"])));
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(SlackClient.ImageBlocks("*Alice*: look", ["F1", "F2"]), SlackJsonContext.Default.IReadOnlyListSlackBlock));
         var blocks = json.RootElement.EnumerateArray().ToList();
 
         Assert.Equal(3, blocks.Count);
@@ -24,7 +24,7 @@ public class SlackImageBlocksTests
     public void Long_text_splits_into_sections_within_limit()
     {
         var text = new string('a', 7000);
-        using var json = JsonDocument.Parse(JsonSerializer.Serialize(SlackClient.ImageBlocks(text, ["F1"])));
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(SlackClient.ImageBlocks(text, ["F1"]), SlackJsonContext.Default.IReadOnlyListSlackBlock));
         var sections = json.RootElement.EnumerateArray()
             .Where(b => b.GetProperty("type").GetString() == "section")
             .Select(b => b.GetProperty("text").GetProperty("text").GetString()!)

@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace TeamsGateway.SlackRelay;
 
@@ -18,32 +17,27 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     // 剛上傳的檔 Slack 可能還沒處理完，這時引用它的 image block 會回 invalid_blocks
     private static readonly TimeSpan[] FileNotReadyDelays = [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4)];
 
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
-
     // version：目前顯示的是 Teams 哪一版（毫秒時間戳，原文 = 訊息 id、編輯後 = 編輯時間），重啟回補後留證才標得出時間
-    private static object? Meta(string? teamsId, long? version) =>
-        teamsId is null ? null : new { event_type = MetaEventType, event_payload = new { teams_id = teamsId, version } };
+    private static SlackMetadata? Meta(string? teamsId, long? version) =>
+        teamsId is null ? null : new SlackMetadata(MetaEventType, new SlackRelayPayload(teamsId, version));
 
     /// <summary>發訊息（<paramref name="teamsId"/> / <paramref name="version"/> 夾進 metadata、<paramref name="images"/> 是已上傳的 Slack file id）；回傳貼成的 ts，失敗 null。</summary>
     public async Task<string?> PostMessageAsync(string channel, string text, string? teamsId, long? version, IReadOnlyList<string> images, CancellationToken ct)
     {
         var result = await SendAsync("chat.postMessage", channel, text, images, clearBlocks: false,
-            (t, blocks) => new { channel, text = t, blocks, metadata = Meta(teamsId, version) }, ct);
+            (t, blocks) => new SlackMessageRequest(channel, t, blocks, Metadata: Meta(teamsId, version)), ct);
         return result?.Ts;
     }
 
     /// <summary>原地更新一則訊息（編輯用；Slack 自帶 "edited"）。metadata 要一起帶，不然更新後會掉。</summary>
     public async Task UpdateMessageAsync(string channel, string ts, string text, string teamsId, long? version, IReadOnlyList<string> images, CancellationToken ct) =>
         await SendAsync("chat.update", channel, text, images, clearBlocks: true,
-            (t, blocks) => new { channel, ts, text = t, blocks, metadata = Meta(teamsId, version) }, ct);
+            (t, blocks) => new SlackMessageRequest(channel, t, blocks, Ts: ts, Metadata: Meta(teamsId, version)), ct);
 
     /// <summary>在某則訊息的 thread 底下回一則（舊版留證用）。</summary>
     public async Task PostReplyAsync(string channel, string threadTs, string text, IReadOnlyList<string> images, CancellationToken ct) =>
         await SendAsync("chat.postMessage", channel, text, images, clearBlocks: false,
-            (t, blocks) => new { channel, text = t, blocks, thread_ts = threadTs }, ct);
+            (t, blocks) => new SlackMessageRequest(channel, t, blocks, ThreadTs: threadTs), ct);
 
     /// <summary>
     /// 上傳一張圖但不分享到任何頻道（留 private），回傳 file id 給 image block 的 <c>slack_file</c> 引用；失敗 null。
@@ -56,7 +50,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
             ["filename"] = filename,
             ["length"] = bytes.Length.ToString(CultureInfo.InvariantCulture),
         }), ct);
-        var ticket = await ticketResp.Content.ReadFromJsonAsync<UploadTicketResponse>(ct);
+        var ticket = await ticketResp.Content.ReadFromJsonAsync(SlackJsonContext.Default.UploadTicketResponse, ct);
         if (ticket is not { Ok: true, UploadUrl: { } uploadUrl, FileId: { } fileId })
         {
             logger.LogWarning("Slack files.getUploadURLExternal 失敗：{Error}{Hint}",
@@ -74,10 +68,10 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
             }
         }
 
-        var files = JsonSerializer.Serialize(new[] { new { id = fileId, title = filename } });
+        var files = JsonSerializer.Serialize([new UploadedFile(fileId, filename)], SlackJsonContext.Default.UploadedFileArray);
         using var doneResp = await http.PostAsync("files.completeUploadExternal",
             new FormUrlEncodedContent(new Dictionary<string, string> { ["files"] = files }), ct);
-        var done = await doneResp.Content.ReadFromJsonAsync<PostResponse>(ct);
+        var done = await doneResp.Content.ReadFromJsonAsync(SlackJsonContext.Default.PostResponse, ct);
         if (done is { Ok: true })
             return fileId;
         logger.LogWarning("Slack files.completeUploadExternal 失敗：{Error}", done?.Error ?? ((int)doneResp.StatusCode).ToString(CultureInfo.InvariantCulture));
@@ -89,15 +83,15 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     {
         var url = $"chat.getPermalink?channel={Uri.EscapeDataString(channel)}&message_ts={Uri.EscapeDataString(ts)}";
         using var resp = await http.GetAsync(url, ct);
-        var result = await resp.Content.ReadFromJsonAsync<PermalinkResponse>(ct);
+        var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.PermalinkResponse, ct);
         return result is { Ok: true } ? result.Permalink : null;
     }
 
     /// <summary>bot 加入頻道（才讀得到歷史；public 頻道用 <c>channels:join</c>）。已在裡面也回 ok。</summary>
     public async Task JoinChannelAsync(string channel, CancellationToken ct)
     {
-        using var resp = await http.PostAsJsonAsync("conversations.join", new { channel }, ct);
-        var result = await resp.Content.ReadFromJsonAsync<PostResponse>(ct);
+        using var resp = await http.PostAsJsonAsync("conversations.join", new JoinRequest(channel), SlackJsonContext.Default.JoinRequest, ct);
+        var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.PostResponse, ct);
         if (result is not { Ok: true })
             logger.LogWarning("Slack conversations.join 失敗（channel={Channel}）：{Error}", channel, result?.Error ?? ((int)resp.StatusCode).ToString());
     }
@@ -112,7 +106,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
             var url = $"conversations.history?channel={Uri.EscapeDataString(channel)}&oldest={oldestUnixSeconds}&limit=200&include_all_metadata=true"
                       + (string.IsNullOrEmpty(cursor) ? "" : $"&cursor={Uri.EscapeDataString(cursor)}");
             using var resp = await http.GetAsync(url, ct);
-            var body = await resp.Content.ReadFromJsonAsync<HistoryResponse>(ct);
+            var body = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.HistoryResponse, ct);
             if (body is not { Ok: true })
             {
                 logger.LogWarning("Slack conversations.history 失敗（channel={Channel}）：{Error}", channel, body?.Error ?? ((int)resp.StatusCode).ToString());
@@ -129,13 +123,13 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     }
 
     /// <summary>文字切成 mrkdwn section（每塊上限 3000 字）+ 每張圖一個引用 Slack 檔案的 image block。</summary>
-    public static object[] ImageBlocks(string text, IReadOnlyList<string> fileIds)
+    internal static IReadOnlyList<SlackBlock> ImageBlocks(string text, IReadOnlyList<string> fileIds)
     {
-        var blocks = new List<object>();
+        var blocks = new List<SlackBlock>();
         for (var i = 0; i < text.Length; i += SectionMaxChars)
-            blocks.Add(new { type = "section", text = new { type = "mrkdwn", text = text.Substring(i, Math.Min(SectionMaxChars, text.Length - i)) } });
-        blocks.AddRange(fileIds.Select(id => new { type = "image", slack_file = new { id }, alt_text = "image" }));
-        return [.. blocks];
+            blocks.Add(SlackBlock.Section(text.Substring(i, Math.Min(SectionMaxChars, text.Length - i))));
+        blocks.AddRange(fileIds.Select(SlackBlock.Image));
+        return blocks;
     }
 
     /// <summary>
@@ -145,14 +139,14 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     /// </summary>
     private async Task<PostResponse?> SendAsync(
         string method, string channel, string text, IReadOnlyList<string> images, bool clearBlocks,
-        Func<string, object[]?, object> body, CancellationToken ct)
+        Func<string, IReadOnlyList<SlackBlock>?, SlackMessageRequest> body, CancellationToken ct)
     {
         var withImages = images.Count > 0;
         for (var attempt = 0; ; attempt++)
         {
-            object[]? blocks = withImages ? ImageBlocks(text, images) : clearBlocks ? [] : null;
-            using var resp = await http.PostAsJsonAsync(method, body(text, blocks), Json, ct);
-            var result = await resp.Content.ReadFromJsonAsync<PostResponse>(ct);
+            IReadOnlyList<SlackBlock>? blocks = withImages ? ImageBlocks(text, images) : clearBlocks ? [] : null;
+            using var resp = await http.PostAsJsonAsync(method, body(text, blocks), SlackJsonContext.Default.SlackMessageRequest, ct);
+            var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.PostResponse, ct);
             if (withImages && result is { Ok: false, Error: "invalid_blocks" })
             {
                 if (attempt < FileNotReadyDelays.Length)
@@ -173,42 +167,4 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     }
 
     public readonly record struct RelayedMessage(string TeamsId, string Ts, string Text, long? Version);
-
-    private sealed record PostResponse(
-        [property: JsonPropertyName("ok")] bool Ok,
-        [property: JsonPropertyName("ts")] string? Ts,
-        [property: JsonPropertyName("error")] string? Error);
-
-    private sealed record UploadTicketResponse(
-        [property: JsonPropertyName("ok")] bool Ok,
-        [property: JsonPropertyName("upload_url")] string? UploadUrl,
-        [property: JsonPropertyName("file_id")] string? FileId,
-        [property: JsonPropertyName("error")] string? Error);
-
-    private sealed record PermalinkResponse(
-        [property: JsonPropertyName("ok")] bool Ok,
-        [property: JsonPropertyName("permalink")] string? Permalink,
-        [property: JsonPropertyName("error")] string? Error);
-
-    private sealed record HistoryResponse(
-        [property: JsonPropertyName("ok")] bool Ok,
-        [property: JsonPropertyName("messages")] HistoryMessage[]? Messages,
-        [property: JsonPropertyName("response_metadata")] ResponseMetadata? ResponseMetadata,
-        [property: JsonPropertyName("error")] string? Error);
-
-    private sealed record HistoryMessage(
-        [property: JsonPropertyName("ts")] string? Ts,
-        [property: JsonPropertyName("text")] string? Text,
-        [property: JsonPropertyName("metadata")] MessageMetadata? Metadata);
-
-    private sealed record MessageMetadata(
-        [property: JsonPropertyName("event_type")] string? EventType,
-        [property: JsonPropertyName("event_payload")] MetadataPayload? EventPayload);
-
-    private sealed record MetadataPayload(
-        [property: JsonPropertyName("teams_id")] string? TeamsId,
-        [property: JsonPropertyName("version")] long? Version);
-
-    private sealed record ResponseMetadata(
-        [property: JsonPropertyName("next_cursor")] string? NextCursor);
 }

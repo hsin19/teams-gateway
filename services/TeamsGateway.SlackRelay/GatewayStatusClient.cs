@@ -1,5 +1,5 @@
 using System.Net.Http.Json;
-using System.Text.Json.Serialization;
+using TeamsGateway.Contracts;
 
 namespace TeamsGateway.SlackRelay;
 
@@ -14,7 +14,7 @@ public sealed class GatewayStatusClient(HttpClient http, ILogger<GatewayStatusCl
     {
         try
         {
-            var status = await http.GetFromJsonAsync<StatusDto>("/v1/status", ct);
+            var status = await http.GetFromJsonAsync("/v1/status", ContractsJsonContext.Default.AuthStatusDto, ct);
             return status is null ? null : status.TeamsAuth == "ok";
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -23,6 +23,4 @@ public sealed class GatewayStatusClient(HttpClient http, ILogger<GatewayStatusCl
             return null;
         }
     }
-
-    private sealed record StatusDto([property: JsonPropertyName("teamsAuth")] string TeamsAuth);
 }
