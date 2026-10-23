@@ -11,7 +11,7 @@ namespace TeamsGateway.Gateway.Mcp;
 /// `chat` 參數接 thread id（19:...）或群名，gateway 端自己解析。
 /// </summary>
 [McpServerToolType]
-public static class TeamsTools
+public sealed class TeamsTools // 不能是 static：WithTools<T> 要拿它當型別參數
 {
     [McpServerTool(Name = "list_chats"), Description("列出 Teams 對話（群組 / 1:1）。可用 query 關鍵字篩 topic。")]
     public static async Task<IReadOnlyList<ConversationDto>> ListChats(

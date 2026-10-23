@@ -1,11 +1,15 @@
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
+using ModelContextProtocol;
 using TeamsGateway.Contracts;
 using Scalar.AspNetCore;
 using TeamsGateway.Gateway.Apis;
 using TeamsGateway.Gateway.Auth;
 using TeamsGateway.Gateway.Data;
 using TeamsGateway.Gateway.Events;
+using TeamsGateway.Gateway.Mcp;
 using TeamsGateway.Gateway.Teams;
 
 namespace TeamsGateway.Gateway;
@@ -62,8 +66,9 @@ public static class Extensions
         builder.Services.AddHostedService<ReconcileService>(); // 慢更新：定期補編輯 / 刪除
         builder.Services.AddHostedService<PollService>();      // 輪詢保險：補 Trouter 漏推的新訊息
 
-        // MCP：讀 / 發是純 function，開成 MCP tool 給任何 MCP client 用（見 Mcp/TeamsTools）
-        builder.Services.AddMcpServer().WithHttpTransport().WithToolsFromAssembly();
+        // MCP：讀 / 發是純 function，開成 MCP tool 給任何 MCP client 用（見 Mcp/TeamsTools）。
+        // 明確列出 tool 型別，不掃 assembly（WithToolsFromAssembly 靠 reflection，trim / AOT 下拿不到）
+        builder.Services.AddMcpServer().WithHttpTransport().WithTools<TeamsTools>(McpToolJson);
 
         // 內建 OpenAPI + Scalar UI（/scalar）
         builder.Services.AddOpenApi(options =>
@@ -105,6 +110,12 @@ public static class Extensions
             });
         });
     }
+
+    /// <summary>MCP tool 的 JSON：回傳的 contract 型別走 Contracts 的 source-gen，其餘（參數、MCP 協定本身）照 SDK 預設。</summary>
+    private static readonly JsonSerializerOptions McpToolJson = new(McpJsonUtilities.DefaultOptions)
+    {
+        TypeInfoResolver = JsonTypeInfoResolver.Combine(ContractsJsonContext.Default, McpJsonUtilities.DefaultOptions.TypeInfoResolver),
+    };
 
     public static async Task UseApplicationAsync(this WebApplication app)
     {
