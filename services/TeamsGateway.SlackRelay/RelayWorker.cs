@@ -59,7 +59,10 @@ public sealed class RelayWorker(
             {
                 await foreach (var evt in stream.ConnectAsync(chats, lastId, resumeAfter, ct))
                 {
-                    await RelayWithRetryAsync(evt.Message, routes, opts.Slack.DefaultChannel, ct);
+                    if (evt.Message is { } message)
+                        await RelayWithRetryAsync(message, routes, opts.Slack.DefaultChannel, ct);
+                    else if (evt.Reaction is { } reaction)
+                        await WithRetryAsync($"表情 {reaction.Emoji}（訊息 {reaction.MessageId}）", () => RelayReactionAsync(reaction, ct), ct);
                     lastId = evt.Id ?? lastId; // 處理完（或放棄）才往前推
                     backoff = MinBackoff; // 收得到就重置退避
                 }
@@ -107,27 +110,51 @@ public sealed class RelayWorker(
     /// 例外不能冒出去：外層會當成 SSE 斷線，重連後這則就默默消失、log 還寫成連線問題。
     /// （編輯在「舊版留證」成功、「原地更新」失敗時重試會多留一則證，可以接受。）
     /// </summary>
-    internal async Task RelayWithRetryAsync(MessageDto message, Dictionary<string, string> routes, string? defaultChannel, CancellationToken ct)
+    internal Task RelayWithRetryAsync(MessageDto message, Dictionary<string, string> routes, string? defaultChannel, CancellationToken ct) =>
+        WithRetryAsync($"訊息 {message.Id}（{message.ConversationId}）", () => RelayAsync(message, routes, defaultChannel, ct), ct);
+
+    private async Task WithRetryAsync(string what, Func<Task> relay, CancellationToken ct)
     {
         for (var attempt = 0; ; attempt++)
         {
             try
             {
-                await RelayAsync(message, routes, defaultChannel, ct);
+                await relay();
                 return;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && attempt < RetryDelays.Length)
             {
-                logger.LogWarning(ex, "轉送 {MessageId} 失敗，{Delay} 後重試", message.Id, RetryDelays[attempt]);
+                logger.LogWarning(ex, "轉送{What}失敗，{Delay} 後重試", what, RetryDelays[attempt]);
                 await Task.Delay(RetryDelays[attempt], ct);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                logger.LogError(ex, "轉送 {MessageId}（{Conversation}）重試 {Attempts} 次仍失敗，放棄這則",
-                    message.Id, message.ConversationId, RetryDelays.Length);
+                logger.LogError(ex, "轉送{What}重試 {Attempts} 次仍失敗，放棄", what, RetryDelays.Length);
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// 有人在 Teams 按 / 收回表情：在那則 Slack 訊息的 thread 留一句「*誰* reacted 👀」/「removed」，
+    /// bot 也在原訊息按上同一個 Slack 表情（頻道裡就看得到有人按），最後一個人收回時拿掉。
+    /// 那則沒轉過（或太舊、對應已清掉）就沒地方掛，略過。
+    /// </summary>
+    internal async Task RelayReactionAsync(ReactionDto reaction, CancellationToken ct)
+    {
+        if (reaction.UserName is { } known)
+            RememberSender(reaction.UserMri, known);
+        if (links.Lookup(reaction.MessageId) is not { } target)
+            return;
+
+        var who = reaction.UserName ?? SenderName(reaction.UserMri) ?? "Someone";
+        var verb = reaction.Added ? "reacted" : "removed";
+        await slack.PostReplyAsync(target.Channel, target.Ts,
+            $"*{TeamsText.EscapeMrkdwn(who)}* {verb} {TeamsText.EscapeMrkdwn(TeamsEmoji.Glyph(reaction.Emoji))}", [], ct);
+
+        // 不同 Teams 表情可能對到同一個 Slack 表情（like / yes 都是 👍）：其中一個收回到 0 就會拿掉，可以接受
+        if (TeamsEmoji.SlackName(reaction.Emoji) is { } name && (reaction.Added || reaction.Count == 0))
+            await slack.ReactAsync(target.Channel, target.Ts, name, add: reaction.Added, ct);
     }
 
     private async Task RelayAsync(MessageDto message, Dictionary<string, string> routes, string? defaultChannel, CancellationToken ct)
@@ -216,11 +243,15 @@ public sealed class RelayWorker(
 
     private void RememberSender(MessageDto message)
     {
-        if (message.From is not { Length: > 0 } mri || string.IsNullOrWhiteSpace(message.FromName))
-            return;
+        if (message.From is { Length: > 0 } mri && !string.IsNullOrWhiteSpace(message.FromName))
+            RememberSender(mri, message.FromName);
+    }
+
+    private void RememberSender(string mri, string name)
+    {
         if (_senderNames.Count >= MaxSenderNames && !_senderNames.ContainsKey(mri))
             _senderNames.Clear(); // 滿了整個清掉：常駐很久也不會一直長，代價只是暫時退回 HTML 裡的名字
-        _senderNames[mri] = message.FromName;
+        _senderNames[mri] = name;
     }
 
     private string? SenderName(string mri) => _senderNames.GetValueOrDefault(mri);

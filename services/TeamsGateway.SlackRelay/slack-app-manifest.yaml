@@ -6,6 +6,7 @@
 # channels:history + channels:join：啟動時 bot 加入頻道、讀近期歷史，從訊息 metadata 把
 #   Teams id → Slack 訊息 的對應撈回來（重啟後回覆連結 / 原地編輯才連得到）。
 # files:write：Teams 訊息的內嵌圖片上傳成 Slack 檔案（不分享到頻道），再用 image block 貼在訊息裡。
+# reactions:write：Teams 有人按表情時，bot 在轉過去的訊息上按同一個 Slack 表情（誰按的寫在 thread 裡）。
 # Phase 2（Slack→Teams）再加 socket_mode_enabled + app token + event_subscriptions。
 display_information:
   name: Teams Relay
@@ -22,6 +23,7 @@ oauth_config:
       - channels:history
       - channels:join
       - files:write
+      - reactions:write
 settings:
   org_deploy_enabled: false
   socket_mode_enabled: false

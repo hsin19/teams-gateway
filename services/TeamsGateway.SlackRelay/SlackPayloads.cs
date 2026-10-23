@@ -32,6 +32,9 @@ internal sealed record SlackRelayPayload(string? TeamsId, long? Version);
 
 internal sealed record JoinRequest(string Channel);
 
+/// <summary><c>reactions.add</c> / <c>reactions.remove</c>：在某則訊息按 / 收回一個表情。</summary>
+internal sealed record ReactionRequest(string Channel, string Timestamp, string Name);
+
 /// <summary><c>files.completeUploadExternal</c> 的 <c>files</c> 欄位（JSON 字串）裡的一項。</summary>
 internal sealed record UploadedFile(string Id, string Title);
 
@@ -54,6 +57,7 @@ internal sealed record ResponseMetadata(string? NextCursor);
 [JsonSerializable(typeof(SlackMessageRequest))]
 [JsonSerializable(typeof(IReadOnlyList<SlackBlock>))]
 [JsonSerializable(typeof(JoinRequest))]
+[JsonSerializable(typeof(ReactionRequest))]
 [JsonSerializable(typeof(UploadedFile[]))]
 [JsonSerializable(typeof(PostResponse))]
 [JsonSerializable(typeof(UploadTicketResponse))]

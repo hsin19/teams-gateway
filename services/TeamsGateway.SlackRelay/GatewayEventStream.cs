@@ -1,12 +1,14 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using TeamsGateway.Contracts;
 
 namespace TeamsGateway.SlackRelay;
 
 /// <summary>SSE 的一個 message 事件。<see cref="Id"/> 是 gateway 的事件序號，重連時當 <c>Last-Event-ID</c> 帶回去。</summary>
-public readonly record struct StreamEvent(string? Id, MessageDto Message);
+/// <summary>SSE 的一個事件：訊息或表情變動擇一。<see cref="Id"/> 是 gateway 的事件序號，重連時當 <c>Last-Event-ID</c> 帶回去。</summary>
+public readonly record struct StreamEvent(string? Id, MessageDto? Message = null, ReactionDto? Reaction = null);
 
 /// <summary>
 /// 連 gateway 的 <c>GET /v1/events</c>（SSE），解析出 <see cref="StreamEvent"/>。
@@ -66,13 +68,17 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
             if (line.Length == 0)
             {
                 // 事件邊界：收完一個事件
-                var message = eventType == "message" && data.Length > 0 ? TryParse(data.ToString()) : null;
-                var id = eventId;
+                var parsed = data.Length == 0 ? null : eventType switch
+                {
+                    EventKinds.Message when TryParse(data.ToString(), ContractsJsonContext.Default.MessageDto) is { } message => new StreamEvent(eventId, message),
+                    EventKinds.Reaction when TryParse(data.ToString(), ContractsJsonContext.Default.ReactionDto) is { } reaction => new StreamEvent(eventId, Reaction: reaction),
+                    _ => (StreamEvent?)null, // 不認得的事件種類：略過
+                };
                 eventType = null;
                 eventId = null;
                 data.Clear();
-                if (message is not null)
-                    yield return new StreamEvent(id, message);
+                if (parsed is { } evt)
+                    yield return evt;
                 continue;
             }
 
@@ -85,11 +91,11 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
         }
     }
 
-    private MessageDto? TryParse(string json)
+    private T? TryParse<T>(string json, JsonTypeInfo<T> typeInfo) where T : class
     {
         try
         {
-            return JsonSerializer.Deserialize(json, ContractsJsonContext.Default.MessageDto);
+            return JsonSerializer.Deserialize(json, typeInfo);
         }
         catch (JsonException ex)
         {

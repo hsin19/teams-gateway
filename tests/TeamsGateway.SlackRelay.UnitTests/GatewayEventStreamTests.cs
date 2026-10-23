@@ -33,7 +33,7 @@ public class GatewayEventStreamTests
         var events = new List<StreamEvent>();
         await foreach (var evt in stream.ConnectAsync(null, null, null, TestContext.Current.CancellationToken))
             events.Add(evt);
-        var messages = events.Select(e => e.Message).ToList();
+        var messages = events.Select(e => e.Message!).ToList();
 
         Assert.Equal(["7", "8"], events.Select(e => e.Id)); // SSE id 是事件序號，續接用它
         Assert.Equal(["100", "101"], messages.Select(m => m.Id));
@@ -59,6 +59,25 @@ public class GatewayEventStreamTests
 
         Assert.Equal(expectedPathAndQuery, handler.LastRequest!.RequestUri!.PathAndQuery);
         Assert.Equal(lastEventId, handler.LastRequest.Headers.TryGetValues("Last-Event-ID", out var v) ? v.Single() : null);
+    }
+
+    [Fact]
+    public async Task Parses_reaction_events()
+    {
+        const string body =
+            "id: 9\nevent: reaction\n" +
+            "data: {\"messageId\":\"100\",\"conversationId\":\"19:x@thread.v2\",\"emoji\":\"1f440_eyes\",\"userMri\":\"8:alice\",\"userName\":\"Alice\",\"added\":true,\"time\":\"2026-10-22T00:00:00+00:00\",\"count\":1}\n\n";
+        var http = new HttpClient(new StubHandler(body)) { BaseAddress = new Uri("http://localhost") };
+        var stream = new GatewayEventStream(http, NullLogger<GatewayEventStream>.Instance);
+
+        var events = new List<StreamEvent>();
+        await foreach (var evt in stream.ConnectAsync(null, null, null, TestContext.Current.CancellationToken))
+            events.Add(evt);
+
+        var reaction = Assert.Single(events);
+        Assert.Equal("9", reaction.Id);
+        Assert.Null(reaction.Message);
+        Assert.Equal(("100", "1f440_eyes", "Alice", true, 1), (reaction.Reaction!.MessageId, reaction.Reaction.Emoji, reaction.Reaction.UserName, reaction.Reaction.Added, reaction.Reaction.Count));
     }
 
     [Fact]

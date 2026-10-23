@@ -87,6 +87,22 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         return result is { Ok: true } ? result.Permalink : null;
     }
 
+    /// <summary>
+    /// bot 在某則訊息按 / 收回一個原生表情（需要 <c>reactions:write</c>）。已經按過 / 本來就沒按、或 Slack 不認得這個表情名稱，
+    /// 都當成沒事：這只是讓人在頻道裡看得到「有人按了」，誰按的在 thread 留言裡。
+    /// </summary>
+    public async Task ReactAsync(string channel, string ts, string name, bool add, CancellationToken ct)
+    {
+        var method = add ? "reactions.add" : "reactions.remove";
+        using var resp = await http.PostAsJsonAsync(method, new ReactionRequest(channel, ts, name), SlackJsonContext.Default.ReactionRequest, ct);
+        var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.PostResponse, ct);
+        if (result is { Ok: true } or { Error: "already_reacted" or "no_reaction" or "invalid_name" })
+            return;
+        logger.LogWarning("Slack {Method} 失敗（channel={Channel}, name={Name}）：{Error}{Hint}", method, channel, name,
+            result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture),
+            result?.Error == "missing_scope" ? "（Slack app 要加 reactions:write 並重新安裝）" : "");
+    }
+
     /// <summary>bot 加入頻道（才讀得到歷史；public 頻道用 <c>channels:join</c>）。已在裡面也回 ok。</summary>
     public async Task JoinChannelAsync(string channel, CancellationToken ct)
     {
