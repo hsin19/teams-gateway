@@ -211,7 +211,7 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
     private static CookieContainer BuildCookieContainer(string cookiesJson)
     {
         var container = new CookieContainer();
-        var cookies = JsonSerializer.Deserialize<List<LoginCookie>>(cookiesJson, JsonOptions) ?? [];
+        var cookies = JsonSerializer.Deserialize(cookiesJson, TeamsJsonContext.Default.ListLoginCookie) ?? [];
         foreach (var c in cookies)
         {
             var domain = c.Domain.TrimStart('.');
@@ -235,7 +235,7 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
             .Select(c => new LoginCookie(c.Name, c.Value.Trim('"'), c.Domain, c.Path))
             .ToList();
         if (cookies.Count > 0)
-            await secureStore.SetAsync(CookieSecureKey, JsonSerializer.Serialize(cookies, JsonOptions), ct);
+            await secureStore.SetAsync(CookieSecureKey, JsonSerializer.Serialize(cookies, TeamsJsonContext.Default.ListLoginCookie), ct);
     }
 
     private static (string Verifier, string Challenge) Pkce()
@@ -249,6 +249,4 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     private static string Truncate(string s) => s.Length <= 300 ? s : s[..300];
-
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 }

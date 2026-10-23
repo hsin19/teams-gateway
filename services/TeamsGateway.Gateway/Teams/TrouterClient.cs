@@ -21,8 +21,8 @@ public sealed class TrouterClient(
 {
     private const string TrouterUrl = "wss://go.trouter.skype.com/v4/c";
     private const string RegistrarUrl = "https://edge.skype.com/registrar/prod/v2/registrations";
-    private static readonly string ClientInfo =
-        JsonSerializer.Serialize(new { cv = "2026.39.01.1", ua = "TeamsCDL", hr = "", v = TeamsAuthConstants.ClientVersion });
+    internal static readonly string ClientInfo = JsonSerializer.Serialize(
+        new TrouterClientInfo("2026.39.01.1", "TeamsCDL", "", TeamsAuthConstants.ClientVersion), TeamsJsonContext.Default.TrouterClientInfo);
 
     // 推播註冊的 ttl 是 3600s：不續約一小時後 Teams 就不再推，而連線本身還活著，keepalive 抓不到
     private static readonly TimeSpan RenewInterval = TimeSpan.FromMinutes(40);
@@ -144,11 +144,7 @@ public sealed class TrouterClient(
     {
         if (frame == "1::")
         {
-            await SendAsync(ws, $"5:{NextSeq()}+::" + JsonSerializer.Serialize(new
-            {
-                name = "user.authenticate",
-                args = new object[] { new { headers = new Dictionary<string, string> { ["X-Skypetoken"] = skypeToken } } },
-            }), ct);
+            await SendAsync(ws, $"5:{NextSeq()}+::" + AuthenticateJson(skypeToken), ct);
             return;
         }
         if (frame.StartsWith("5:", StringComparison.Ordinal))
@@ -168,7 +164,7 @@ public sealed class TrouterClient(
             else if (name == "trouter.message_loss")
             {
                 var args = payload.RootElement.GetProperty("args");
-                await SendAsync(ws, $"5:{NextSeq()}+::" + JsonSerializer.Serialize(new { name = "trouter.processed_message_loss", args }), ct);
+                await SendAsync(ws, $"5:{NextSeq()}+::" + MessageLossAckJson(args), ct);
             }
             return;
         }
@@ -196,14 +192,19 @@ public sealed class TrouterClient(
         }
 
         // 一定要 ack，否則 Trouter 會重送
-        await SendAsync(ws, "3:::" + JsonSerializer.Serialize(new
-        {
-            id,
-            status = 200,
-            headers = new Dictionary<string, string> { ["trouter-request"] = trouterRequest ?? "", ["trouter-client"] = "{\"cd\":1}" },
-            body = "",
-        }), ct);
+        await SendAsync(ws, "3:::" + PushAckJson(id, trouterRequest ?? ""), ct);
     }
+
+    internal static string AuthenticateJson(string skypeToken) => JsonSerializer.Serialize(
+        new TrouterAuthenticate("user.authenticate", [new TrouterAuthArgs(new() { ["X-Skypetoken"] = skypeToken })]),
+        TeamsJsonContext.Default.TrouterAuthenticate);
+
+    internal static string MessageLossAckJson(JsonElement args) => JsonSerializer.Serialize(
+        new TrouterMessageLossAck("trouter.processed_message_loss", args), TeamsJsonContext.Default.TrouterMessageLossAck);
+
+    internal static string PushAckJson(long id, string trouterRequest) => JsonSerializer.Serialize(
+        new TrouterPushAck(id, 200, new() { ["trouter-request"] = trouterRequest, ["trouter-client"] = "{\"cd\":1}" }, ""),
+        TeamsJsonContext.Default.TrouterPushAck);
 
     private static async Task DispatchPushAsync(JsonElement root, Func<IncomingMessage, CancellationToken, Task> onMessage, CancellationToken ct)
     {
@@ -249,41 +250,27 @@ public sealed class TrouterClient(
     /// </summary>
     private async Task<int> RegisterAsync(string skypeToken, string epid, string surl, CancellationToken ct)
     {
-        var main = await PostRegistrationAsync(skypeToken, new
-        {
-            appId = "TeamsCDLWebWorker",
-            aesKey = "",
-            languageId = "en-US",
-            platform = "chrome",
-            templateKey = "TeamsCDLWebWorker_2.7",
-            platformUIVersion = TeamsAuthConstants.ClientVersion,
-            productContext = "TFL",
-        }, epid, surl, ct);
-        var goldenGate = await PostRegistrationAsync(skypeToken, new
-        {
-            appId = "TeamsCDLWebWorker",
-            aesKey = "",
-            languageId = "",
-            platform = "chrome",
-            templateKey = "TeamsCDLWebWorker_2.3",
-            platformUIVersion = TeamsAuthConstants.ClientVersion,
-            productContext = "",
-        }, $"{epid}_GG", surl.TrimEnd('/'), ct);
+        var main = await PostRegistrationAsync(skypeToken, MainRegistration(epid, surl), ct);
+        var goldenGate = await PostRegistrationAsync(skypeToken, GoldenGateRegistration(epid, surl), ct);
         return main is >= 200 and < 300 ? goldenGate : main;
     }
 
-    private async Task<int> PostRegistrationAsync(string skypeToken, object clientDescription, string registrationId, string path, CancellationToken ct)
+    internal static RegistrationRequest MainRegistration(string epid, string surl) => Registration(
+        new TrouterClientDescription("TeamsCDLWebWorker", "", "en-US", "chrome", "TeamsCDLWebWorker_2.7", TeamsAuthConstants.ClientVersion, "TFL"),
+        epid, surl);
+
+    internal static RegistrationRequest GoldenGateRegistration(string epid, string surl) => Registration(
+        new TrouterClientDescription("TeamsCDLWebWorker", "", "", "chrome", "TeamsCDLWebWorker_2.3", TeamsAuthConstants.ClientVersion, ""),
+        $"{epid}_GG", surl.TrimEnd('/'));
+
+    private static RegistrationRequest Registration(TrouterClientDescription client, string registrationId, string path) =>
+        new(client, registrationId, NodeId: "", new RegistrationTransports([new TrouterTransport(Context: "", path, Ttl: 3600)]));
+
+    private async Task<int> PostRegistrationAsync(string skypeToken, RegistrationRequest body, CancellationToken ct)
     {
-        var body = new
-        {
-            clientDescription,
-            registrationId,
-            nodeId = "",
-            transports = new { TROUTER = new[] { new { context = "", path, ttl = 3600 } } },
-        };
         using var request = new HttpRequestMessage(HttpMethod.Post, RegistrarUrl)
         {
-            Content = JsonContent.Create(body),
+            Content = JsonContent.Create(body, TeamsJsonContext.Default.RegistrationRequest),
         };
         request.Headers.TryAddWithoutValidation("X-Skypetoken", skypeToken);
         request.Headers.TryAddWithoutValidation("X-MS-Migration", "True");

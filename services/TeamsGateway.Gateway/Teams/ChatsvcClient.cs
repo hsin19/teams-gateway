@@ -155,19 +155,18 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
     {
         // 亂數而不是時間戳：同一毫秒的兩個發話不能撞號（Teams 用它認同一則訊息）
         var clientMessageId = Random.Shared.NextInt64(1_000_000_000_000_000_000, long.MaxValue).ToString(CultureInfo.InvariantCulture);
-        var body = new
-        {
-            content = text,
-            messagetype = "Text",
-            contenttype = "text",
-            clientmessageid = clientMessageId,
-            imdisplayname = displayName,
-        };
+        var body = SendBody(text, clientMessageId, displayName);
         using var resp = await SendAsync(
-            () => new HttpRequestMessage(HttpMethod.Post, $"conversations/{Uri.EscapeDataString(threadId)}/messages") { Content = JsonContent.Create(body) },
+            () => new HttpRequestMessage(HttpMethod.Post, $"conversations/{Uri.EscapeDataString(threadId)}/messages")
+            {
+                Content = JsonContent.Create(body, TeamsJsonContext.Default.ChatsvcSendRequest),
+            },
             ct);
         return new SendMessageResult(clientMessageId);
     }
+
+    internal static ChatsvcSendRequest SendBody(string text, string clientMessageId, string displayName) =>
+        new(text, MessageType: "Text", ContentType: "text", clientMessageId, displayName);
 
     /// <summary>static 版的訊息解析，給 Trouter 推播事件共用。編輯會讓 version &gt; id、properties 多 edittime；刪除有 deletetime。</summary>
     public static MessageDto? ParseMessage(JsonElement m, string conversationId)

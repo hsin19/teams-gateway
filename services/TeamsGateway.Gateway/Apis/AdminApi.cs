@@ -21,7 +21,7 @@ public static class AdminApi
             List<LoginCookie>? cookies;
             try
             {
-                cookies = JsonSerializer.Deserialize<List<LoginCookie>>(json, Web);
+                cookies = JsonSerializer.Deserialize(json, TeamsJsonContext.Default.ListLoginCookie);
             }
             catch (JsonException)
             {
@@ -147,8 +147,6 @@ public static class AdminApi
 
         return admin;
     }
-
-    private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 }
 
 public sealed record CreateApiKeyRequest(string Name);
