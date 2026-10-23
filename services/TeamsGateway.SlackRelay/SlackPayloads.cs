@@ -53,6 +53,11 @@ internal sealed record HistoryMessage(string? Ts, string? Text, SlackMetadata? M
 
 internal sealed record ResponseMetadata(string? NextCursor);
 
+/// <summary><c>conversations.info</c>：只用到頻道名稱（啟動時印路由用）。</summary>
+internal sealed record ChannelInfoResponse(bool Ok, SlackChannel? Channel, string? Error);
+
+internal sealed record SlackChannel(string? Id, string? Name);
+
 /// <summary>Slack Web API 的 source-gen context：snake_case、null 不送。</summary>
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
@@ -66,4 +71,5 @@ internal sealed record ResponseMetadata(string? NextCursor);
 [JsonSerializable(typeof(UploadTicketResponse))]
 [JsonSerializable(typeof(PermalinkResponse))]
 [JsonSerializable(typeof(HistoryResponse))]
+[JsonSerializable(typeof(ChannelInfoResponse))]
 internal sealed partial class SlackJsonContext : JsonSerializerContext;

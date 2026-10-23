@@ -24,11 +24,13 @@ appsettings 放完整 default，secret 走 env（雙底線覆蓋）或 user-secr
 | `Relay:Gateway:BaseUrl` | `Relay__Gateway__BaseUrl` | gateway 位址（預設 `http://localhost:5199`） |
 | `Relay:Gateway:ApiKey` | `Relay__Gateway__ApiKey` | gateway 的 API key（gateway 的 `POST /admin/api-keys` 建） |
 | `Relay:Slack:BotToken` | `Relay__Slack__BotToken` | Slack bot token（`xoxb-…`，scope 見 manifest） |
-| `Relay:Slack:DefaultChannel` | `Relay__Slack__DefaultChannel` | 沒對應到 ChannelMap 的對話落這個頻道；不設 = 不轉 |
+| `Relay:Slack:DefaultChannel` | `Relay__Slack__DefaultChannel` | 沒對應到 Routes 的對話落這個頻道（頻道 id）；不設 = 不轉 |
 | `Relay:Slack:Routes` | — | `Teams 對話 → Slack 頻道` 路由（list） |
 | `Relay:Links:RetentionHours` | `Relay__Links__RetentionHours` | 啟動時從 Slack 歷史回補多久內的訊息對應（預設 24），給回覆連結 / 原地編輯用 |
 
 **頻道策略**：有 `Routes` 就只訂閱表內那些 Teams 對話、各自轉到對應頻道；要「全部進一個頻道」就只設 `DefaultChannel`、不填 Routes。
+
+**頻道只能填 id**（`C…`）：除了發新訊息，原地更新、按表情、讀歷史這些 Slack API 都只認 id，而且頻道改名 id 也不變。核對哪個 id 是哪個群 / 頻道看啟動時的 log：`路由：<Teams 群名>（<對話 id>）→ #<頻道名>（<頻道 id>）`。名稱來自 gateway 的 `/v1/chats` 與 Slack 的 `conversations.info`（要 `channels:read`），查不到就只印 id，不影響轉送；路由的對話不在帳號的對話清單裡（id 打錯、帳號不在群裡）會記 warning。
 
 Routes 刻意用 **list** 而非 dict：Teams 對話 id 含 `:`，當 config dict 的 key 會被 .NET config 的階層分隔符拆掉。非 secret 但屬部署專屬，放 gitignored 的 `appsettings.Local.json`（會載入、不進 repo）。
 

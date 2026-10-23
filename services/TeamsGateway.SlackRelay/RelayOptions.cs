@@ -22,7 +22,7 @@ public sealed class RelayOptions
     public sealed class SlackSettings
     {
         public string? BotToken { get; set; }
-        /// <summary>沒對應到 <see cref="Routes"/> 的對話落這個頻道；null = 不轉。</summary>
+        /// <summary>沒對應到 <see cref="Routes"/> 的對話落這個頻道（頻道 id，見 <see cref="ChannelRoute.Channel"/>）；null = 不轉。</summary>
         public string? DefaultChannel { get; set; }
         /// <summary>
         /// Teams 對話 → Slack 頻道 的轉送路由。
@@ -35,7 +35,10 @@ public sealed class RelayOptions
     {
         /// <summary>Teams 對話 id（<c>19:…@thread.v2</c> / <c>@thread.skype</c>）。</summary>
         public string Chat { get; set; } = "";
-        /// <summary>Slack 頻道 id 或 <c>#name</c>。</summary>
+        /// <summary>
+        /// Slack 頻道 id（<c>C…</c>）。只能用 id：除了發新訊息，原地更新、按表情、讀歷史都只認 id；
+        /// 頻道改名 id 也不變。對應的名稱看啟動時 <see cref="RouteLogger"/> 印的 log。
+        /// </summary>
         public string Channel { get; set; } = "";
     }
 }

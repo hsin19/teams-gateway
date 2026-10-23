@@ -111,6 +111,19 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
             result?.Error == "missing_scope" ? "（Slack app 要加 reactions:write 並重新安裝）" : "");
     }
 
+    /// <summary>頻道名稱（不含 <c>#</c>），啟動時印路由用；需要 <c>channels:read</c>（private 頻道 <c>groups:read</c>），查不到回 null。</summary>
+    public async Task<string?> GetChannelNameAsync(string channel, CancellationToken ct)
+    {
+        using var resp = await http.GetAsync($"conversations.info?channel={Uri.EscapeDataString(channel)}", ct);
+        var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.ChannelInfoResponse, ct);
+        if (result is { Ok: true, Channel.Name: { } name })
+            return name;
+        logger.LogWarning("Slack conversations.info 失敗（channel={Channel}）：{Error}{Hint}", channel,
+            result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture),
+            result?.Error == "missing_scope" ? "（Slack app 要加 channels:read 並重新安裝；private 頻道要 groups:read）" : "");
+        return null;
+    }
+
     /// <summary>bot 加入頻道（才讀得到歷史；public 頻道用 <c>channels:join</c>）。已在裡面也回 ok。</summary>
     public async Task JoinChannelAsync(string channel, CancellationToken ct)
     {

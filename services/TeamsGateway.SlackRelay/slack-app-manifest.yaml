@@ -1,5 +1,5 @@
 # Slack app manifest for the relay bot.
-# api.slack.com/apps -> Create New App -> From an app manifest -> 貼這份 -> Install to Workspace
+# https://api.slack.com/apps -> Create New App -> From an app manifest -> 貼這份 -> Install to Workspace
 # 裝完到 OAuth & Permissions 複製 Bot User OAuth Token（xoxb-…），設成 Relay__Slack__BotToken。
 #
 # chat:write.public 讓 bot 不用被邀請就能貼公開頻道（三個 teams-* 是 public）。
@@ -7,6 +7,7 @@
 #   Teams id → Slack 訊息 的對應撈回來（重啟後回覆連結 / 原地編輯才連得到）。
 # files:write：Teams 訊息的內嵌圖片上傳成 Slack 檔案（不分享到頻道），再用 image block 貼在訊息裡。
 # reactions:write：Teams 有人按表情時，bot 在轉過去的訊息上按同一個 Slack 表情（誰按的寫在 thread 裡）。
+# channels:read：啟動時查頻道名稱，把路由印成「Teams 群名 → #頻道名」方便核對（設定只放 id）。private 頻道要再加 groups:read。
 # Phase 2（Slack→Teams）再加 socket_mode_enabled + app token + event_subscriptions。
 display_information:
   name: Teams Relay
@@ -22,6 +23,7 @@ oauth_config:
       - chat:write.public
       - channels:history
       - channels:join
+      - channels:read
       - files:write
       - reactions:write
 settings:
