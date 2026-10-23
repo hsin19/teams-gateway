@@ -96,11 +96,18 @@ public static class AdminApi
         admin.MapPut("/subscriptions", async (SubscribeRequest body, ChatsvcClient chatsvc, IDbContextFactory<GatewayDbContext> factory, Backfiller backfiller, CancellationToken ct) =>
         {
             var chats = await chatsvc.GetConversationsAsync(ct);
-            var hit = ChatsvcClient.IsThreadId(body.Chat)
-                ? chats.FirstOrDefault(c => c.Id == body.Chat) ?? new Contracts.ConversationDto(body.Chat, null, null, null)
-                : ChatsvcClient.MatchByName(chats, body.Chat);
-            if (hit is null)
-                return Results.NotFound(new { error = $"找不到對話 '{body.Chat}'" });
+            Contracts.ConversationDto hit;
+            if (ChatsvcClient.IsThreadId(body.Chat))
+                hit = chats.FirstOrDefault(c => c.Id == body.Chat) ?? new Contracts.ConversationDto(body.Chat, null, null, null);
+            else
+            {
+                var hits = ChatsvcClient.MatchByName(chats, body.Chat);
+                if (hits.Count == 0)
+                    return Results.NotFound(new { error = $"找不到對話 '{body.Chat}'" });
+                if (hits.Count > 1)
+                    return Results.BadRequest(new { error = ChatsvcClient.Ambiguous(body.Chat, hits) });
+                hit = hits[0];
+            }
 
             await using (var db = await factory.CreateDbContextAsync(ct))
             {

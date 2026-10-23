@@ -40,7 +40,7 @@ public static class TeamsTools
         return page.Messages;
     }
 
-    [McpServerTool(Name = "send_message"), Description("發一則訊息到某個 Teams 對話（以專用帳號名義、不可撤回）。chat 可給 thread id 或群名。")]
+    [McpServerTool(Name = "send_message"), Description("發一則訊息到某個 Teams 對話（以專用帳號名義、不可撤回）。chat 可給 thread id 或群名；群名對到不只一個群會報錯並列出候選，不會自己猜。")]
     public static async Task<SendMessageResult> SendMessage(
         ChatsvcClient chatsvc,
         IOptions<GatewayOptions> options,

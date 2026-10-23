@@ -37,26 +37,42 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         return result;
     }
 
-    /// <summary>把 thread id（19:...）直接放行；否則當群名對 topic 做前綴 / 包含比對。找不到就丟例外。</summary>
+    /// <summary>把 thread id（19:...）直接放行；否則當群名比對（見 <see cref="MatchByName"/>）。找不到或對到不只一個就丟例外。</summary>
     public async Task<string> ResolveChatAsync(string spec, CancellationToken ct = default)
     {
         if (IsThreadId(spec))
             return spec;
-        var hit = MatchByName(await GetConversationsAsync(ct), spec);
-        if (hit is null)
-            throw new InvalidOperationException($"找不到群 '{spec}'（名稱不符）");
-        return hit.Id;
+        var hits = MatchByName(await GetConversationsAsync(ct), spec);
+        return hits.Count switch
+        {
+            1 => hits[0].Id,
+            0 => throw new InvalidOperationException($"找不到群 '{spec}'（名稱不符）"),
+            _ => throw new InvalidOperationException(Ambiguous(spec, hits)),
+        };
     }
+
+    /// <summary>群名對到不只一個時的說明，列出候選讓呼叫端改給完整名稱或 id。</summary>
+    public static string Ambiguous(string spec, IReadOnlyList<ConversationDto> hits) =>
+        $"'{spec}' 對到 {hits.Count} 個群：{string.Join("、", hits.Take(10).Select(h => $"{h.Topic}（{h.Id}）"))}；請給更完整的名稱或 thread id";
 
     public static bool IsThreadId(string spec) =>
         spec.StartsWith("19:", StringComparison.Ordinal) || spec.Contains("@thread", StringComparison.Ordinal);
 
-    /// <summary>群名對 topic 做前綴比對（優先）或包含比對，不分大小寫。</summary>
-    public static ConversationDto? MatchByName(IReadOnlyList<ConversationDto> chats, string spec)
+    /// <summary>
+    /// 群名對 topic 比對，不分大小寫，依序：完全相同 → 前綴 → 包含，回第一個有結果那層的全部符合。
+    /// 呼叫端只在剛好一個時採用：發話不能撤回，「dev」不能默默挑到「devops-alerts」。
+    /// </summary>
+    public static IReadOnlyList<ConversationDto> MatchByName(IReadOnlyList<ConversationDto> chats, string spec)
     {
-        var low = spec.ToLowerInvariant();
-        return chats.FirstOrDefault(c => c.Topic?.ToLowerInvariant().StartsWith(low) == true)
-               ?? chats.FirstOrDefault(c => c.Topic?.ToLowerInvariant().Contains(low) == true);
+        var low = spec.Trim().ToLowerInvariant();
+        Func<string, bool>[] rules = [t => t == low, t => t.StartsWith(low, StringComparison.Ordinal), t => t.Contains(low, StringComparison.Ordinal)];
+        foreach (var rule in rules)
+        {
+            var hits = chats.Where(c => c.Topic is { } topic && rule(topic.Trim().ToLowerInvariant())).ToList();
+            if (hits.Count > 0)
+                return hits;
+        }
+        return [];
     }
 
     /// <summary>一則訊息連同原始 JSON（給持久化留存）。</summary>

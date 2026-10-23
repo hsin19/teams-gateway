@@ -119,8 +119,39 @@ public class ChatsvcClientTests
             new("19:c", "my team backup", "Chat", null),
         };
 
-        Assert.Equal("19:a", ChatsvcClient.MatchByName(chats, "general chat")!.Id);  // 前綴優先
-        Assert.Equal("19:c", ChatsvcClient.MatchByName(chats, "backup")!.Id);      // 退包含
-        Assert.Null(ChatsvcClient.MatchByName(chats, "nope"));
+        Assert.Equal(["19:a"], ChatsvcClient.MatchByName(chats, "general chat").Select(c => c.Id));  // 前綴優先
+        Assert.Equal(["19:c"], ChatsvcClient.MatchByName(chats, "backup").Select(c => c.Id));      // 退包含
+        Assert.Empty(ChatsvcClient.MatchByName(chats, "nope"));
+    }
+
+    // 發話不能撤回：「dev」要對到叫 dev 的群，而不是第一個 dev 開頭的
+    [Fact]
+    public void MatchByName_exact_beats_prefix()
+    {
+        var chats = new List<ConversationDto>
+        {
+            new("19:ops", "devops-alerts", "Chat", null),
+            new("19:dev", "Dev", "Chat", null),
+        };
+
+        Assert.Equal(["19:dev"], ChatsvcClient.MatchByName(chats, "dev").Select(c => c.Id));
+    }
+
+    // 同一層多個符合 = 模稜兩可，全部回傳讓呼叫端報錯，不能默默挑第一個
+    [Fact]
+    public void MatchByName_returns_all_ambiguous_hits()
+    {
+        var chats = new List<ConversationDto>
+        {
+            new("19:ops", "devops-alerts", "Chat", null),
+            new("19:fe", "dev-frontend", "Chat", null),
+            new("19:x", "random", "Chat", null),
+        };
+
+        var hits = ChatsvcClient.MatchByName(chats, "dev");
+
+        Assert.Equal(["19:ops", "19:fe"], hits.Select(c => c.Id));
+        Assert.Contains("devops-alerts", ChatsvcClient.Ambiguous("dev", hits));
+        Assert.Contains("dev-frontend", ChatsvcClient.Ambiguous("dev", hits));
     }
 }
