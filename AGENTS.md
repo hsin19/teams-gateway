@@ -15,6 +15,7 @@
 | `tests/` | UnitTests / FunctionalTests / E2E |
 | `spike/` | 逆向非官方 API 的拋棄式 Python 腳本，結論在 `spike/FINDINGS.md` |
 | `docs/adr/` | 設計決策 |
+| `.github/` | CI（check / pr / release workflow）與 Dependabot |
 
 ## 建置與測試
 
@@ -25,9 +26,12 @@ dotnet test --project tests/TeamsGateway.Gateway.FunctionalTests
 GATEWAY_TEST_DB=postgres dotnet test --project tests/TeamsGateway.Gateway.FunctionalTests   # 同一組改跑 Postgres（Aspire 起 container，要有 Docker）
 dotnet test --project tests/TeamsGateway.SlackRelay.UnitTests
 dotnet test --project tests/TeamsGateway.Gateway.UnitTests -- --filter-method '*Reaction*'   # 只跑部分
+dotnet publish services/TeamsGateway.Gateway -t:PublishContainer -p:ContainerRuntimeIdentifier=linux-arm64   # 出 image 進本機 Docker（沒有 Dockerfile，ADR 0010）
 ```
 
 - 測試 runner 是 Microsoft.Testing.Platform：指定專案要用 `--project`，篩選參數放在 `--` 後面。
+- CI 在 `.github/workflows/`（架構見裡面的 README）：`check.yml` 是唯一的檢查定義，PR、push 到 main、release 都跑它（含 Postgres 版 functional test 與 shellcheck）；打 `v*` tag 由 `release.yml` 出 amd64 + arm64 image 到 GHCR。加新的檢查就加在 `check.yml`。
+- image 的設定在 csproj 與 `services/Directory.Build.props` 的 `Container*` 屬性（ADR 0010）。image 以 uid 1654 跑、沒有 shell；改了 entrypoint、環境變數、資料路徑這類東西，用上面的 `PublishContainer` 出一份實際跑過再說。
 - `TreatWarningsAsErrors` 開著，warning 會擋建置。
 - E2E 打的是真帳號、會真的在 Teams 發訊息；沒設 `GATEWAY_API_KEY` 會整組 skip。要跑先問。
 - 改了行為就補測試；修 bug 時先確認新測試在修正前會失敗。
@@ -35,7 +39,7 @@ dotnet test --project tests/TeamsGateway.Gateway.UnitTests -- --filter-method '*
 ## 程式慣例
 
 - 照周圍的寫法：primary constructor、`sealed`、DTO 用 `record`；JSON 走 source generator（`*JsonContext`），新的 wire 型別要註冊進去。
-- 註解、XML doc、log 訊息用繁體中文，寫「為什麼」，不重複程式碼已經講清楚的事。
+- 註解、XML doc、log 訊息用繁體中文，寫「為什麼」，不重複程式碼已經講清楚的事。例外：`.github/workflows/` 的註解與 step 名稱用英文。
 - 測試名稱是英文、底線分隔的句子（例如 `Upsert_inserts_then_dedupes_same_version`），上面用中文註解說明情境；`CancellationToken` 用 `TestContext.Current.CancellationToken`，DB 用 `TestDb`。
 - DB 可切換 SQLite / Postgres（`Gateway:Database:Provider`，ADR 0008），本機預設 SQLite。動到 DB 的程式兩邊都要能跑：改完跑一次 Postgres 版的 functional test；寫 `PublishedEvents` 只能經過 `MessageIngestor` 的寫入鎖（序號要等於 commit 順序）。
 - schema 走 EF migration（ADR 0009），SQLite / Postgres 各一套：改了 EF model 就跑 `tools/db-migration.sh add <名稱>`，產生的檔案一起 commit（`MigrationTests` 會擋忘記的）。gateway 啟動時自動套用，不用刪 DB。`.data/gateway.db` 裡有登入 cookie 和 API key，**任何要刪或重建它的操作都要先問**。

@@ -1,0 +1,63 @@
+version: 2
+updates:
+  # Central versions live in Directory.Packages.props; dotnet-ef in dotnet-tools.json.
+  - package-ecosystem: 'nuget'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: 'chore'
+      include: 'scope'
+    ignore:
+      # The repo targets .NET 10 (global.json, Directory.Build.props). Packages that ship with the
+      # .NET major would arrive as 11.x needing net11.0, so every such PR would stay red and reopen
+      # weekly. Lift these when the TFM moves to net11.0.
+      - dependency-name: 'Microsoft.AspNetCore.*'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'Microsoft.EntityFrameworkCore*'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'Microsoft.Extensions.*'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'Npgsql.EntityFrameworkCore.PostgreSQL'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'dotnet-ef'
+        update-types: ['version-update:semver-major']
+    groups:
+      # Aspire.AppHost.Sdk (global.json) and the Aspire.Hosting.* packages must stay on one version.
+      aspire:
+        patterns:
+          - 'Aspire.*'
+      # EF Core, its design-time package, dotnet-ef and the Npgsql provider move together.
+      efcore:
+        patterns:
+          - 'Microsoft.EntityFrameworkCore*'
+          - 'Npgsql.EntityFrameworkCore.PostgreSQL'
+          - 'dotnet-ef'
+      opentelemetry:
+        patterns:
+          - 'OpenTelemetry*'
+      xunit:
+        patterns:
+          - 'xunit*'
+      non-major:
+        patterns:
+          - '*'
+        update-types:
+          - 'minor'
+          - 'patch'
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: 'chore'
+      include: 'scope'
+    groups:
+      actions:
+        patterns:
+          - '*'

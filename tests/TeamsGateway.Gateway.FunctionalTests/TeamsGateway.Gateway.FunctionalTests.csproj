@@ -8,8 +8,10 @@
     <IsPackable>false</IsPackable>
     <!-- xunit v3 的測試專案要是可執行檔 -->
     <OutputType>Exe</OutputType>
-    <!-- 走 Aspire CLI bundle 的 DCP（跟 AppHost 一樣） -->
-    <AspireUseCliBundle>true</AspireUseCliBundle>
+    <!-- DCP 從 NuGet 拉（不走 Aspire CLI bundle）：跑 Postgres 版測試只要有 Docker，CI 不用另外裝 Aspire CLI -->
+    <AspireUseCliBundle>false</AspireUseCliBundle>
+    <!-- ASPIRE010：沒用 CLI bundle 時「有些功能要 bundle」的提醒；測試只拿來起 Postgres container，用不到那些 -->
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

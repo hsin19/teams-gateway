@@ -1,0 +1,67 @@
+name: Pull Request
+
+# Everything a PR gets: the shared gate in check.yml, plus the policy that only makes sense on a
+# PR -- dependency review and the Dependabot auto-merge. Named for its trigger rather than
+# `ci.yml`, because CI is not what distinguishes it: release.yml calls the same gate.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    uses: ./.github/workflows/check.yml
+
+  # Needs the Dependency graph turned on (see README.md); until then every PR fails here.
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: moderate
+          comment-summary-in-pr: on-failure
+
+  # Merges a green Dependabot PR with a dedicated token (a Dependabot secret, NOT the default
+  # GITHUB_TOKEN) so the resulting push to main still runs check.yml: GitHub never lets a
+  # GITHUB_TOKEN push start another workflow. See README.md for the token setup.
+  auto-merge:
+    name: Auto-merge Dependabot
+    needs: [check, dependency-review]
+    if: ${{ success() && github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+
+    steps:
+      # The check ran on this PR merged into main as main stood when the run began: GITHUB_SHA is
+      # that test merge, and its first parent is that main. If main has moved since, the squash
+      # would land a tree no check saw, so ask Dependabot to rebase instead; its push re-runs this gate.
+      - name: Squash-merge the PR, or have Dependabot rebase it onto main
+        run: |
+          tested_base=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.parents[0].sha')
+          main=$(gh api "repos/$GITHUB_REPOSITORY/commits/$BASE_REF" --jq .sha)
+          if [ "$tested_base" != "$main" ]; then
+            gh pr comment "$PR_URL" --body "@dependabot rebase"
+            exit 0
+          fi
+          gh pr merge --squash --delete-branch --match-head-commit "$HEAD_SHA" "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}

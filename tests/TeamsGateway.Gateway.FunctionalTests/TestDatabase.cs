@@ -7,7 +7,7 @@ namespace TeamsGateway.Gateway.FunctionalTests;
 
 /// <summary>
 /// 測試跑在哪個 DB：預設 SQLite（每個 fixture 一個臨時檔）；<c>GATEWAY_TEST_DB=postgres</c> 時用 Aspire 起一個 Postgres container
-/// （照 eShop 的 functional test，要有 Docker 與 Aspire CLI），整個測試行程共用，每個 fixture 各開一個資料庫。
+/// （照 eShop 的 functional test，要有 Docker；DCP 從 NuGet 拉，不用裝 Aspire CLI），整個測試行程共用，每個 fixture 各開一個資料庫。
 /// fixture 之間不能互相注入，所以 <see cref="GatewayAppFixture"/> 從靜態的 <see cref="PostgresConnectionString"/> 拿；
 /// assembly fixture 在任何測試之前就建好。
 /// </summary>

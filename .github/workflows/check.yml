@@ -1,0 +1,60 @@
+name: Check
+
+# The single definition of "did this tree pass": build, unit tests, functional tests against both
+# SQLite and Postgres, and a shellcheck of the repo scripts. pr.yml and release.yml both call it, so
+# a PR and a release are held to the same bar and the list cannot drift between them. main has no
+# deploy workflow of its own, so the push trigger lives here; workflow_dispatch runs every check
+# against any ref. E2E tests hit a real Teams account and send real messages, so they never run here.
+on:
+  push:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        id: build
+        run: dotnet build
+
+      # One step per suite rather than one chained command, so the red step names what failed;
+      # `!cancelled()` so a single run reports every failure instead of stopping at the first.
+      # Gated on the build too, or a compile error reds every step below it and buries the cause.
+      - name: Unit tests (gateway)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: dotnet test --project tests/TeamsGateway.Gateway.UnitTests --no-build
+
+      - name: Unit tests (relay)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: dotnet test --project tests/TeamsGateway.SlackRelay.UnitTests --no-build
+
+      - name: Functional tests (SQLite)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: dotnet test --project tests/TeamsGateway.Gateway.FunctionalTests --no-build
+
+      # The runner has Docker; DCP comes from NuGet, so no Aspire CLI install is needed (see the test csproj).
+      - name: Functional tests (Postgres)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: dotnet test --project tests/TeamsGateway.Gateway.FunctionalTests --no-build
+        env:
+          GATEWAY_TEST_DB: postgres
+
+      # shellcheck ships with the ubuntu runner image.
+      - name: ShellCheck
+        if: ${{ !cancelled() }}
+        run: shellcheck tools/*.sh
