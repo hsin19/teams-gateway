@@ -16,7 +16,7 @@
 
 ## 與 eShop 的差異（刻意）
 
-- **事件匯流排**：eShop 用 RabbitMQ 做跨服務 integration event；我們是單一行程，用 `System.Threading.Channels` 的行程內 pub/sub 把「收到新訊息」分派給 sink（SSE / webhook / 之後的 ES）。要拆多服務或多實例時再換成真的 broker。
+- **事件匯流排**：eShop 用 RabbitMQ 做跨服務 integration event；我們是單一行程，用 `System.Threading.Channels` 的行程內 pub/sub 把「收到新訊息」分派給 sink（SSE / webhook / 之後的 ES）。要拆多服務或多實例時再換成真的 broker。（事件出入口抽象化、傳輸 infra 可替換的修正見 ADR 0006。）
 - **API 版本**：eShop 用 `Asp.Versioning` + `NewVersionedApi`；我們先用 `/v1` route group，省一個相依，之後要多版本再換。
 - **資料庫**：見 ADR 0001，SQLite + EF，單一實例。
 

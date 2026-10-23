@@ -29,7 +29,7 @@
 | `tools/TeamsGateway.AppHost` | Aspire 編排（只在 dev，不部署） | ✅ |
 | `spike/` | 逆向非官方 API 的拋棄式 Python 腳本；結論在 [`spike/FINDINGS.md`](spike/FINDINGS.md) | — |
 
-技術選型、結構、monorepo 的理由見 [`docs/adr/`](docs/adr/)（0001 選型、0002 服務內部結構、0003 monorepo）。
+技術選型、結構等決策的理由見 [`docs/adr/`](docs/adr/)（0001 選型、0002 服務內部結構、0003 monorepo、0004 先跑在本機、0005 agent 介面用 MCP、0006 事件出入口抽象化）。
 
 ## 開始
 
