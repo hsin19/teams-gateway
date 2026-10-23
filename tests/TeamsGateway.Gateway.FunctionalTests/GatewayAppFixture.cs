@@ -1,7 +1,9 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,6 +36,14 @@ public sealed class GatewayAppFixture : WebApplicationFactory<Program>
             RemoveHostedService<StartupBackfillService>(services);
             RemoveHostedService<ReconcileService>(services);
             RemoveHostedService<PollService>(services);
+
+            // 模擬 AOT：API 的 JSON 拿掉 reflection，只剩 source-gen context。
+            // 端點的 request / response 型別沒註冊進 context 就會直接失敗，不用等真的 publish AOT 才發現
+            services.PostConfigure<JsonOptions>(options =>
+            {
+                foreach (var reflection in options.SerializerOptions.TypeInfoResolverChain.OfType<DefaultJsonTypeInfoResolver>().ToList())
+                    options.SerializerOptions.TypeInfoResolverChain.Remove(reflection);
+            });
         });
     }
 

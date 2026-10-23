@@ -10,11 +10,11 @@ public sealed class ApiKeyFilter(ApiKeyService keys) : IEndpointFilter
         var http = context.HttpContext;
         var raw = ExtractKey(http.Request);
         if (raw is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         var key = await keys.ValidateAsync(raw, http.RequestAborted);
         if (key is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         http.Items[nameof(ApiKey)] = key;
         return await next(context);

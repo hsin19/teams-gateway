@@ -32,6 +32,22 @@ public sealed record MessagePage(IReadOnlyList<MessageDto> Messages, string? Nex
 
 public sealed record SendMessageRequest(string Text);
 
+/// <summary>API 的錯誤回應：<c>{"error": "..."}</c>。</summary>
+public sealed record ApiError(string Error);
+
+/// <summary><c>GET /v1/messages/{id}/revisions</c>：目前版本 + 被取代的舊版本（由舊到新）。</summary>
+public sealed record MessageRevisionsDto(MessageVersionDto Current, IReadOnlyList<RevisionDto> Revisions);
+
+public sealed record MessageVersionDto(long Version, string? Content, bool Edited, bool Deleted, DateTimeOffset UpdatedAt);
+
+public sealed record RevisionDto(long Version, string? Content, DateTimeOffset SupersededAt);
+
+/// <summary>登記 webhook。<c>ConversationId</c> 省略 = 所有訂閱中的對話；<c>Secret</c> 有給才簽 HMAC。</summary>
+public sealed record CreateWebhookRequest(string TargetUrl, string? ConversationId = null, string? Secret = null);
+
+/// <summary>一個 webhook（secret 不回傳，只回有沒有設）。</summary>
+public sealed record WebhookDto(Guid Id, string? ConversationId, string TargetUrl, bool HasSecret, bool Active, DateTimeOffset CreatedAt);
+
 /// <summary>
 /// <c>GET /v1/status</c>：gateway 與 Teams 的認證健康。<c>TeamsAuth</c> 是 <c>ok</c> 或 <c>failed</c>；
 /// 訂閱者（relay）拿來偵測登入 cookie 失效並告警。

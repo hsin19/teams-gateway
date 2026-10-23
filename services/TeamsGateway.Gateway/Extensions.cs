@@ -17,9 +17,14 @@ public static class Extensions
     {
         builder.Services.AddOptions<GatewayOptions>().BindConfiguration("Gateway");
 
-        // minimal API 的 request / response JSON：wire DTO 走 Contracts 的 source-gen context
+        // minimal API 的 request / response JSON 走 source-gen：wire DTO（Contracts）+ gateway 自己的型別
         builder.Services.ConfigureHttpJsonOptions(options =>
-            options.SerializerOptions.TypeInfoResolverChain.Insert(0, ContractsJsonContext.Default));
+        {
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, ContractsJsonContext.Default);
+            options.SerializerOptions.TypeInfoResolverChain.Insert(1, GatewayJsonContext.Default);
+        });
+        // TypedResults.Problem 的 ProblemDetails：AddProblemDetails 才會把框架自己的 source-gen context 串進上面那條鏈
+        builder.Services.AddProblemDetails();
 
         builder.AddGatewayDatabase();
         builder.AddTeams();

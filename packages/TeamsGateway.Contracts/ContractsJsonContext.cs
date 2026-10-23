@@ -17,4 +17,9 @@ namespace TeamsGateway.Contracts;
 [JsonSerializable(typeof(SendMessageRequest))]
 [JsonSerializable(typeof(SendMessageResult))]
 [JsonSerializable(typeof(AuthStatusDto))]
+[JsonSerializable(typeof(ApiError))]
+[JsonSerializable(typeof(MessageRevisionsDto))]
+[JsonSerializable(typeof(CreateWebhookRequest))]
+[JsonSerializable(typeof(WebhookDto))]
+[JsonSerializable(typeof(IReadOnlyList<WebhookDto>))]
 public sealed partial class ContractsJsonContext : JsonSerializerContext;

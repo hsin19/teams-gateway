@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
+using TeamsGateway.Contracts;
 using TeamsGateway.Gateway.Auth;
 using TeamsGateway.Gateway.Data;
 using TeamsGateway.Gateway.Teams;
@@ -14,7 +16,7 @@ public static class AdminApi
         var admin = app.MapGroup("/admin").AddEndpointFilter<AdminTokenFilter>().WithTags("Admin");
 
         // 第一次綁定：把瀏覽器匯出的登入 cookie（spike/http_refresh.py export 的格式）PUT 進來
-        admin.MapPut("/login-cookies", async (HttpRequest request, SecureStore store, CancellationToken ct) =>
+        admin.MapPut("/login-cookies", async Task<Results<Ok<ImportedCookies>, BadRequest<ApiError>>> (HttpRequest request, SecureStore store, CancellationToken ct) =>
         {
             using var reader = new StreamReader(request.Body);
             var json = await reader.ReadToEndAsync(ct);
@@ -25,13 +27,13 @@ public static class AdminApi
             }
             catch (JsonException)
             {
-                return Results.BadRequest(new { error = "不是合法的 cookie JSON 陣列" });
+                return TypedResults.BadRequest(new ApiError("不是合法的 cookie JSON 陣列"));
             }
             if (cookies is not { Count: > 0 })
-                return Results.BadRequest(new { error = "cookie 陣列是空的" });
+                return TypedResults.BadRequest(new ApiError("cookie 陣列是空的"));
 
             await store.SetAsync(TeamsAuthConstants.CookieSecureKey, json, ct);
-            return Results.Ok(new { imported = cookies.Count });
+            return TypedResults.Ok(new ImportedCookies(cookies.Count));
         })
         .WithSummary("匯入登入 cookie")
         .WithDescription("一次性 bootstrap：把瀏覽器匯出的 Teams 登入 cookie 加密存進來，之後自動換 skypetoken。約一年效期，到期重匯。");
@@ -40,33 +42,33 @@ public static class AdminApi
         {
             var hasCookies = await store.GetAsync(TeamsAuthConstants.CookieSecureKey, ct) is not null;
             var current = tokens.Current;
-            return Results.Ok(new { hasCookies, skypeId = current?.SkypeId, tokenExpiresAt = current?.ExpiresAt });
+            return TypedResults.Ok(new AuthInfo(hasCookies, current?.SkypeId, current?.ExpiresAt));
         })
         .WithSummary("看認證狀態");
 
-        admin.MapPost("/auth/refresh", async (SkypeTokenProvider tokens, CancellationToken ct) =>
+        admin.MapPost("/auth/refresh", async Task<Results<Ok<TokenInfo>, ProblemHttpResult>> (SkypeTokenProvider tokens, CancellationToken ct) =>
         {
             // 一定要真的重換：GetAsync 會回快取，cookie 已經死了也照樣回 ok
             try
             {
                 var token = await tokens.RefreshAsync(ct: ct);
-                return Results.Ok(new { token.SkypeId, token.ExpiresAt });
+                return TypedResults.Ok(new TokenInfo(token.SkypeId, token.ExpiresAt));
             }
             catch (InvalidOperationException ex)
             {
-                return Results.Problem($"換不到 skypetoken：{ex.Message}", statusCode: StatusCodes.Status502BadGateway);
+                return TypedResults.Problem($"換不到 skypetoken：{ex.Message}", statusCode: StatusCodes.Status502BadGateway);
             }
         })
         .WithSummary("強制換一次 skypetoken")
         .WithDescription("驗證 cookie 還有效（換得到 token 就 ok，失敗代表該重匯）。");
 
-        admin.MapPost("/api-keys", async (CreateApiKeyRequest body, ApiKeyService keys, CancellationToken ct) =>
+        admin.MapPost("/api-keys", async Task<Results<Ok<CreatedApiKey>, BadRequest<ApiError>>> (CreateApiKeyRequest body, ApiKeyService keys, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(body.Name))
-                return Results.BadRequest(new { error = "name 必填" });
+                return TypedResults.BadRequest(new ApiError("name 必填"));
             var (key, raw) = await keys.CreateAsync(body.Name, ct);
             // 明文只回這一次
-            return Results.Ok(new { key.Id, key.Name, apiKey = raw });
+            return TypedResults.Ok(new CreatedApiKey(key.Id, key.Name, raw));
         })
         .WithSummary("建 API key")
         .WithDescription("給訂閱者（relay / client）打 /v1 用。回的 `apiKey` 明文只出現這一次。");
@@ -74,12 +76,12 @@ public static class AdminApi
         admin.MapGet("/api-keys", async (ApiKeyService keys, CancellationToken ct) =>
         {
             var all = await keys.ListAsync(ct);
-            return Results.Ok(all.Select(k => new { k.Id, k.Name, k.CreatedAt, k.RevokedAt }));
+            return TypedResults.Ok<IReadOnlyList<ApiKeyInfo>>(all.Select(k => new ApiKeyInfo(k.Id, k.Name, k.CreatedAt, k.RevokedAt)).ToList());
         })
         .WithSummary("列出 API key");
 
-        admin.MapDelete("/api-keys/{id:guid}", async (Guid id, ApiKeyService keys, CancellationToken ct) =>
-            await keys.RevokeAsync(id, ct) ? Results.NoContent() : Results.NotFound())
+        admin.MapDelete("/api-keys/{id:guid}", async Task<Results<NoContent, NotFound>> (Guid id, ApiKeyService keys, CancellationToken ct) =>
+            await keys.RevokeAsync(id, ct) ? TypedResults.NoContent() : TypedResults.NotFound())
         .WithSummary("撤銷 API key");
 
         // 訂閱對話：gateway 只追 / 存訂閱中的對話（Trouter 會推帳號所有對話，但只有這些入庫）
@@ -87,25 +89,26 @@ public static class AdminApi
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var subs = await db.Conversations.Where(c => c.Subscribed)
-                .Select(c => new { c.Id, c.Topic, c.LastMessageId, c.UpdatedAt }).ToListAsync(ct);
-            return Results.Ok(subs);
+                .Select(c => new SubscriptionInfo(c.Id, c.Topic, c.LastMessageId, c.UpdatedAt)).ToListAsync(ct);
+            return TypedResults.Ok<IReadOnlyList<SubscriptionInfo>>(subs);
         })
         .WithSummary("列出訂閱中的對話");
 
         // chat 可給 id 或群名；訂閱後同步回補歷史（預設一週）
-        admin.MapPut("/subscriptions", async (SubscribeRequest body, ChatsvcClient chatsvc, IDbContextFactory<GatewayDbContext> factory, Backfiller backfiller, CancellationToken ct) =>
+        admin.MapPut("/subscriptions", async Task<Results<Ok<SubscribedConversation>, NotFound<ApiError>, BadRequest<ApiError>>> (
+            SubscribeRequest body, ChatsvcClient chatsvc, IDbContextFactory<GatewayDbContext> factory, Backfiller backfiller, CancellationToken ct) =>
         {
             var chats = await chatsvc.GetConversationsAsync(ct);
-            Contracts.ConversationDto hit;
+            ConversationDto hit;
             if (ChatsvcClient.IsThreadId(body.Chat))
-                hit = chats.FirstOrDefault(c => c.Id == body.Chat) ?? new Contracts.ConversationDto(body.Chat, null, null, null);
+                hit = chats.FirstOrDefault(c => c.Id == body.Chat) ?? new ConversationDto(body.Chat, null, null, null);
             else
             {
                 var hits = ChatsvcClient.MatchByName(chats, body.Chat);
                 if (hits.Count == 0)
-                    return Results.NotFound(new { error = $"找不到對話 '{body.Chat}'" });
+                    return TypedResults.NotFound(new ApiError($"找不到對話 '{body.Chat}'"));
                 if (hits.Count > 1)
-                    return Results.BadRequest(new { error = ChatsvcClient.Ambiguous(body.Chat, hits) });
+                    return TypedResults.BadRequest(new ApiError(ChatsvcClient.Ambiguous(body.Chat, hits)));
                 hit = hits[0];
             }
 
@@ -127,20 +130,20 @@ public static class AdminApi
             }
 
             await backfiller.BackfillAsync(hit.Id, publishGap: false, ct); // 回補歷史（只存不發）
-            return Results.Ok(new { id = hit.Id, topic = hit.Topic });
+            return TypedResults.Ok(new SubscribedConversation(hit.Id, hit.Topic));
         })
         .WithSummary("訂閱對話")
         .WithDescription("`chat` 可給對話 id 或群名。訂閱後同步回補歷史（預設一週），之後即時訊息進 SSE / webhook。");
 
-        admin.MapDelete("/subscriptions/{id}", async (string id, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
+        admin.MapDelete("/subscriptions/{id}", async Task<Results<NoContent, NotFound>> (string id, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var conv = await db.Conversations.FindAsync([id], ct);
             if (conv is null || !conv.Subscribed)
-                return Results.NotFound();
+                return TypedResults.NotFound();
             conv.Subscribed = false; // 保留已存的歷史
             await db.SaveChangesAsync(ct);
-            return Results.NoContent();
+            return TypedResults.NoContent();
         })
         .WithSummary("取消訂閱")
         .WithDescription("停止追這個對話，但保留已存的歷史。");
@@ -148,7 +151,3 @@ public static class AdminApi
         return admin;
     }
 }
-
-public sealed record CreateApiKeyRequest(string Name);
-
-public sealed record SubscribeRequest(string Chat);

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using TeamsGateway.Gateway.Auth;
@@ -26,68 +27,70 @@ public static class ChatsApi
         .WithTags("Status");
 
         v1.MapGet("/chats", async (ChatsvcClient chatsvc, CancellationToken ct) =>
-            Results.Ok(await chatsvc.GetConversationsAsync(ct)))
+            TypedResults.Ok(await chatsvc.GetConversationsAsync(ct)))
         .WithSummary("列出對話")
         .WithDescription("列出帳號的所有 Teams 對話（群組 / 1:1）。")
         .WithTags("Chats");
 
-        v1.MapGet("/chats/{id}/messages", async (string id, ChatsvcClient chatsvc, CancellationToken ct, int? limit = null, string? cursor = null) =>
+        v1.MapGet("/chats/{id}/messages", async Task<Results<Ok<MessagePage>, BadRequest<ApiError>>> (
+            string id, ChatsvcClient chatsvc, CancellationToken ct, int? limit = null, string? cursor = null) =>
         {
             cursor = string.IsNullOrEmpty(cursor) ? null : cursor;
             if (cursor is not null && !chatsvc.IsValidCursor(id, cursor))
-                return Results.BadRequest(new { error = "cursor 要帶同一個對話上一頁回的 nextCursor" });
+                return TypedResults.BadRequest(new ApiError("cursor 要帶同一個對話上一頁回的 nextCursor"));
             var page = await chatsvc.GetMessagesAsync(id, Math.Clamp(limit ?? 30, 1, 200), cursor, ct);
-            return Results.Ok(page);
+            return TypedResults.Ok(page);
         })
         .WithSummary("讀某對話的訊息")
         .WithDescription("即時從 chatsvc 讀。`limit` 1–200（預設 30）；`cursor` 帶上一頁回的 `nextCursor` 往更舊翻。")
         .WithTags("Chats");
 
-        v1.MapPost("/chats/{id}/messages", async (string id, SendMessageRequest body, ChatsvcClient chatsvc, IOptions<GatewayOptions> options, CancellationToken ct) =>
+        v1.MapPost("/chats/{id}/messages", async Task<Results<Ok<SendMessageResult>, BadRequest<ApiError>>> (
+            string id, SendMessageRequest body, ChatsvcClient chatsvc, IOptions<GatewayOptions> options, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(body.Text))
-                return Results.BadRequest(new { error = "text 必填" });
+                return TypedResults.BadRequest(new ApiError("text 必填"));
             var result = await chatsvc.SendMessageAsync(id, body.Text, options.Value.DisplayName, ct);
-            return Results.Ok(result);
+            return TypedResults.Ok(result);
         })
         .WithSummary("發訊息到某對話")
         .WithDescription("以綁定帳號身分發一則文字訊息。")
         .WithTags("Chats");
 
         // 編輯歷史：目前版本 + 被取代的舊版本（只有訂閱對話、入庫後的訊息才有）
-        v1.MapGet("/messages/{messageId}/revisions", async (string messageId, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
+        v1.MapGet("/messages/{messageId}/revisions", async Task<Results<Ok<MessageRevisionsDto>, NotFound>> (
+            string messageId, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var current = await db.MessageEvents.FindAsync([messageId], ct);
             if (current is null)
-                return Results.NotFound();
+                return TypedResults.NotFound();
             var revisions = await db.MessageRevisions
                 .Where(r => r.MessageId == messageId)
                 .OrderBy(r => r.Version)
-                .Select(r => new { r.Version, r.Content, r.SupersededAt })
+                .Select(r => new RevisionDto(r.Version, r.Content, r.SupersededAt))
                 .ToListAsync(ct);
-            return Results.Ok(new
-            {
-                current = new { current.Version, current.Content, current.Edited, current.Deleted, current.UpdatedAt },
-                revisions,
-            });
+            return TypedResults.Ok(new MessageRevisionsDto(
+                new MessageVersionDto(current.Version, current.Content, current.Edited, current.Deleted, current.UpdatedAt),
+                revisions));
         })
         .WithSummary("一則訊息的編輯歷史")
         .WithDescription("`current`（目前版本）+ `revisions`（被取代的舊版本，由舊到新）。只有訂閱對話、已入庫的訊息才有。")
         .WithTags("Messages");
 
-        v1.MapGet("/media", async (string url, MediaClient media, CancellationToken ct) =>
+        v1.MapGet("/media", async Task<Results<FileContentHttpResult, BadRequest<ApiError>, ProblemHttpResult>> (
+            string url, MediaClient media, CancellationToken ct) =>
         {
             if (!MediaClient.IsAllowed(url, out var uri))
-                return Results.BadRequest(new { error = "只代理 Teams 媒體網址（https://*.asm.skype.com）" });
+                return TypedResults.BadRequest(new ApiError("只代理 Teams 媒體網址（https://*.asm.skype.com）"));
             try
             {
                 var (bytes, contentType) = await media.GetAsync(uri, ct);
-                return Results.File(bytes, contentType);
+                return TypedResults.File(bytes, contentType);
             }
             catch (InvalidOperationException ex)
             {
-                return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway);
+                return TypedResults.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway);
             }
         })
         .WithSummary("代抓訊息內嵌圖片")
