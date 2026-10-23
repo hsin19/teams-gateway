@@ -15,8 +15,6 @@ public enum IngestResult { Inserted, Updated, Unchanged }
 /// </summary>
 public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory, GatewayEventBus bus)
 {
-    private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
-
     // Trouter、輪詢、慢更新、回補會同時寫同一則（先查再插 → 主鍵衝突、編輯的 revision 重複）：寫入一次一筆。
     // 量很小，串行化沒有成本；也讓事件依序號順序 publish
     private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -114,7 +112,7 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
         {
             MessageId = dto.Id,
             ConversationId = dto.ConversationId,
-            Payload = JsonSerializer.Serialize(dto, Web),
+            Payload = JsonSerializer.Serialize(dto, ContractsJsonContext.Default.MessageDto),
             PublishedAt = DateTimeOffset.UtcNow,
         };
         db.PublishedEvents.Add(evt);

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
+using TeamsGateway.Contracts;
 using Scalar.AspNetCore;
 using TeamsGateway.Gateway.Apis;
 using TeamsGateway.Gateway.Auth;
@@ -15,6 +16,10 @@ public static class Extensions
     public static void AddApplicationServices(this IHostApplicationBuilder builder)
     {
         builder.Services.AddOptions<GatewayOptions>().BindConfiguration("Gateway");
+
+        // minimal API 的 request / response JSON：wire DTO 走 Contracts 的 source-gen context
+        builder.Services.ConfigureHttpJsonOptions(options =>
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, ContractsJsonContext.Default));
 
         builder.AddGatewayDatabase();
         builder.AddTeams();

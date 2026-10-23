@@ -14,8 +14,6 @@ public readonly record struct StreamEvent(string? Id, MessageDto Message);
 /// </summary>
 public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStream> logger, TimeSpan? idleTimeout = null)
 {
-    private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
-
     // gateway 閒置時每 20s 送心跳：這麼久什麼都沒收到 = 連線半死（對方睡眠 / NAT 砍掉），丟例外讓 worker 重連。
     // 少了這個，half-open 的 TCP 會讓 ReadLineAsync 永遠卡住，relay 默默停擺
     private readonly TimeSpan _idleTimeout = idleTimeout ?? TimeSpan.FromSeconds(60);
@@ -91,7 +89,7 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
     {
         try
         {
-            return JsonSerializer.Deserialize<MessageDto>(json, Web);
+            return JsonSerializer.Deserialize(json, ContractsJsonContext.Default.MessageDto);
         }
         catch (JsonException ex)
         {

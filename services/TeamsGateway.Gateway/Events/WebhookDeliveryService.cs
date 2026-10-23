@@ -18,8 +18,6 @@ public sealed class WebhookDeliveryService(
     /// <summary>投遞用的 named HttpClient（連線時檢查目標 IP，見 <see cref="WebhookTargetGuard"/>）。</summary>
     public const string HttpClientName = "webhook";
 
-    private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var subscription = bus.Subscribe();
@@ -42,7 +40,7 @@ public sealed class WebhookDeliveryService(
         if (hooks.Count == 0)
             return;
 
-        var body = JsonSerializer.Serialize(message, Web);
+        var body = JsonSerializer.Serialize(message, ContractsJsonContext.Default.MessageDto);
         var bytes = Encoding.UTF8.GetBytes(body);
         var client = httpFactory.CreateClient(HttpClientName);
 

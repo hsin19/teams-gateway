@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using TeamsGateway.Contracts;
 using TeamsGateway.Gateway.Auth;
 using TeamsGateway.Gateway.Data;
 using TeamsGateway.Gateway.Events;
@@ -15,7 +16,6 @@ namespace TeamsGateway.Gateway.Apis;
 public static class EventsApi
 {
     private const int ReplayBatch = 500;
-    private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 
     public static void MapEventsApi(this IEndpointRouteBuilder app)
     {
@@ -80,7 +80,7 @@ public static class EventsApi
                         if (evt.Seq > cursor + 1)
                             cursor = await ReplayAsync(http, factory, cursor, upTo: evt.Seq - 1, Wanted, ct);
                         if (Wanted(evt.Message.ConversationId))
-                            await WriteAsync(http, evt.Seq, JsonSerializer.Serialize(evt.Message, Web), ct);
+                            await WriteAsync(http, evt.Seq, JsonSerializer.Serialize(evt.Message, ContractsJsonContext.Default.MessageDto), ct);
                         cursor = evt.Seq;
                     }
                     continue;
