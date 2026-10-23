@@ -17,6 +17,10 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
 {
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 
+    // Trouter、輪詢、慢更新、回補會同時寫同一則（先查再插 → 主鍵衝突、編輯的 revision 重複）：寫入一次一筆。
+    // 量很小，串行化沒有成本；也讓事件依序號順序 publish
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
+
     public async Task<bool> IsSubscribedAsync(string conversationId, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
@@ -24,6 +28,19 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
     }
 
     public async Task<IngestResult> UpsertAsync(MessageDto dto, string rawJson, bool publish, CancellationToken ct)
+    {
+        await _writeGate.WaitAsync(ct);
+        try
+        {
+            return await UpsertCoreAsync(dto, rawJson, publish, ct);
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
+    private async Task<IngestResult> UpsertCoreAsync(MessageDto dto, string rawJson, bool publish, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var existing = await db.MessageEvents.FindAsync([dto.Id], ct);

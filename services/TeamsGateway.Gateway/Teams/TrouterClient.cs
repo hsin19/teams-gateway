@@ -99,7 +99,7 @@ public sealed class TrouterClient(
         }
     }
 
-    private async Task ReceiveLoopAsync(ClientWebSocket ws, string skypeToken, string epid, Func<IncomingMessage, CancellationToken, Task> onMessage, CancellationToken ct)
+    internal async Task ReceiveLoopAsync(WebSocket ws, string skypeToken, string epid, Func<IncomingMessage, CancellationToken, Task> onMessage, CancellationToken ct)
     {
         var buffer = new byte[64 * 1024];
         var message = new ArrayBufferWriter<byte>();
@@ -110,7 +110,15 @@ public sealed class TrouterClient(
                 logger.LogInformation("Trouter 關閉連線：{Status}", ws.CloseStatus);
                 return;
             }
-            await HandleFrameAsync(ws, frame, skypeToken, epid, onMessage, ct);
+            try
+            {
+                await HandleFrameAsync(ws, frame, skypeToken, epid, onMessage, ct);
+            }
+            catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException)
+            {
+                // 格式認不得的 frame 跳過就好，不要拖垮整條連線（漏掉的訊息輪詢會補）
+                logger.LogWarning(ex, "Trouter frame 解析失敗，略過：{Frame}", frame.Length <= 300 ? frame : frame[..300]);
+            }
         }
     }
 
@@ -132,7 +140,7 @@ public sealed class TrouterClient(
         return Encoding.UTF8.GetString(message.WrittenSpan);
     }
 
-    private async Task HandleFrameAsync(ClientWebSocket ws, string frame, string skypeToken, string epid, Func<IncomingMessage, CancellationToken, Task> onMessage, CancellationToken ct)
+    private async Task HandleFrameAsync(WebSocket ws, string frame, string skypeToken, string epid, Func<IncomingMessage, CancellationToken, Task> onMessage, CancellationToken ct)
     {
         if (frame == "1::")
         {
@@ -145,7 +153,7 @@ public sealed class TrouterClient(
         }
         if (frame.StartsWith("5:", StringComparison.Ordinal))
         {
-            var payload = JsonDocument.Parse(frame[(frame.IndexOf("::", StringComparison.Ordinal) + 2)..]);
+            using var payload = JsonDocument.Parse(frame[(frame.IndexOf("::", StringComparison.Ordinal) + 2)..]);
             var name = payload.RootElement.GetProperty("name").GetString();
             if (name == "trouter.connected")
             {
@@ -170,29 +178,21 @@ public sealed class TrouterClient(
         }
     }
 
-    private async Task HandlePushAsync(ClientWebSocket ws, string json, Func<IncomingMessage, CancellationToken, Task> onMessage, CancellationToken ct)
+    private async Task HandlePushAsync(WebSocket ws, string json, Func<IncomingMessage, CancellationToken, Task> onMessage, CancellationToken ct)
     {
         using var req = JsonDocument.Parse(json);
         var root = req.RootElement;
         var id = root.GetProperty("id").GetInt64();
         var trouterRequest = root.TryGetProperty("headers", out var h) && h.TryGetProperty("trouter-request", out var tr) ? tr.GetString() : "";
 
-        if (root.TryGetProperty("body", out var bodyEl) && bodyEl.GetString() is { } body && body.StartsWith('{'))
+        try
         {
-            using var envelope = JsonDocument.Parse(body);
-            var env = envelope.RootElement;
-            // NewMessage 是新訊息；編輯 / 刪除可能走別的 resourceType（MessageUpdate 等），一併收，靠 version upsert 決定更新
-            var resourceType = env.TryGetProperty("resourceType", out var rt) ? rt.GetString() : null;
-            if (resourceType is "NewMessage" or "MessageUpdate" or "EditMessage" && env.TryGetProperty("resource", out var resource))
-            {
-                var conversationId = resource.TryGetProperty("to", out var to) ? to.GetString() : null;
-                var dto = conversationId is null ? null : ChatsvcClient.ParseMessage(resource, conversationId);
-                if (dto is not null && dto.Type is "Text" or "RichText/Html")
-                {
-                    var topic = resource.TryGetProperty("threadtopic", out var tt) ? tt.GetString() : null;
-                    await onMessage(new IncomingMessage(dto, topic, resource.GetRawText()), ct);
-                }
-            }
+            await DispatchPushAsync(root, onMessage, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 一則推播處理失敗（內容格式不認得、DB 一時寫不進去）不能拖垮整條連線；照樣 ack，漏掉的輪詢會補
+            logger.LogWarning(ex, "Trouter 推播處理失敗，略過（輪詢會補）");
         }
 
         // 一定要 ack，否則 Trouter 會重送
@@ -203,6 +203,26 @@ public sealed class TrouterClient(
             headers = new Dictionary<string, string> { ["trouter-request"] = trouterRequest ?? "", ["trouter-client"] = "{\"cd\":1}" },
             body = "",
         }), ct);
+    }
+
+    private static async Task DispatchPushAsync(JsonElement root, Func<IncomingMessage, CancellationToken, Task> onMessage, CancellationToken ct)
+    {
+        if (!root.TryGetProperty("body", out var bodyEl) || bodyEl.GetString() is not { } body || !body.StartsWith('{'))
+            return;
+        using var envelope = JsonDocument.Parse(body);
+        var env = envelope.RootElement;
+        // NewMessage 是新訊息；編輯 / 刪除可能走別的 resourceType（MessageUpdate 等），一併收，靠 version upsert 決定更新
+        var resourceType = env.TryGetProperty("resourceType", out var rt) ? rt.GetString() : null;
+        if (resourceType is "NewMessage" or "MessageUpdate" or "EditMessage" && env.TryGetProperty("resource", out var resource))
+        {
+            var conversationId = resource.TryGetProperty("to", out var to) ? to.GetString() : null;
+            var dto = conversationId is null ? null : ChatsvcClient.ParseMessage(resource, conversationId);
+            if (dto is not null && dto.Type is "Text" or "RichText/Html")
+            {
+                var topic = resource.TryGetProperty("threadtopic", out var tt) ? tt.GetString() : null;
+                await onMessage(new IncomingMessage(dto, topic, resource.GetRawText()), ct);
+            }
+        }
     }
 
     private async Task PingLoopAsync(ClientWebSocket ws, CancellationToken ct)
@@ -271,7 +291,7 @@ public sealed class TrouterClient(
         return (int)resp.StatusCode;
     }
 
-    private async Task SendAsync(ClientWebSocket ws, string text, CancellationToken ct)
+    private async Task SendAsync(WebSocket ws, string text, CancellationToken ct)
     {
         await _sendGate.WaitAsync(ct);
         try

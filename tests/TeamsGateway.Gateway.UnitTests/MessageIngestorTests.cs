@@ -89,6 +89,23 @@ public class MessageIngestorTests
     }
 
     [Fact]
+    public async Task Concurrent_upserts_of_the_same_message_insert_once()
+    {
+        // Trouter 推來的同時輪詢也抓到同一則：先查再插不能撞主鍵
+        using var db = new TestDb();
+        await AddConversationAsync(db, subscribed: true);
+        var ingestor = new MessageIngestor(db, new GatewayEventBus());
+        var ct = TestContext.Current.CancellationToken;
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ =>
+            Task.Run(() => ingestor.UpsertAsync(Msg("100", version: 100), "{}", publish: true, ct), ct)));
+
+        Assert.Single(results, r => r == IngestResult.Inserted);
+        await using var ctx = db.CreateDbContext();
+        Assert.Single(ctx.PublishedEvents);
+    }
+
+    [Fact]
     public async Task Store_only_backfill_records_no_event()
     {
         // 首次訂閱的歷史回補只存不發：也不能進事件流水帳，不然重連補收會把歷史洗給訂閱者
