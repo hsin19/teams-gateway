@@ -1,4 +1,6 @@
+using System.Net;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace TeamsGateway.Gateway.FunctionalTests;
 
@@ -25,5 +27,18 @@ public sealed class OpenApiTests(GatewayAppFixture fx) : IClassFixture<GatewayAp
         var response = doc.RootElement.GetProperty("paths").GetProperty(path).GetProperty(method).GetProperty("responses").GetProperty(status);
 
         Assert.True(response.GetProperty("content").GetProperty("application/json").TryGetProperty("schema", out _));
+    }
+
+    // 根目錄轉到 API doc：Aspire dashboard 上 gateway 的連結點進去就是文件
+    [Fact]
+    public async Task Root_redirects_to_scalar()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = fx.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        using var response = await client.GetAsync("/", ct);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/scalar", response.Headers.Location?.OriginalString);
     }
 }

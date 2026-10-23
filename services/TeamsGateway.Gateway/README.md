@@ -70,6 +70,8 @@ curl -X DELETE -H "X-Admin-Token: $T"  $BASE/admin/subscriptions/<id>           
 
 ## 對外 API（給 skills / client / slack-relay 接）
 
+API 文件在 `/scalar`（OpenAPI 文件 `/openapi/v1.json`），根目錄 `/` 會轉過去。
+
 帶 `Authorization: Bearer tgw_...`：
 
 | 端點 | 說明 |

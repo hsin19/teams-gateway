@@ -132,7 +132,8 @@ public static class Extensions
         app.MapEventsApi();
         app.MapWebhooksApi();
         app.MapMcp("/mcp");
-        app.MapGet("/", () => "teams-gateway").ExcludeFromDescription(); // liveness，不進 API doc
+        // 根目錄轉到 API doc，Aspire dashboard 上 gateway 的連結點進去就是文件；liveness 用 /alive、/health
+        app.MapGet("/", () => TypedResults.Redirect("/scalar")).ExcludeFromDescription();
 
         // API doc：/openapi/v1.json + Scalar UI /scalar（借 eShop：關掉預設字型下載，不打外部）
         app.MapOpenApi();

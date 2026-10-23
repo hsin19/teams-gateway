@@ -31,12 +31,4 @@ public sealed class AuthTests(GatewayAppFixture fx) : IClassFixture<GatewayAppFi
         Assert.Equal(HttpStatusCode.BadGateway, resp.StatusCode);
         Assert.Contains("還沒匯入登入 cookie", await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
-
-    [Fact]
-    public async Task Root_returns_liveness_text()
-    {
-        var resp = await fx.CreateClient().GetAsync("/", TestContext.Current.CancellationToken);
-        resp.EnsureSuccessStatusCode();
-        Assert.Equal("teams-gateway", await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
-    }
 }
