@@ -90,7 +90,7 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
     private async Task<SkypeToken> MintAsync(CancellationToken ct)
     {
         var cookiesJson = await secureStore.GetAsync(CookieSecureKey, ct)
-            ?? throw new InvalidOperationException("還沒匯入登入 cookie（POST /admin/login-cookies）");
+            ?? throw new InvalidOperationException("還沒匯入登入 cookie（PUT /admin/login-cookies）");
 
         var container = BuildCookieContainer(cookiesJson);
         using var handler = new SocketsHttpHandler { AllowAutoRedirect = false, CookieContainer = container, UseCookies = true };

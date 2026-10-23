@@ -23,6 +23,16 @@ public sealed class AuthTests(GatewayAppFixture fx) : IClassFixture<GatewayAppFi
     }
 
     [Fact]
+    public async Task Auth_refresh_without_cookies_reports_why()
+    {
+        // 強制重換：沒有 cookie 就該明講換不到（502 + 原因），不是 500
+        var resp = await fx.CreateAdminClient().PostAsync("/admin/auth/refresh", null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadGateway, resp.StatusCode);
+        Assert.Contains("還沒匯入登入 cookie", await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task Root_returns_liveness_text()
     {
         var resp = await fx.CreateClient().GetAsync("/", TestContext.Current.CancellationToken);

@@ -46,8 +46,16 @@ public static class AdminApi
 
         admin.MapPost("/auth/refresh", async (SkypeTokenProvider tokens, CancellationToken ct) =>
         {
-            var token = await tokens.GetAsync(ct);
-            return Results.Ok(new { token.SkypeId, token.ExpiresAt });
+            // 一定要真的重換：GetAsync 會回快取，cookie 已經死了也照樣回 ok
+            try
+            {
+                var token = await tokens.RefreshAsync(ct);
+                return Results.Ok(new { token.SkypeId, token.ExpiresAt });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Problem($"換不到 skypetoken：{ex.Message}", statusCode: StatusCodes.Status502BadGateway);
+            }
         })
         .WithSummary("強制換一次 skypetoken")
         .WithDescription("驗證 cookie 還有效（換得到 token 就 ok，失敗代表該重匯）。");
