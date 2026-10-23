@@ -28,14 +28,14 @@ public sealed class RelayWorker(
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         var opts = options.Value;
+        var routes = BuildRoutes(opts.Slack.Routes, logger);
         if (string.IsNullOrWhiteSpace(opts.Slack.BotToken)
-            || (opts.Slack.DefaultChannel is null && opts.Slack.Routes.Count == 0))
+            || (opts.Slack.DefaultChannel is null && routes.Count == 0))
         {
             logger.LogError("未設定 Relay:Slack:BotToken 或任何頻道，relay 不啟動");
             return;
         }
 
-        var routes = opts.Slack.Routes.ToDictionary(r => r.Chat, r => r.Channel);
         // 有路由就只訂閱那些對話；否則訂全部（走 DefaultChannel）
         var chats = routes.Count > 0 ? string.Join(',', routes.Keys) : null;
         logger.LogInformation("relay 啟動：{Count} 條路由，default={Default}", routes.Count, opts.Slack.DefaultChannel ?? "(無)");
@@ -71,6 +71,27 @@ public sealed class RelayWorker(
             await Task.Delay(backoff, ct);
             backoff = TimeSpan.FromSeconds(Math.Min(backoff.TotalSeconds * 2, MaxBackoff.TotalSeconds));
         }
+    }
+
+    /// <summary>
+    /// Routes → 對照表。同一個 Teams 對話設了兩次以後面為準並警告（用 ToDictionary 會丟例外、整個 relay 起不來），
+    /// 缺 chat / channel 的略過。
+    /// </summary>
+    internal static Dictionary<string, string> BuildRoutes(IEnumerable<RelayOptions.ChannelRoute> routes, ILogger logger)
+    {
+        var map = new Dictionary<string, string>();
+        foreach (var route in routes)
+        {
+            if (string.IsNullOrWhiteSpace(route.Chat) || string.IsNullOrWhiteSpace(route.Channel))
+            {
+                logger.LogWarning("略過不完整的路由：chat={Chat} channel={Channel}", route.Chat, route.Channel);
+                continue;
+            }
+            if (map.TryGetValue(route.Chat, out var existing) && existing != route.Channel)
+                logger.LogWarning("路由重複：{Chat} 同時設了 {First} 和 {Second}，用後者", route.Chat, existing, route.Channel);
+            map[route.Chat] = route.Channel;
+        }
+        return map;
     }
 
     /// <summary>單則轉送失敗後的重試間隔；用完還失敗就放棄這則。</summary>
