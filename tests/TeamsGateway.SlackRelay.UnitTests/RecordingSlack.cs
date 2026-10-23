@@ -17,6 +17,9 @@ internal sealed class RecordingSlack : HttpMessageHandler
     /// <summary>method → 回應的 JSON。</summary>
     public Dictionary<string, string> Responses { get; } = [];
 
+    /// <summary>依完整網址決定回應（同一個 method、參數不同時用）；回 null 就照 <see cref="Responses"/> / 預設。</summary>
+    public Func<Uri, string?>? Respond { get; set; }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var method = request.RequestUri!.Segments[^1];
@@ -24,10 +27,10 @@ internal sealed class RecordingSlack : HttpMessageHandler
             ? default
             : JsonDocument.Parse(await request.Content.ReadAsStringAsync(cancellationToken)).RootElement.Clone();
         Requests.Add((method, body));
-        var response = Responses.TryGetValue(method, out var canned) ? canned
+        var response = Respond?.Invoke(request.RequestUri) ?? (Responses.TryGetValue(method, out var canned) ? canned
             : method == "chat.getPermalink"
             ? $$"""{"ok":true,"permalink":"{{Permalink(System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["message_ts"]!)}}"}"""
-            : """{"ok":true,"ts":"111.333"}""";
+            : """{"ok":true,"ts":"111.333"}""");
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(response, Encoding.UTF8, "application/json") };
     }
 }

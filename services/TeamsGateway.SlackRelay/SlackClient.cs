@@ -138,10 +138,24 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     {
         var found = new List<RelayedMessage>();
         await foreach (var m in ReadPagesAsync("conversations.history", channel, $"oldest={oldestUnixSeconds}", ct))
-            if (m.Metadata?.EventType == MetaEventType && m.Metadata.EventPayload?.TeamsId is { } tid && m.Ts is { } ts)
-                found.Add(new RelayedMessage(tid, ts, m.Text ?? "", m.Metadata.EventPayload.Version));
+            if (AsRelayed(m) is { } relayed)
+                found.Add(relayed);
         return found;
     }
+
+    /// <summary>頻道裡最新一則我們轉過的訊息，不限時間往回找（最多 20 頁）；一則都沒有回 null。</summary>
+    public async Task<RelayedMessage?> ReadNewestRelayedAsync(string channel, CancellationToken ct)
+    {
+        await foreach (var m in ReadPagesAsync("conversations.history", channel, "", ct))
+            if (AsRelayed(m) is { } relayed)
+                return relayed;
+        return null;
+    }
+
+    private static RelayedMessage? AsRelayed(HistoryMessage m) =>
+        m.Metadata?.EventType == MetaEventType && m.Metadata.EventPayload?.TeamsId is { } tid && m.Ts is { } ts
+            ? new RelayedMessage(tid, ts, m.Text ?? "", m.Metadata.EventPayload.Version)
+            : null;
 
     /// <summary>某則訊息 thread 裡已經貼過的表情留言的事件序號（<see cref="PostReactionNoteAsync"/> 夾的 metadata）；讀不到就是空的。</summary>
     public async Task<IReadOnlyCollection<long>> ReadReactionSeqsAsync(string channel, string threadTs, CancellationToken ct)
@@ -159,7 +173,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         string? cursor = null;
         for (var page = 0; page < 20; page++) // 上限保護
         {
-            var url = $"{method}?channel={Uri.EscapeDataString(channel)}&{query}&limit=200&include_all_metadata=true"
+            var url = $"{method}?channel={Uri.EscapeDataString(channel)}{(query.Length > 0 ? "&" + query : "")}&limit=200&include_all_metadata=true"
                       + (string.IsNullOrEmpty(cursor) ? "" : $"&cursor={Uri.EscapeDataString(cursor)}");
             using var resp = await http.GetAsync(url, ct);
             var body = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.HistoryResponse, ct);

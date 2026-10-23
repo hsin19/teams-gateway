@@ -4,7 +4,7 @@
 
 分兩階段：
 
-- **Phase 1（已做）Teams → Slack**：當 `GET /v1/events`（SSE）的訂閱者，把 Teams 訊息貼進對應的 Slack 頻道。斷線用 `Last-Event-ID`（事件序號）續接；relay 自己重啟時序號沒了，改從 Slack 上最後一則轉過去的 Teams 訊息之後續接（`afterMessage`），停機期間的不會漏，重送的照版本去重。60 秒沒收到任何資料（gateway 每 20 秒有心跳）就當連線半死、重連。
+- **Phase 1（已做）Teams → Slack**：當 `GET /v1/events`（SSE）的訂閱者，把 Teams 訊息貼進對應的 Slack 頻道。斷線用 `Last-Event-ID`（事件序號）續接；relay 自己重啟時序號沒了，改從 Slack 上最後一則轉過去的 Teams 訊息之後續接（`afterMessage`；近 24 小時沒轉過東西就往更早的歷史找），停機期間的不會漏，重送的照版本去重。限制：Slack 上一則都沒轉過（例如剛清空），或那則訊息的事件已超過 gateway 的保留天數（預設 7 天），就只能從現在開始。60 秒沒收到任何資料（gateway 每 20 秒有心跳）就當連線半死、重連。
 - **Phase 2（未做）Slack → Teams**：Socket Mode 收 Slack 回覆 → 對應回 Teams 對話 → `POST /v1/chats/{id}/messages`。
 
 ## Slack app
@@ -26,7 +26,7 @@ appsettings 放完整 default，secret 走 env（雙底線覆蓋）或 user-secr
 | `Relay:Slack:BotToken` | `Relay__Slack__BotToken` | Slack bot token（`xoxb-…`，scope 見 manifest） |
 | `Relay:Slack:DefaultChannel` | `Relay__Slack__DefaultChannel` | 沒對應到 Routes 的對話落這個頻道（頻道 id）；不設 = 不轉 |
 | `Relay:Slack:Routes` | — | `Teams 對話 → Slack 頻道` 路由（list） |
-| `Relay:Links:RetentionHours` | `Relay__Links__RetentionHours` | 啟動時從 Slack 歷史回補多久內的訊息對應（預設 24），給回覆連結 / 原地編輯用 |
+| `Relay:Links:RetentionHours` | `Relay__Links__RetentionHours` | 啟動時從 Slack 歷史回補多久內的訊息對應（預設 24），給回覆連結 / 原地編輯用；重啟的續接點不受這個限制 |
 
 **頻道策略**：有 `Routes` 就只訂閱表內那些 Teams 對話、各自轉到對應頻道；要「全部進一個頻道」就只設 `DefaultChannel`、不填 Routes。
 

@@ -223,7 +223,7 @@ public sealed class RelayWorker(
     }
 
     /// <summary>加入各頻道並讀近 <paramref name="retentionHours"/> 的歷史，從 metadata 把 Teams id → Slack 訊息 撈回對應表。</summary>
-    private async Task WarmupLinksAsync(Dictionary<string, string> routes, string? defaultChannel, int retentionHours, CancellationToken ct)
+    internal async Task WarmupLinksAsync(Dictionary<string, string> routes, string? defaultChannel, int retentionHours, CancellationToken ct)
     {
         var channels = new HashSet<string>(routes.Values);
         if (!string.IsNullOrWhiteSpace(defaultChannel))
@@ -237,8 +237,12 @@ public sealed class RelayWorker(
             try
             {
                 await slack.JoinChannelAsync(channel, ct); // 要是成員才讀得到歷史
-                foreach (var m in await slack.ReadRelayedAsync(channel, oldest, ct))
+                var recent = await slack.ReadRelayedAsync(channel, oldest, ct);
+                foreach (var m in recent)
                     links.Remember(m.TeamsId, channel, m.Ts, m.Text, m.Version);
+                // 近期沒轉過東西：往更早找最新一則當續接點，不然重啟後從「現在」開始，停機期間 gateway 發出的事件就漏了
+                if (recent.Count == 0 && await slack.ReadNewestRelayedAsync(channel, ct) is { } newest)
+                    links.Remember(newest.TeamsId, channel, newest.Ts, newest.Text, newest.Version);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
