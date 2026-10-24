@@ -39,7 +39,8 @@ dotnet publish services/TeamsGateway.Gateway -t:PublishContainer -p:ContainerRun
 ## 程式慣例
 
 - 照周圍的寫法：primary constructor、`sealed`、DTO 用 `record`；JSON 走 source generator（`*JsonContext`），新的 wire 型別要註冊進去。
-- 註解、XML doc、log 訊息用繁體中文，寫「為什麼」，不重複程式碼已經講清楚的事。例外：`.github/workflows/` 的註解與 step 名稱用英文。
+- 語言：給人讀的說明用繁體中文——文件、註解、XML doc、`.github/workflows/` 的註解與 step 名稱；其他一律英文——識別字、log、例外與錯誤訊息、health check 的描述、API 回應、發到 Slack 的文字、console 輸出。舊的還沒改完，動到哪段就順手改哪段。
+- 註解有需要才寫：只寫程式碼看不出來的事（為什麼這樣做、限制、踩過的坑）。程式碼已經講清楚的不要再用中文翻一遍。
 - 測試名稱是英文、底線分隔的句子（例如 `Upsert_inserts_then_dedupes_same_version`），上面用中文註解說明情境；`CancellationToken` 用 `TestContext.Current.CancellationToken`，DB 用 `TestDb`。
 - DB 可切換 SQLite / Postgres（`Gateway:Database:Provider`，ADR 0008），本機預設 SQLite。動到 DB 的程式兩邊都要能跑：改完跑一次 Postgres 版的 functional test；寫 `PublishedEvents` 只能經過 `MessageIngestor` 的寫入鎖（序號要等於 commit 順序）。
 - schema 走 EF migration（ADR 0009），SQLite / Postgres 各一套：改了 EF model 就跑 `tools/db-migration.sh add <名稱>`，產生的檔案一起 commit（`MigrationTests` 會擋忘記的）。gateway 啟動時自動套用，不用刪 DB。`.data/gateway.db` 裡有登入 cookie 和 API key，**任何要刪或重建它的操作都要先問**。
