@@ -62,6 +62,7 @@ gateway 的 bootstrap（綁定 Teams 帳號）與 API 見 [`services/TeamsGatewa
 | | gateway | relay |
 |---|---|---|
 | 副本 | 1：一條 Trouter 連線、單一寫入者 | 1：多副本會重複貼 Slack |
+| 執行方式 | JIT（base image `aspnet` chiseled） | Native AOT（base image `runtime-deps` chiseled，image 小、記憶體少） |
 | 埠 | 8080（HTTP） | 8080（HTTP，只有 `/health`、`/alive`） |
 | 持久化 | `/data` volume：DataProtection key，用 SQLite 時還有 `gateway.db`。要讓 uid 1654 寫得進去（bind mount 的話先 `chown 1654:1654`） | 無：狀態在 Slack 訊息的 metadata |
 | 健康檢查 | `/health`：含 DB | `/health`：設定齊全、連著 gateway 的事件串流才 Healthy；`/alive`：process 有回應 |

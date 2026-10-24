@@ -2,7 +2,7 @@
 
 ## 決定
 
-.NET 10 + Aspire + ASP.NET Core（Minimal API）+ EF Core（SQLite），走一般 JIT CoreCLR，**不用 Native AOT**。
+.NET 10 + Aspire + ASP.NET Core（Minimal API）+ EF Core（SQLite），走一般 JIT CoreCLR，**不用 Native AOT**。（後來 relay 改成 Native AOT：它沒有 EF Core，ServiceDefaults 也過得了 AOT 分析；gateway 照舊 JIT。）
 
 ## 背景與取捨
 
@@ -16,7 +16,7 @@
 
 原本為了省記憶體想用 Native AOT，後來放棄：
 
-1. **EF Core 的 AOT 到 EF 10 仍是 experimental、官方標明不可上 production**，動態查詢會在執行期直接丟 `Query wasn't precompiled`。Aspire 本身也不 AOT-friendly。
+1. **EF Core 的 AOT 到 EF 10 仍是 experimental、官方標明不可上 production**，動態查詢會在執行期直接丟 `Query wasn't precompiled`。Aspire 本身也不 AOT-friendly。（AppHost 確實不行，但服務用的 ServiceDefaults 在 .NET 10 已經沒有 AOT 警告，relay 就是靠這點改成 AOT。）
 2. **省記憶體的動機已經消失**：原本怕吃幾百 MB 的元兇是登入 Teams 要開的 Chromium。spike（見 `spike/FINDINGS.md`）已確認**執行期完全不需要瀏覽器**——換 token、讀、發、收推播全是 HTTP / WebSocket，瀏覽器只在第一次登入拿 cookie 時用一次。
 
 所以改用 JIT，並以 workstation GC（`ServerGarbageCollection=false`）把常駐記憶體壓到數十 MB 等級，足以滿足原始訴求，又不必犧牲 EF Core 與 Aspire。

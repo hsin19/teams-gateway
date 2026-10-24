@@ -9,6 +9,11 @@
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <ContainerRepository>teams-slack-relay</ContainerRepository>
+    <!-- Native AOT：image 小、記憶體少（ADR 0001 的補充）。原生碼不能跨作業系統、也不好跨架構編，
+         Linux 的 image 要在對應架構的 Linux 上出（release 用兩種 runner；本機見 AGENTS.md） -->
+    <PublishAot>true</PublishAot>
+    <!-- 符號檔（.dbg）比執行檔還大，不放進 image -->
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
   </PropertyGroup>
 
   <ItemGroup>

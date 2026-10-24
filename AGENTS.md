@@ -27,11 +27,17 @@ GATEWAY_TEST_DB=postgres dotnet test --project tests/TeamsGateway.Gateway.Functi
 dotnet test --project tests/TeamsGateway.SlackRelay.UnitTests
 dotnet test --project tests/TeamsGateway.Gateway.UnitTests -- --filter-method '*Reaction*'   # 只跑部分
 dotnet publish services/TeamsGateway.Gateway -t:PublishContainer -p:ContainerRuntimeIdentifier=linux-arm64   # 出 image 進本機 Docker（沒有 Dockerfile，ADR 0010）
+
+# relay 是 Native AOT，Linux 的原生碼在 macOS 上編不出來：在 AOT 版的 SDK image 裡出成檔案再 load。
+# --platform 決定架構（Apple Silicon 上 linux/amd64 走模擬，比較慢）
+docker run --rm --platform linux/arm64 -v "$PWD:/src" -w /src mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
+  dotnet publish services/TeamsGateway.SlackRelay -t:PublishContainer -p:ContainerRuntimeIdentifier=linux-arm64 -p:ContainerArchiveOutputPath=/src/bin/relay.tar.gz
+docker load -i bin/relay.tar.gz
 ```
 
 - 測試 runner 是 Microsoft.Testing.Platform：指定專案要用 `--project`，篩選參數放在 `--` 後面。
 - CI 在 `.github/workflows/`（架構見裡面的 README）：`check.yml` 是唯一的檢查定義，PR、push 到 main、release 都跑它（含 Postgres 版 functional test 與 shellcheck）；打 `v*` tag 由 `release.yml` 出 amd64 + arm64 image 到 GHCR。加新的檢查就加在 `check.yml`。
-- image 的設定在 csproj 與 `services/Directory.Build.props` 的 `Container*` 屬性（ADR 0010）。image 以 uid 1654 跑、沒有 shell；改了 entrypoint、環境變數、資料路徑這類東西，用上面的 `PublishContainer` 出一份實際跑過再說。
+- image 的設定在 csproj 與 `services/Directory.Build.props` 的 `Container*` 屬性（ADR 0010）。relay 是 Native AOT、gateway 是 JIT；`ServiceDefaults`、`Contracts` 開了 `IsAotCompatible`，build 時就跑 AOT 分析，警告一樣擋建置。image 以 uid 1654 跑、沒有 shell；改了 entrypoint、環境變數、資料路徑這類東西，用上面的 `PublishContainer` 出一份實際跑過再說。
 - `TreatWarningsAsErrors` 開著，warning 會擋建置。
 - E2E 打的是真帳號、會真的在 Teams 發訊息；沒設 `GATEWAY_API_KEY` 會整組 skip。要跑先問。
 - 改了行為就補測試；修 bug 時先確認新測試在修正前會失敗。
@@ -39,7 +45,7 @@ dotnet publish services/TeamsGateway.Gateway -t:PublishContainer -p:ContainerRun
 ## 程式慣例
 
 - 照周圍的寫法：primary constructor、`sealed`、DTO 用 `record`；JSON 走 source generator（`*JsonContext`），新的 wire 型別要註冊進去。
-- 語言：給人讀的說明用繁體中文——文件、註解、XML doc、`.github/workflows/` 的註解與 step 名稱；其他一律英文——識別字、log、例外與錯誤訊息、health check 的描述、API 回應、發到 Slack 的文字、console 輸出。舊的還沒改完，動到哪段就順手改哪段。
+- 語言：只有打開 repo 讀原始碼才看得到的用繁體中文（文件、註解、XML doc）；其他一律英文，包括執行時或在 UI 上會出現的字串（log、例外與錯誤訊息、health check 的描述、API 回應、發到 Slack 的文字、console 輸出、workflow 的 job / step 名稱）。舊的還沒改完，動到哪段就順手改哪段。
 - 註解有需要才寫：只寫程式碼看不出來的事（為什麼這樣做、限制、踩過的坑）。程式碼已經講清楚的不要再用中文翻一遍。
 - 測試名稱是英文、底線分隔的句子（例如 `Upsert_inserts_then_dedupes_same_version`），上面用中文註解說明情境；`CancellationToken` 用 `TestContext.Current.CancellationToken`，DB 用 `TestDb`。
 - DB 可切換 SQLite / Postgres（`Gateway:Database:Provider`，ADR 0008），本機預設 SQLite。動到 DB 的程式兩邊都要能跑：改完跑一次 Postgres 版的 functional test；寫 `PublishedEvents` 只能經過 `MessageIngestor` 的寫入鎖（序號要等於 commit 順序）。
@@ -52,7 +58,7 @@ dotnet publish services/TeamsGateway.Gateway -t:PublishContainer -p:ContainerRun
   - `packages/TeamsGateway.ServiceDefaults/README.md`
   - `packages/README.md`
   - `README.md`
-- 設計上的決定寫成 ADR：`docs/adr/NNNN-<slug>.md`，格式照既有的。新的決定修正或推翻舊 ADR 時，不改寫舊 ADR 的內容，在舊的那份加一句指向新的；新增 ADR 時一併更新根 `README.md` 的 ADR 清單。
+- 設計上的決定寫成 ADR：`docs/adr/NNNN-<slug>.md`，格式照既有的。舊 ADR 的正文不改寫；後來的修正、例外、變化，在相關的句子後面用括號補充（括號裡的內容可以改、可以加）。整個推翻才另開新的 ADR，在舊的那份加一句指向它，並一併更新根 `README.md` 的 ADR 清單。
 - 文件用繁體中文；程式碼識別字、路徑、設定鍵用反引號。
 
 ## Commit

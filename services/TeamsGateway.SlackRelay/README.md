@@ -60,6 +60,13 @@ Relay__Gateway__ApiKey=tgw_… Relay__Slack__BotToken=xoxb-… Relay__Slack__Def
   dotnet run --project services/TeamsGateway.SlackRelay
 ```
 
+## Native AOT
+
+正式的 image 是 Native AOT（不帶 .NET runtime，image 與記憶體都小很多）；本機 `dotnet run` / AppHost 照樣是 JIT。
+寫程式時要守 AOT 的限制：不靠反射，JSON 一律走 source generator（`SlackJsonContext`、`ContractsJsonContext`），
+設定繫結由 SDK 的 source generator 處理。`TeamsGateway.SlackRelay` 開了 `PublishAot`、共用的 `ServiceDefaults` /
+`Contracts` 開了 `IsAotCompatible`，平常 build 就會跑 AOT 分析，警告一樣擋建置。在本機出 Linux image 的方式見 AGENTS.md。
+
 ## 健康檢查
 
 relay 是 worker，開 HTTP（container 裡是 8080）只為了這兩個端點，沒有別的：

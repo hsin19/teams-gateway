@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <IsAspireSharedProject>true</IsAspireSharedProject>
+    <!-- relay 是 Native AOT：build 時就跑 AOT / trim 分析，不相容的寫法直接擋下來 -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
