@@ -1,11 +1,8 @@
 name: Release
 
-# On a v* tag: once check.yml passes, build the gateway and relay images with the .NET SDK
-# (`dotnet publish -t:PublishContainer`, no Dockerfile; see ADR 0010), smoke-check them, and push
-# them to GHCR as linux/amd64 + linux/arm64 under one tag. The SDK assembles both architectures on
-# this x64 runner without emulation: the app is IL, and only NuGet's native libraries differ.
-# Image tags: v1.2.3 -> 1.2.3, 1.2, sha-<short sha>. Deployments pin one of them (see the README's
-# deployment section).
+# 打 v* tag：check.yml 過了之後，兩個 image 各在 x64 與 arm64 的原生 runner 上 smoke check，
+# 全部過了才用 .NET SDK 出 image（沒有 Dockerfile，ADR 0010），以 linux/amd64 + linux/arm64 推到 GHCR 的同一個 tag。
+# image tag：v1.2.3 → 1.2.3、1.2、sha-<短 sha>。部署端固定用其中一個（見根目錄 README〈部署〉）。
 on:
   push:
     tags: ['v*']
@@ -13,8 +10,7 @@ on:
 permissions:
   contents: read
 
-# One release per tag at a time, and never cancel one in flight: a half-pushed set of tags is
-# worse than a slightly late one.
+# 同一個 tag 一次只跑一個 release，跑到一半不取消：tag 推了一半比晚一點推完更糟
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -23,9 +19,70 @@ jobs:
   check:
     uses: ./.github/workflows/check.yml
 
-  image:
-    name: Image (${{ matrix.image }})
+  # 每個架構都要真的跑過才推：arm64 的部署端拿到的是 arm64 那份，兩個架構只差 NuGet 帶來的 native 函式庫，
+  # 但出包就出在這裡
+  smoke:
+    name: Smoke check（${{ matrix.app.image }}，${{ matrix.platform.rid }}）
     needs: check
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        app:
+          - image: teams-gateway
+            project: services/TeamsGateway.Gateway
+          - image: teams-slack-relay
+            project: services/TeamsGateway.SlackRelay
+        platform:
+          - rid: linux-x64
+            runner: ubuntu-24.04
+          - rid: linux-arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 安裝 .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: 建 image 進本機 Docker
+        run: >
+          dotnet publish ${{ matrix.app.project }} -t:PublishContainer
+          -p:ContainerRuntimeIdentifier=${{ matrix.platform.rid }}
+          -p:ContainerImageTag=smoke
+
+      # 沒有 secret、沒有 Teams 登入、也沒有 gateway 給 relay 連，要抓的是 image 本身壞掉（少了 runtime 檔、一啟動就掛）。
+      # gateway 照樣會 migrate SQLite、回 /health（含 DB）；/data 要讓 uid 1654 寫得進去，跟部署端一樣。
+      # relay 的 /health 在這裡一定是 Unhealthy（沒有 Slack 頻道、沒連 gateway），所以只看 /alive
+      - name: Smoke check
+        run: |
+          image="${{ matrix.app.image }}:smoke"
+          if [ "${{ matrix.app.image }}" = teams-gateway ]; then
+            data="$RUNNER_TEMP/data"
+            mkdir "$data"
+            sudo chown 1654:1654 "$data"
+            docker run -d --name smoke -p 8080:8080 -v "$data:/data" "$image"
+            path=/health
+          else
+            docker run -d --name smoke -p 8080:8080 "$image"
+            path=/alive
+          fi
+          for _ in $(seq 1 30); do
+            if curl -fsS "http://localhost:8080$path" | grep -q Healthy; then
+              echo "${{ matrix.app.image }} answers $path Healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs smoke
+          exit 1
+
+  image:
+    name: 推 image（${{ matrix.image }}）
+    needs: smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -43,13 +100,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup .NET
+      - name: 安裝 .NET
         uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
-      # A pre-release (v1.2.3-rc.1) gets no major.minor tag, so 1.2 keeps pointing at a release.
-      - name: Image tags
+      # pre-release（v1.2.3-rc.1）不給 major.minor tag，1.2 才會一直指向正式版
+      - name: 決定 image tag
         id: tags
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -65,56 +122,17 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
 
-      # Only the runner's own architecture goes into the local engine to be run: the arm64 half
-      # differs from it only in NuGet's native libraries, and running it here would need QEMU.
-      - name: Build for the smoke check
-        run: >
-          dotnet publish ${{ matrix.project }} -t:PublishContainer
-          -p:ContainerRuntimeIdentifier=linux-x64
-          -p:ContainerImageTag=smoke
-          -p:Version=${{ steps.tags.outputs.version }}
-
-      # No secrets and no Teams login: the gateway still migrates its SQLite DB and answers /health,
-      # which catches a broken image (missing runtime files, a crash on startup). Its /data is a host
-      # directory owned by the image's non-root user (uid 1654), as a deployment must provide. The
-      # relay has no HTTP endpoint, so for it "still running after a few seconds" is the bar.
-      - name: Smoke check
-        run: |
-          image="${{ matrix.image }}:smoke"
-          if [ "${{ matrix.image }}" = teams-gateway ]; then
-            data="$RUNNER_TEMP/data"
-            mkdir "$data"
-            sudo chown 1654:1654 "$data"
-            docker run -d --name smoke -p 8080:8080 -v "$data:/data" "$image"
-            for _ in $(seq 1 30); do
-              if curl -fsS http://localhost:8080/health | grep -q Healthy; then
-                echo "gateway is healthy"
-                exit 0
-              fi
-              sleep 2
-            done
-            docker logs smoke
-            exit 1
-          fi
-          docker run -d --name smoke "$image"
-          sleep 10
-          if [ "$(docker inspect -f '{{.State.Running}}' smoke)" != true ]; then
-            docker logs smoke
-            exit 1
-          fi
-          echo "relay is still running"
-
-      # The SDK reads the credentials docker login stores, per registry. Its DOTNET_CONTAINER_REGISTRY_*
-      # variables would instead also be sent to the base image's registry (MCR).
-      - name: Log in to GHCR
+      # SDK 讀 docker login 存的帳密，分 registry 給。用 SDK 的 DOTNET_CONTAINER_REGISTRY_* 的話，
+      # 帳密也會送到 base image 的 registry（MCR）
+      - name: 登入 GHCR
         run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
 
-      # Both architectures, merged into one image index under every tag and pushed straight to the
-      # registry. Same inputs as the smoke build, so the x64 half is an incremental rebuild.
-      - name: Push
+      # 兩個架構合成一個 image index、每個 tag 都推。這裡是同一個 commit 重新 build 的，不是 smoke 跑過的那幾份：
+      # SDK 沒辦法拿別台 runner 本機 Docker 裡的 image 來推
+      - name: 推到 GHCR
         run: >
           dotnet publish ${{ matrix.project }} -t:PublishContainer
           -p:ContainerRegistry=ghcr.io

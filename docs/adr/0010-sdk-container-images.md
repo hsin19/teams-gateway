@@ -5,12 +5,12 @@
 - 兩個服務的 image 用 `dotnet publish -t:PublishContainer` 出。repository 名稱、環境變數寫在各自的 csproj，架構與 base image 寫在 `services/Directory.Build.props`。Dockerfile 與 `.dockerignore` 拿掉。
 - 同一個 tag 含 `linux/amd64` 與 `linux/arm64`：`ContainerRuntimeIdentifiers` 讓 SDK 各 publish 一份，再合成一個 OCI image index。CI 在 x64 runner 上一次出兩份，不用 QEMU，也不用 arm64 runner。
 - base image 是 `aspnet:10.0-noble-chiseled`（relay 也是，因為 ServiceDefaults 參照了 ASP.NET Core）：沒有 shell、沒有套件管理，以非 root（uid 1654）執行。
-- release 照舊先在 runner 上 smoke check 再推，但只能跑 x64 那份。
+- release 照舊先在 runner 上 smoke check 再推，但只能跑 x64 那份。（後來 smoke check 改成兩個架構各在原生 runner（`ubuntu-24.04` / `ubuntu-24.04-arm`）上跑，arm64 也實際跑過才推；推的那一步照舊在一台 x64 上組出兩個架構。）
 
 ## 背景
 
 - 兩個服務都是純 .NET、走 JIT，image 裡只需要 publish 的輸出。Dockerfile 主要在處理 monorepo 的 restore（先 copy 各個 csproj 吃 layer cache）跟用 `.dockerignore` 擋 secret；SDK 直接拿 build 的結果組 image，這兩件都不用管。
-- 多架構：Dockerfile 要靠 buildx，不是 QEMU 模擬（慢），就是各架構的 runner 各 build 一份再合併。JIT 編出來是 IL，分架構的只有 NuGet 帶來的 native 函式庫（SQLite），SDK 在任何一台都組得出兩份。順帶不再綁 arm64 runner（只有公開 repo 免費）。
+- 多架構：Dockerfile 要靠 buildx，不是 QEMU 模擬（慢），就是各架構的 runner 各 build 一份再合併。JIT 編出來是 IL，分架構的只有 NuGet 帶來的 native 函式庫（SQLite），SDK 在任何一台都組得出兩份。順帶不用綁 arm64 runner。
 - gateway 的 image 原本裝了 `curl`，給 compose 的 healthcheck 用。compose 已經移到部署端，CI 的 smoke check 從 host 打 `/health`，image 裡用不到。SDK 出的 image 不能 `RUN`，剛好也不需要。
 
 ## 代價與注意
