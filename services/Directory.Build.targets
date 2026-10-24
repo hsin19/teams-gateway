@@ -4,6 +4,7 @@
     SDK 10.0 的 multi-RID container publish 把 label、環境變數以 `名稱:值` 傳給各 RID 的 inner build，再用 Split(':')[1] 拆回來，
     值裡有 `:` 的就只剩第一段：org.opencontainers.image.source 變成 `https`，GHCR 就連不到 repo；建立時間、base image 名稱也一樣。
     這裡照第一個 `:` 重拆一次。label 的部分 upstream 修了（dotnet/sdk#55414），用的 SDK 帶了修正、環境變數也修了就可以拿掉。
+    release 每個架構分開出、不走 multi-RID，只有本機不指定架構 publish 時才會用到。
   -->
   <Target Name="_ReparseMultiRidContainerItems" AfterTargets="_ParseItemsForPublishingSingleContainer">
     <ItemGroup Condition="@(_ParsedContainerLabel->Count()) > 0">

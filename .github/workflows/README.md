@@ -6,7 +6,7 @@
 check.yml    push 到 main · workflow_call · workflow_dispatch
              → build · unit test · functional test（SQLite、Postgres）· shellcheck
 pr.yml       pull_request → check.yml · dependency review → auto-merge（Dependabot）
-release.yml  v* tag       → check.yml → 每個 image 在 x64 + arm64 runner 上 smoke check → 推 amd64 + arm64 到 GHCR
+release.yml  v* tag       → check.yml → 每個 image 在 x64 + arm64 runner 上 build、smoke check → 推 amd64 + arm64 到 GHCR
 ```
 
 `check.yml` 是「這棵樹過了沒」的唯一定義。另外兩個 workflow 都呼叫它，PR 和 release 用同一套標準，清單不會兩邊各長各的。
@@ -29,14 +29,16 @@ workflow 用觸發它的事件命名，不叫 `ci.yml`：它們跑的是同一�
 `ghcr.io/<owner>/teams-slack-relay`，tag 是 `1.2.3`、`1.2` 與 `sha-<短 sha>`。
 
 - 沒有 Dockerfile：`dotnet publish -t:PublishContainer` 照專案設定（`services/Directory.Build.props` 與各自的 csproj，
-  見 ADR 0010）出 image、直接推到 registry，workflow 裡沒有 Docker 的 action。
-- 每個 tag 是含 `linux/amd64` 與 `linux/arm64` 的 image index，兩個架構都在同一台 x64 runner 上出、不用模擬：
-  程式是 IL，分架構的只有 NuGet 帶來的 native 函式庫。SDK 會先把各架構推成 `<tag>-linux-x64` /
-  `<tag>-linux-arm64`，所以 GHCR 上也看得到這些 tag；部署用沒有後綴的那個。
-- 推之前，每個 image 都在兩個架構的原生 runner（`ubuntu-24.04`、`ubuntu-24.04-arm`）上 build 進本機 Docker、
-  跑 smoke check：gateway 在沒有任何 secret 的情況下要回 `/health` Healthy，relay 要回 `/alive` Healthy
-  （它的 `/health` 要有 Slack 頻道、連著 gateway，在這裡一定是 Unhealthy）。gateway 拿到一個屬於 uid 1654
-  的 `/data`，跟部署端要準備的一樣。推的時候是同一個 commit 重新 build 的，不是 smoke 跑過的那幾份。
+  見 ADR 0010）出 image 進本機 Docker，再用 `docker` 指令推；workflow 裡沒有 Docker 的 action。
+- 每個 image、每個架構各一個 build job，跑在該架構的原生 runner 上（`ubuntu-24.04`、`ubuntu-24.04-arm`）：
+  1. build 進本機 Docker。gateway（JIT）直接用 SDK；relay（Native AOT）在 AOT 版的 SDK image（`sdk:10.0-noble-aot`）裡編，
+     跟本機出 image 的做法一樣。
+  2. smoke check：gateway 在沒有任何 secret 的情況下要回 `/health` Healthy，relay 要回 `/alive` Healthy
+     （它的 `/health` 要有 Slack 頻道、連著 gateway，在這裡一定是 Unhealthy）。gateway 拿到一個屬於 uid 1654
+     的 `/data`，跟部署端要準備的一樣。
+  3. 過了就把**同一份** image 推成 `<版本>-<rid>`（例如 `1.2.3-linux-arm64`）。推出去的就是跑過的。
+- 四個 build job 都過了，`publish` 才用 `docker buildx imagetools create` 把兩個架構合成一個 image index，
+  每個正式 tag 都指向它。中途失敗的話，GHCR 上會留下幾個 `<版本>-<rid>`，但正式 tag 不會出現；部署用的是沒有後綴的正式 tag。
 - GHCR 新推的 package 預設是 private。到 package 設定改成 public 一次，或改成授權給部署端的 repo 讀取。
   `org.opencontainers.image.source` label 會把 package 連到這個 repo。
 

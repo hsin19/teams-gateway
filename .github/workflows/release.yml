@@ -1,7 +1,8 @@
 name: Release
 
-# 打 v* tag：check.yml 過了之後，兩個 image 各在 x64 與 arm64 的原生 runner 上 smoke check，
-# 全部過了才用 .NET SDK 出 image（沒有 Dockerfile，ADR 0010），以 linux/amd64 + linux/arm64 推到 GHCR 的同一個 tag。
+# 打 v* tag：check.yml 過了之後，兩個 image 各在 x64 與 arm64 的原生 runner 上 build、smoke check，
+# 過了就把那一份推成 <版本>-<rid>；全部過了才合成 linux/amd64 + linux/arm64 的正式 tag。
+# image 由 .NET SDK 出（沒有 Dockerfile，ADR 0010）。
 # image tag：v1.2.3 → 1.2.3、1.2、sha-<短 sha>。部署端固定用其中一個（見根目錄 README〈部署〉）。
 on:
   push:
@@ -19,94 +20,17 @@ jobs:
   check:
     uses: ./.github/workflows/check.yml
 
-  # 每個架構都要真的跑過才推：arm64 的部署端拿到的是 arm64 那份，兩個架構只差 NuGet 帶來的 native 函式庫，
-  # 但出包就出在這裡
-  smoke:
-    name: Smoke check（${{ matrix.app.image }}，${{ matrix.platform.rid }}）
-    needs: check
-    runs-on: ${{ matrix.platform.runner }}
-    timeout-minutes: 20
-    strategy:
-      matrix:
-        app:
-          - image: teams-gateway
-            project: services/TeamsGateway.Gateway
-          - image: teams-slack-relay
-            project: services/TeamsGateway.SlackRelay
-        platform:
-          - rid: linux-x64
-            runner: ubuntu-24.04
-          - rid: linux-arm64
-            runner: ubuntu-24.04-arm
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: 安裝 .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          global-json-file: global.json
-
-      - name: 建 image 進本機 Docker
-        run: >
-          dotnet publish ${{ matrix.app.project }} -t:PublishContainer
-          -p:ContainerRuntimeIdentifier=${{ matrix.platform.rid }}
-          -p:ContainerImageTag=smoke
-
-      # 沒有 secret、沒有 Teams 登入、也沒有 gateway 給 relay 連，要抓的是 image 本身壞掉（少了 runtime 檔、一啟動就掛）。
-      # gateway 照樣會 migrate SQLite、回 /health（含 DB）；/data 要讓 uid 1654 寫得進去，跟部署端一樣。
-      # relay 的 /health 在這裡一定是 Unhealthy（沒有 Slack 頻道、沒連 gateway），所以只看 /alive
-      - name: Smoke check
-        run: |
-          image="${{ matrix.app.image }}:smoke"
-          if [ "${{ matrix.app.image }}" = teams-gateway ]; then
-            data="$RUNNER_TEMP/data"
-            mkdir "$data"
-            sudo chown 1654:1654 "$data"
-            docker run -d --name smoke -p 8080:8080 -v "$data:/data" "$image"
-            path=/health
-          else
-            docker run -d --name smoke -p 8080:8080 "$image"
-            path=/alive
-          fi
-          for _ in $(seq 1 30); do
-            if curl -fsS "http://localhost:8080$path" | grep -q Healthy; then
-              echo "${{ matrix.app.image }} answers $path Healthy"
-              exit 0
-            fi
-            sleep 2
-          done
-          docker logs smoke
-          exit 1
-
-  image:
-    name: 推 image（${{ matrix.image }}）
-    needs: smoke
+  # tag 不合格式就在 build 之前擋下來
+  meta:
+    name: Resolve version and image tags
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      matrix:
-        include:
-          - image: teams-gateway
-            project: services/TeamsGateway.Gateway
-          - image: teams-slack-relay
-            project: services/TeamsGateway.SlackRelay
-
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.tags.outputs.version }}
+      tags: ${{ steps.tags.outputs.tags }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: 安裝 .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          global-json-file: global.json
-
       # pre-release（v1.2.3-rc.1）不給 major.minor tag，1.2 才會一直指向正式版
-      - name: 決定 image tag
+      - name: Resolve image tags
         id: tags
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -122,22 +46,129 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
 
-      # SDK 讀 docker login 存的帳密，分 registry 給。用 SDK 的 DOTNET_CONTAINER_REGISTRY_* 的話，
-      # 帳密也會送到 base image 的 registry（MCR）
-      - name: 登入 GHCR
+  # 每個架構都要真的跑過才推：arm64 的部署端拿到的是 arm64 那份。smoke 過的那一份直接推成 <版本>-<rid>，
+  # 推出去的就是跑過的。部署端只用正式 tag，這裡推上去的在 publish 合成之前用不到
+  build:
+    name: Build and smoke check (${{ matrix.app.image }}, ${{ matrix.platform.rid }})
+    needs: [check, meta]
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        app:
+          - image: teams-gateway
+            project: services/TeamsGateway.Gateway
+            health: /health
+          # /health 要有 Slack 頻道、連著 gateway，在這裡一定是 Unhealthy，所以只看 /alive
+          - image: teams-slack-relay
+            project: services/TeamsGateway.SlackRelay
+            health: /alive
+            aot: true
+        platform:
+          - rid: linux-x64
+            runner: ubuntu-24.04
+          - rid: linux-arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        if: ${{ !matrix.app.aot }}
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Build image into local Docker
+        if: ${{ !matrix.app.aot }}
+        run: >
+          dotnet publish ${{ matrix.app.project }} -t:PublishContainer
+          -p:ContainerRuntimeIdentifier=${{ matrix.platform.rid }}
+          -p:ContainerImageTag=smoke
+          -p:Version=${{ needs.meta.outputs.version }}
+
+      # Native AOT 在 AOT 版的 SDK image 裡編（clang 等工具鏈都在裡面），跟本機出 image 的做法一樣（見 AGENTS.md）
+      - name: Build AOT image into local Docker
+        if: ${{ matrix.app.aot }}
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
+            dotnet publish ${{ matrix.app.project }} -t:PublishContainer \
+            -p:ContainerRuntimeIdentifier=${{ matrix.platform.rid }} \
+            -p:ContainerImageTag=smoke \
+            -p:Version=${{ needs.meta.outputs.version }} \
+            -p:ContainerArchiveOutputPath=/src/image.tar.gz
+          docker load -i image.tar.gz
+
+      # 沒有 secret、沒有 Teams 登入、也沒有 gateway 給 relay 連，要抓的是 image 本身壞掉（少了檔案、一啟動就掛）。
+      # gateway 照樣會 migrate SQLite、回 /health（含 DB）；/data 要讓 uid 1654 寫得進去，跟部署端一樣
+      - name: Smoke check
+        run: |
+          image="${{ matrix.app.image }}:smoke"
+          if [ "${{ matrix.app.image }}" = teams-gateway ]; then
+            data="$RUNNER_TEMP/data"
+            mkdir "$data"
+            sudo chown 1654:1654 "$data"
+            docker run -d --name smoke -p 8080:8080 -v "$data:/data" "$image"
+          else
+            docker run -d --name smoke -p 8080:8080 "$image"
+          fi
+          for _ in $(seq 1 30); do
+            if curl -fsS "http://localhost:8080${{ matrix.app.health }}" | grep -q Healthy; then
+              echo "${{ matrix.app.image }} answers ${{ matrix.app.health }} Healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs smoke
+          exit 1
+
+      - name: Log in to GHCR
         run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
 
-      # 兩個架構合成一個 image index、每個 tag 都推。這裡是同一個 commit 重新 build 的，不是 smoke 跑過的那幾份：
-      # SDK 沒辦法拿別台 runner 本機 Docker 裡的 image 來推
-      - name: 推到 GHCR
-        run: >
-          dotnet publish ${{ matrix.project }} -t:PublishContainer
-          -p:ContainerRegistry=ghcr.io
-          -p:ContainerRepository="${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.image }}"
-          -p:ContainerImageTags="\"$TAGS\""
-          -p:Version=${{ steps.tags.outputs.version }}
+      - name: Push smoke-checked image
+        run: |
+          target="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE:$VERSION-$RID"
+          docker tag "$IMAGE:smoke" "$target"
+          docker push "$target"
         env:
-          TAGS: ${{ steps.tags.outputs.tags }}
+          IMAGE: ${{ matrix.app.image }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          RID: ${{ matrix.platform.rid }}
+
+  # 每個 build job 都過了才走到這裡：把兩個架構合成一個 image index，每個正式 tag 都指向它
+  publish:
+    name: Merge multi-arch tags (${{ matrix.image }})
+    needs: [meta, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image: [teams-gateway, teams-slack-relay]
+
+    steps:
+      - name: Log in to GHCR
+        run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+
+      - name: Merge multi-arch tags
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE"
+          for tag in ${TAGS//;/ }; do
+            docker buildx imagetools create -t "$repo:$tag" "$repo:$VERSION-linux-x64" "$repo:$VERSION-linux-arm64"
+          done
+        env:
+          IMAGE: ${{ matrix.image }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          TAGS: ${{ needs.meta.outputs.tags }}

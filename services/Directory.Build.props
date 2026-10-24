@@ -4,7 +4,8 @@
 
   <!-- 部署用的 image 由 SDK 出（`dotnet publish -t:PublishContainer`，ADR 0010），不寫 Dockerfile；repository 名稱在各自的 csproj -->
   <PropertyGroup>
-    <!-- 兩個架構合成同一個 tag。JIT 編出來是 IL，分架構的只有 NuGet 帶來的 native 函式庫，在任何一台都能出，不用模擬 -->
+    <!-- 不指定架構 publish 時兩個架構一起出、合成同一個 tag（只有 JIT 的 gateway 能這樣：IL 不分架構，
+         分架構的只有 NuGet 帶來的 native 函式庫）。release 不走這條：每個架構在自己的 runner 上出（見 release.yml） -->
     <RuntimeIdentifiers>linux-x64;linux-arm64</RuntimeIdentifiers>
     <ContainerRuntimeIdentifiers>linux-x64;linux-arm64</ContainerRuntimeIdentifiers>
     <!-- chiseled：沒有 shell 與套件管理、以非 root（uid 1654）執行；InvariantGlobalization 開著，不需要 ICU -->
