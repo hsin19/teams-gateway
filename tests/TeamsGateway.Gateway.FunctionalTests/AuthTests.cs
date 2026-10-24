@@ -14,6 +14,16 @@ public sealed class AuthTests(GatewayAppFixture fx) : IClassFixture<GatewayAppFi
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
+    // API key 只是 api：有身分、沒有 admin
+    [Fact]
+    public async Task Api_key_cannot_use_admin()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await fx.CreateApiClientAsync(ct);
+        var resp = await client.GetAsync("/admin/api-keys", ct);
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
     [Fact]
     public async Task Admin_without_token_is_401()
     {

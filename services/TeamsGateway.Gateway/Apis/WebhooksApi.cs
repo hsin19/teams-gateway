@@ -14,10 +14,11 @@ public static class WebhooksApi
 {
     public static void MapWebhooksApi(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/v1/webhooks").AddEndpointFilter<ApiKeyFilter>().WithTags("Webhooks");
+        // webhook 掛在建立它的 API key 底下（撤銷 key 就一起失效），所以要用 API key 打
+        var group = app.MapGroup("/v1/webhooks").RequireAuthorization(GatewayRoles.Api).WithTags("Webhooks");
 
         group.MapPost("", async Task<Results<Ok<WebhookDto>, BadRequest<ApiError>>> (
-            CreateWebhookRequest body, HttpContext http, IDbContextFactory<GatewayDbContext> factory, IOptions<GatewayOptions> options,
+            CreateWebhookRequest body, CurrentUser user, IDbContextFactory<GatewayDbContext> factory, IOptions<GatewayOptions> options,
             WebhookSecretProtector secrets, CancellationToken ct) =>
         {
             if (!Uri.TryCreate(body.TargetUrl, UriKind.Absolute, out var target) || !WebhookTargetGuard.IsAllowedScheme(target))
@@ -26,12 +27,13 @@ public static class WebhooksApi
             if (IPAddress.TryParse(target.IdnHost, out var ip) && !WebhookTargetGuard.IsAllowedAddress(ip, options.Value.WebhookAllowPrivateNetworks))
                 return TypedResults.BadRequest(new ApiError("targetUrl 不能指向內網 / loopback / link-local 位址"));
 
-            var apiKey = (ApiKey)http.Items[nameof(ApiKey)]!;
+            if (user.ApiKeyId is not { } apiKeyId)
+                return TypedResults.BadRequest(new ApiError("Webhooks belong to an API key: call this with an API key"));
             await using var db = await factory.CreateDbContextAsync(ct);
             var hook = new WebhookSubscription
             {
                 Id = Guid.NewGuid(),
-                ApiKeyId = apiKey.Id,
+                ApiKeyId = apiKeyId,
                 ConversationId = string.IsNullOrWhiteSpace(body.ConversationId) ? null : body.ConversationId,
                 TargetUrl = body.TargetUrl,
                 Secret = secrets.Protect(body.Secret), // 加密後才存
@@ -46,20 +48,18 @@ public static class WebhooksApi
         .WithSummary("登記 webhook")
         .WithDescription("有符合的新事件時 gateway 會 POST 到 `targetUrl`（body 同 SSE 的 data），header 帶 `X-TeamsGateway-Event`、`X-TeamsGateway-Seq`（事件序號，送失敗會重送，照它去重）、`X-TeamsGateway-Schema-Version`，有設 secret 再帶 `X-TeamsGateway-Signature: sha256=<hmac>`。只收登記之後的事件；`conversationId` 省略 = 所有訂閱對話。");
 
-        group.MapGet("", async (HttpContext http, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
+        group.MapGet("", async (CurrentUser user, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
         {
-            var apiKey = (ApiKey)http.Items[nameof(ApiKey)]!;
             await using var db = await factory.CreateDbContextAsync(ct);
-            var hooks = await db.WebhookSubscriptions.Where(w => w.ApiKeyId == apiKey.Id).ToListAsync(ct);
+            var hooks = await db.WebhookSubscriptions.Where(w => w.ApiKeyId == user.ApiKeyId).ToListAsync(ct);
             return TypedResults.Ok<IReadOnlyList<WebhookDto>>(hooks.Select(View).ToList());
         })
         .WithSummary("列出自己登記的 webhook");
 
-        group.MapDelete("/{id:guid}", async Task<Results<NoContent, NotFound>> (Guid id, HttpContext http, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
+        group.MapDelete("/{id:guid}", async Task<Results<NoContent, NotFound>> (Guid id, CurrentUser user, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
         {
-            var apiKey = (ApiKey)http.Items[nameof(ApiKey)]!;
             await using var db = await factory.CreateDbContextAsync(ct);
-            var hook = await db.WebhookSubscriptions.FirstOrDefaultAsync(w => w.Id == id && w.ApiKeyId == apiKey.Id, ct);
+            var hook = await db.WebhookSubscriptions.FirstOrDefaultAsync(w => w.Id == id && w.ApiKeyId == user.ApiKeyId, ct);
             if (hook is null)
                 return TypedResults.NotFound();
             db.WebhookSubscriptions.Remove(hook);

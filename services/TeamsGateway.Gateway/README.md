@@ -30,7 +30,7 @@ Mac 睡眠時 gateway 跟著暫停，醒來後輪詢 / 回補會把缺口補上�
 
 第一次要把專用帳號的登入 cookie 匯進來（之後 gateway 自己換 token）。cookie 用 `spike/http_refresh.py export` 從已登入的瀏覽器 profile 匯出。
 
-`/admin` 端點帶 `X-Admin-Token`（設定 `Gateway:AdminToken`，可用 env `Gateway__AdminToken`）：
+`/admin` 端點帶 `X-Admin-Token`（設定 `Gateway:AdminToken`，可用 env `Gateway__AdminToken`；從外面登入見下方〈認證與角色〉）：
 
 ```
 curl -X PUT  -H "X-Admin-Token: $TOKEN" --data-binary @login_cookies.json  $BASE/admin/login-cookies
@@ -38,13 +38,39 @@ curl -X POST -H "X-Admin-Token: $TOKEN"                                     $BAS
 curl -X POST -H "X-Admin-Token: $TOKEN" -H "Content-Type: application/json" -d '{"name":"client"}' $BASE/admin/api-keys       # 建 API key，回的 apiKey 只出現一次
 ```
 
+## 認證與角色
+
+端點只看角色（ADR 0011）：`/admin` 要 `admin`，`/v1`、`/mcp` 要 `api`；`/health`、`/alive`、`/scalar`、`/openapi` 不用。
+每種身分怎麼來、拿到什麼角色：
+
+| 身分 | 怎麼帶 | 角色 |
+|---|---|---|
+| API key | `Authorization: Bearer tgw_…`（或 `X-Api-Key`） | `api` |
+| admin token | `X-Admin-Token`，等於 `Gateway:AdminToken`（沒設就不認） | `admin` |
+| Cloudflare Access 登入的人 | Cloudflare 放行後附上的 `Cf-Access-Jwt-Assertion`（`Gateway:CloudflareAccess` 沒設就不認） | email 在 `Gateway:SuperAdmins` 就是 `admin` |
+
+沒有身分 401，有身分但沒有那個角色 403。admin token 與 Cloudflare Access 都沒設定的話，沒有人能用 `/admin`。
+
+### Cloudflare Access
+
+gateway 放在 Cloudflare Access 後面時，Cloudflare 負責登入、確認是誰，gateway 驗它附上的 JWT、對照名單給角色。
+
+| 設定 | 說明 |
+|---|---|
+| `Gateway:CloudflareAccess:Issuer` | team domain，例如 `https://<team>.cloudflareaccess.com`。沒設 = 不認這種身分 |
+| `Gateway:CloudflareAccess:Audience` | Access application 的 AUD tag。設了 Issuer 就必填，缺了 gateway 起不來 |
+| `Gateway:SuperAdmins` | 是 admin 的 email（list，env 是 `Gateway__SuperAdmins__0`…，不分大小寫）。跟登入方式無關 |
+
+Access 那邊建一個 self-hosted application 涵蓋要登入的路徑（例如 `/admin`），policy 只要確認是誰（例如任何登入者都放行）就好，名單由 gateway 管。
+
 登入 cookie 以 DataProtection 加密後存進 DB（`SecureValues` 表），key 在 `.data/keys/`（用 Postgres 時也還是在檔案，備份要兩邊一起）；skypetoken 只放記憶體，重啟後用 cookie 重換。
 
 ## 部署注意
 
 image、副本數與必要設定見根目錄 README〈部署〉。
 
-- **對外只開 `/v1`、`/mcp`**：gateway 本身是明文 HTTP（容器裡聽 8080），admin token、API key、訊息內容都是明文，前面一定要有 TLS（反向代理或 tunnel）。`/admin` 不要對外，bootstrap、建 key 在部署環境內部打。API key 沒有權限範圍，對外的路徑最好再加一層存取控制。
+- **對外只開 `/v1`、`/mcp`**：gateway 本身是明文 HTTP（容器裡聽 8080），admin token、API key、訊息內容都是明文，前面一定要有 TLS（反向代理或 tunnel）。`/admin` 不要直接對外，bootstrap、建 key 在部署環境內部打（用 Cloudflare Access 的話可以放在它後面，見〈認證與角色〉）。API key 沒有權限範圍，對外的路徑最好再加一層存取控制。
+- **用 Cloudflare Access 時**：gateway 只驗 JWT 本身，除了經過 Cloudflare 之外不要有別的對外入口，不然拿到一張有效 JWT 的人可以繞過 Access 直接重放到它過期。
 - **`/data` 等於帳號本身**：登入 cookie、webhook secret 用 DataProtection 加密，但解密用的 key（`/data/keys`）就在同一個 volume、沒再加密：拿到 volume（用 Postgres 時再加上 DB）就拿得到 Teams 帳號。權限、備份要當密碼看待。
 - **對外連線**：要連得到 `login.live.com`、`teams.live.com`（chatsvc）、`*.trouter.skype.com`（WebSocket），受限網段要先開白名單。
 - **health**：`/health`（含 DB）、`/alive` 不需要認證，只回 `Healthy` / `Unhealthy`，不帶細節。

@@ -29,7 +29,7 @@
 | `tools/TeamsGateway.AppHost` | Aspire 編排：本機開發一次起 gateway + relay（不部署） | ✅ |
 | `spike/` | 逆向非官方 API 的拋棄式 Python 腳本；結論在 [`spike/FINDINGS.md`](spike/FINDINGS.md) | — |
 
-技術選型、結構等決策的理由見 [`docs/adr/`](docs/adr/)（0001 選型、0002 服務內部結構、0003 monorepo、0004 先跑在本機、0005 agent 介面用 MCP、0006 事件出入口抽象化、0007 本機只當開發環境、0008 資料庫可切換 SQLite / Postgres、0009 EF migration、0010 image 由 SDK 出）。
+技術選型、結構等決策的理由見 [`docs/adr/`](docs/adr/)（0001 選型、0002 服務內部結構、0003 monorepo、0004 先跑在本機、0005 agent 介面用 MCP、0006 事件出入口抽象化、0007 本機只當開發環境、0008 資料庫可切換 SQLite / Postgres、0009 EF migration、0010 image 由 SDK 出、0011 認證與授權分開、接上 Cloudflare Access）。
 
 ## 開始
 
@@ -66,7 +66,7 @@ gateway 的 bootstrap（綁定 Teams 帳號）與 API 見 [`services/TeamsGatewa
 | 埠 | 8080（HTTP） | 8080（HTTP，只有 `/health`、`/alive`） |
 | 持久化 | `/data` volume：DataProtection key，用 SQLite 時還有 `gateway.db`。要讓 uid 1654 寫得進去（bind mount 的話先 `chown 1654:1654`） | 無：狀態在 Slack 訊息的 metadata |
 | 健康檢查 | `/health`：含 DB | `/health`：設定齊全、連著 gateway 的事件串流才 Healthy；`/alive`：process 有回應 |
-| 必要設定 | `Gateway__AdminToken`；用 Postgres 時加 `Gateway__Database__Provider=Postgres`、`ConnectionStrings__gateway`（gateway 專用的資料庫） | `Relay__Gateway__BaseUrl`、`Relay__Gateway__ApiKey`、`Relay__Slack__BotToken`；Routes 掛檔到 `/app/appsettings.Local.json`（uid 1654 要讀得到） |
+| 必要設定 | `Gateway__AdminToken`（或改用 Cloudflare Access 的身分，見 gateway README）；用 Postgres 時加 `Gateway__Database__Provider=Postgres`、`ConnectionStrings__gateway`（gateway 專用的資料庫） | `Relay__Gateway__BaseUrl`、`Relay__Gateway__ApiKey`、`Relay__Slack__BotToken`；Routes 掛檔到 `/app/appsettings.Local.json`（uid 1654 要讀得到） |
 
 - image 以非 root（uid 1654）執行，而且沒有 shell，`docker exec` 進不去；查問題看 log、OTel 與掛出來的 `/data`。
 - 開 init（compose 的 `init: true`）：不開的話 `dotnet` 是 container 的 PID 1，背景執行緒上的未處理例外會讓 process 卡在 100% CPU 不結束，restart policy 也不會動。啟動失敗（例如 `/data` 寫不進去、DB 連不上）由 `Program.cs` 接住，有沒有 init 都會以 exit code 1 結束（ADR 0010）。

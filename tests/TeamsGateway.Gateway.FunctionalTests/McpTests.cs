@@ -28,10 +28,12 @@ public sealed class McpTests(GatewayAppFixture fx) : IClassFixture<GatewayAppFix
         Assert.True(properties.TryGetProperty("text", out _));
     }
 
+    // 送 JSON：content type 不對的請求在挑 endpoint 時就回 415，輪不到授權，測不到 key
     [Fact]
     public async Task Requires_api_key()
     {
-        var resp = await fx.CreateClient().PostAsync("/mcp", new StringContent("{}"), TestContext.Current.CancellationToken);
+        var body = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+        var resp = await fx.CreateClient().PostAsync("/mcp", body, TestContext.Current.CancellationToken);
         Assert.Equal(System.Net.HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 }

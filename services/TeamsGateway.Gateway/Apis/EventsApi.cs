@@ -24,6 +24,7 @@ public static class EventsApi
             GatewayEventBus bus,
             IDbContextFactory<GatewayDbContext> factory,
             ApiKeyService keys,
+            CurrentUser user,
             IOptions<GatewayOptions> options,
             IHostApplicationLifetime lifetime,
             CancellationToken ct,
@@ -34,7 +35,7 @@ public static class EventsApi
             // Aspire 的停止 / rebuild 等不到就放棄。斷掉走的是跟訂閱者斷線同一條路（ct 取消），訂閱者重連帶 Last-Event-ID 補回
             using var stopping = lifetime.ApplicationStopping.Register(http.Abort);
 
-            var apiKeyId = ((ApiKey)http.Items[nameof(ApiKey)]!).Id;
+            var apiKeyId = user.ApiKeyId;
             var heartbeat = TimeSpan.FromSeconds(Math.Max(1, options.Value.SseHeartbeatSeconds));
             var filter = chats?
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -66,14 +67,14 @@ public static class EventsApi
 
                 // 心跳（SSE comment）：沒訊息時中間的 proxy / NAT 不會把連線當閒置砍掉，訂閱者也靠它判斷連線還活著。
                 // 順便確認 key 沒被撤銷——長連線只在連上時驗過一次
-                if (!await keys.IsActiveAsync(apiKeyId, ct))
+                if (apiKeyId is { } id && !await keys.IsActiveAsync(id, ct))
                     return;
                 await http.Response.WriteAsync(": ping\n\n", ct);
                 await http.Response.Body.FlushAsync(ct);
                 lastBeat = DateTimeOffset.UtcNow;
             }
         })
-        .AddEndpointFilter<ApiKeyFilter>()
+        .RequireAuthorization(GatewayRoles.Api)
         .WithSummary("SSE 即時訊息串流")
         .WithDescription("連著收即時新訊息（像 Slack Socket Mode）。`chats` 逗號分隔過濾對話、省略 = 全部。SSE `id` 是事件序號；重連帶 `Last-Event-ID`（最後收到的 `id`）會先補回斷線期間發過的事件；沒有序號時可帶 `afterMessage`（最後處理的 Teams 訊息 id）從那則之後補。閒置時定期送 `: ping` 心跳；API key 被撤銷會斷線。")
         .WithTags("Events");

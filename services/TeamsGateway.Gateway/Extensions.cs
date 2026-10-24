@@ -35,6 +35,8 @@ public static class Extensions
 
         builder.Services.AddSingleton<ApiKeyService>();
 
+        builder.AddGatewayAuth();
+
         // 自訂 metrics（推播可靠度），跟 ServiceDefaults 的 OpenTelemetry 一起匯出
         builder.Services.AddSingleton<GatewayMetrics>();
         builder.Services.AddOpenTelemetry().WithMetrics(metrics => metrics.AddMeter(GatewayMetrics.MeterName));
@@ -134,37 +136,19 @@ public static class Extensions
     {
         await app.Services.MigrateGatewayDatabaseAsync();
 
-        // /mcp 跟 /v1 一樣要 API key（MCP client 以 header 帶）
-        app.UseWhen(
-            ctx => ctx.Request.Path.StartsWithSegments("/mcp"),
-            branch => branch.Use(RequireApiKey));
+        app.UseGatewayAuth();
 
         app.MapDefaultEndpoints();
         app.MapAdminApi();
         app.MapChatsApi();
         app.MapEventsApi();
         app.MapWebhooksApi();
-        app.MapMcp("/mcp");
+        app.MapMcp("/mcp").RequireAuthorization(GatewayRoles.Api);
         // 根目錄轉到 API doc，Aspire dashboard 上 gateway 的連結點進去就是文件；liveness 用 /alive、/health
         app.MapGet("/", () => TypedResults.Redirect("/scalar")).ExcludeFromDescription();
 
         // API doc：/openapi/v1.json + Scalar UI /scalar（借 eShop：關掉預設字型下載，不打外部）
         app.MapOpenApi();
         app.MapScalarApiReference(options => options.DefaultFonts = false);
-    }
-
-    private static async Task RequireApiKey(HttpContext ctx, RequestDelegate next)
-    {
-        var auth = ctx.Request.Headers.Authorization.ToString();
-        var raw = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
-            ? auth["Bearer ".Length..].Trim()
-            : ctx.Request.Headers["X-Api-Key"].ToString();
-        var keys = ctx.RequestServices.GetRequiredService<ApiKeyService>();
-        if (string.IsNullOrEmpty(raw) || await keys.ValidateAsync(raw, ctx.RequestAborted) is null)
-        {
-            ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            return;
-        }
-        await next(ctx);
     }
 }

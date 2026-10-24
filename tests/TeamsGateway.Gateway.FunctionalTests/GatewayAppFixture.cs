@@ -17,7 +17,7 @@ namespace TeamsGateway.Gateway.FunctionalTests;
 /// 把整個 gateway 跑在測試宿主裡、打真 HTTP，但資料落臨時目錄（或 <see cref="TestDatabase"/> 的 Postgres）、關掉會連 Teams 的背景服務。
 /// 測的是「我們的接線」（auth / 路由 / EF / 序列化）；會連 chatsvc 的讀發交給 E2E canary。
 /// </summary>
-public sealed class GatewayAppFixture : WebApplicationFactory<Program>
+public class GatewayAppFixture : WebApplicationFactory<Program>
 {
     public string AdminToken { get; } = "func-admin-" + Guid.NewGuid().ToString("N");
 
@@ -53,6 +53,13 @@ public sealed class GatewayAppFixture : WebApplicationFactory<Program>
                     options.SerializerOptions.TypeInfoResolverChain.Remove(reflection);
             });
         });
+
+        ConfigureGateway(builder);
+    }
+
+    /// <summary>子類別在預設設定之後再改（後設的 UseSetting 蓋過前面的）：測不同的 admin 設定組合用。</summary>
+    protected virtual void ConfigureGateway(IWebHostBuilder builder)
+    {
     }
 
     /// <summary>帶 admin token 的 client。</summary>

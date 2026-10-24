@@ -13,7 +13,7 @@ public static class ChatsApi
 {
     public static RouteGroupBuilder MapChatsApi(this IEndpointRouteBuilder app)
     {
-        var v1 = app.MapGroup("/v1").AddEndpointFilter<ApiKeyFilter>();
+        var v1 = app.MapGroup("/v1").RequireAuthorization(GatewayRoles.Api);
 
         // Teams 認證健康：給訂閱者（relay）偵測 cookie 失效並告警
         v1.MapGet("/status", (SkypeTokenProvider tokens) => TypedResults.Ok(new AuthStatusDto(

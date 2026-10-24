@@ -13,7 +13,7 @@ public static class AdminApi
 {
     public static RouteGroupBuilder MapAdminApi(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/admin").AddEndpointFilter<AdminTokenFilter>().WithTags("Admin");
+        var admin = app.MapGroup("/admin").RequireAuthorization(GatewayRoles.Admin).WithTags("Admin");
 
         // 第一次綁定：把瀏覽器匯出的登入 cookie（spike/http_refresh.py export 的格式）PUT 進來
         admin.MapPut("/login-cookies", async Task<Results<Ok<ImportedCookies>, BadRequest<ApiError>>> (HttpRequest request, SecureStore store, CancellationToken ct) =>

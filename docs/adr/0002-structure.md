@@ -24,4 +24,4 @@
 
 - `/v1/*`：REST，帶 API key（`Authorization: Bearer tgw_...`）。列對話、讀訊息、發話。
 - `/v1/events`：SSE 事件串流，訂閱者用 `chats=` 篩選、`Last-Event-ID` 補收。
-- `/admin/*`：管理（匯入 cookie、建 API key、建 webhook 訂閱），帶 `X-Admin-Token`。（實作時 webhook 改由 API key 持有者在 `/v1/webhooks` 自己建、只看得到自己的。）
+- `/admin/*`：管理（匯入 cookie、建 API key、建 webhook 訂閱），帶 `X-Admin-Token`。（實作時 webhook 改由 API key 持有者在 `/v1/webhooks` 自己建、只看得到自己的。）（後來改成看角色：admin token 或 Cloudflare Access 登入的 super admin 都能用，見 ADR 0011。）

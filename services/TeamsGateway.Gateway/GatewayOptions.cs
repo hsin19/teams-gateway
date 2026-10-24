@@ -6,8 +6,17 @@ public sealed class GatewayOptions
     /// <summary>發話時掛的顯示名稱。</summary>
     public string DisplayName { get; set; } = "teams-gateway";
 
-    /// <summary><c>/admin</c> 端點的 token；沒設定則 admin 端點停用。</summary>
+    /// <summary><c>/admin</c> 端點的 token（<c>X-Admin-Token</c>）；沒設定則這條路關閉（ADR 0011）。</summary>
     public string? AdminToken { get; set; }
+
+    /// <summary>用 Cloudflare Access 登入的身分（ADR 0011）；沒設 <c>Issuer</c> 則不認這種身分。</summary>
+    public CloudflareAccessSettings CloudflareAccess { get; set; } = new();
+
+    /// <summary>
+    /// 是 admin 的 email（不分大小寫）。跟登入方式無關：Cloudflare Access（之後其他 OIDC 也一樣）只負責確認是誰，
+    /// 名單外的身分拿不到 admin（ADR 0011）。
+    /// </summary>
+    public List<string> SuperAdmins { get; set; } = [];
 
     /// <summary>SQLite 與 DataProtection key 的存放目錄；預設 content root 下的 <c>.data</c>。</summary>
     public string? DataDir { get; set; }
@@ -49,6 +58,18 @@ public sealed class GatewayOptions
     /// link-local（雲端 metadata）不管怎樣都不行。
     /// </summary>
     public bool WebhookAllowPrivateNetworks { get; set; }
+}
+
+public sealed class CloudflareAccessSettings
+{
+    /// <summary>
+    /// Zero Trust 的 team domain，例如 <c>https://&lt;team&gt;.cloudflareaccess.com</c>：JWT 的 <c>iss</c> 要等於它，
+    /// 公鑰從 <c>{Issuer}/cdn-cgi/access/certs</c> 抓。
+    /// </summary>
+    public string? Issuer { get; set; }
+
+    /// <summary>Access application 的 AUD tag。設了 <see cref="Issuer"/> 就必填：不驗 audience 的話，同一個 team 其他 app 的 JWT 也進得來。</summary>
+    public string? Audience { get; set; }
 }
 
 public sealed class SinkSettings

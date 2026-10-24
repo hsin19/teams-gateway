@@ -17,6 +17,11 @@
     <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.3" />
   </ItemGroup>
 
+  <!-- Cloudflare Access 的身分 JWT（ADR 0011） -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13" />
+  </ItemGroup>
+
   <!-- MCP -->
   <ItemGroup>
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.3.0" />
