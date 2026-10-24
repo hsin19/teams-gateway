@@ -115,6 +115,39 @@ public class GatewayEventStreamTests
         Assert.Equal(["7", "8"], ids);
     }
 
+    // /health 看這個：連上之後到串流結束（對方關掉、逾時、呼叫端不讀了）之間才是 true
+    [Fact]
+    public async Task Connected_only_while_the_stream_is_open()
+    {
+        var http = new HttpClient(new StubHandler(SseBody)) { BaseAddress = new Uri("http://localhost") };
+        var stream = new GatewayEventStream(http, NullLogger<GatewayEventStream>.Instance);
+        Assert.False(stream.Connected);
+
+        var seen = new List<bool>();
+        await foreach (var _ in stream.ConnectAsync(null, null, null, TestContext.Current.CancellationToken))
+            seen.Add(stream.Connected);
+
+        Assert.Equal([true, true], seen);
+        Assert.False(stream.Connected);
+    }
+
+    // 半死的連線逾時丟例外後也要變回 false，不然 /health 會一直說連著
+    [Fact]
+    public async Task Not_connected_after_the_idle_timeout()
+    {
+        var http = new HttpClient(new SilentHandler()) { BaseAddress = new Uri("http://localhost") };
+        var stream = new GatewayEventStream(http, NullLogger<GatewayEventStream>.Instance, idleTimeout: TimeSpan.FromMilliseconds(200));
+
+        await Assert.ThrowsAsync<TimeoutException>(async () =>
+        {
+            await foreach (var _ in stream.ConnectAsync(null, null, null, TestContext.Current.CancellationToken))
+            {
+            }
+        });
+
+        Assert.False(stream.Connected);
+    }
+
     /// <summary>每次 ReadAsync 吐一段（每個 SSE 事件一段），吐完就結束；會檢查取消。</summary>
     private sealed class ChunkedHandler(string[] chunks) : HttpMessageHandler
     {

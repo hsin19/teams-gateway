@@ -33,6 +33,7 @@ builder.AddProject<Projects.TeamsGateway_SlackRelay>("slack-relay")
     .WithLocalEnv("Relay__Slack__BotToken")
     .WithLocalEnv("Relay__Slack__DefaultChannel")
     .WithLocalEnvPrefix("Relay__Slack__Routes__")
+    .WithHttpHealthCheck("/health", endpointName: "http")
     .WaitFor(gateway);
 
 builder.Build().Run();

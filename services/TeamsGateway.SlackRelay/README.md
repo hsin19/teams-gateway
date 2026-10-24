@@ -60,4 +60,18 @@ Relay__Gateway__ApiKey=tgw_… Relay__Slack__BotToken=xoxb-… Relay__Slack__Def
   dotnet run --project services/TeamsGateway.SlackRelay
 ```
 
+## 健康檢查
+
+relay 是 worker，開 HTTP（container 裡是 8080）只為了這兩個端點，沒有別的：
+
+| 端點 | Healthy 的條件 | 用途 |
+|---|---|---|
+| `/health` | 設定齊全（有 BotToken 和頻道），**而且**連著 gateway 的事件串流 | 確認 relay 真的在轉送 |
+| `/alive` | process 有回應 | 只確認活著（release 的 smoke check 用，那裡沒有 gateway） |
+
+- 剛啟動（從 Slack 回補對應時還沒連上）、gateway 重啟或斷線重連的空檔，`/health` 都是 Unhealthy，回應只有 `Healthy` / `Unhealthy`，原因記在 log。所以探測的那端要容忍短暫失敗，連續失敗一段時間才算出事。
+- 連線半死（gateway 睡眠、NAT 砍掉）時，最多 60 秒沒收到心跳就會斷線重連，`/health` 也跟著變成 Unhealthy，不會一直回 Healthy。
+- 不看 Slack：Slack 一時不通由單則重試處理，不代表 relay 壞了。
+- 不看 gateway 的 Teams 登入狀態：那是 gateway 的事，由 `AuthMonitor` 在 Slack 發告警。
+
 log 等級同 gateway：`Microsoft.*` / `System.*` / `Polly` 只記 warning 以上。沒設 BotToken 或任何頻道時，worker 會記一筆 error 然後不啟動（不會空轉）。

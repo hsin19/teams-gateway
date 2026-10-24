@@ -37,8 +37,7 @@ public sealed class RelayWorker(
     {
         var opts = options.Value;
         var routes = BuildRoutes(opts.Slack.Routes, logger);
-        if (string.IsNullOrWhiteSpace(opts.Slack.BotToken)
-            || (opts.Slack.DefaultChannel is null && routes.Count == 0))
+        if (!HasDestination(opts.Slack, routes))
         {
             logger.LogError("未設定 Relay:Slack:BotToken 或任何頻道，relay 不啟動");
             return;
@@ -61,6 +60,10 @@ public sealed class RelayWorker(
                 await WithRetryAsync($"表情 {reaction.Emoji}（訊息 {reaction.MessageId}）", () => RelayReactionAsync(reaction, Seq(evt.Id), ct), ct);
         }
     }
+
+    /// <summary>worker 要不要啟動、<c>/health</c> 算不算在轉送，用同一個條件。</summary>
+    internal static bool HasDestination(RelayOptions.SlackSettings slack, Dictionary<string, string> routes) =>
+        !string.IsNullOrWhiteSpace(slack.BotToken) && (slack.DefaultChannel is not null || routes.Count > 0);
 
     /// <summary>
     /// Routes → 對照表。同一個 Teams 對話設了兩次以後面為準並警告（用 ToDictionary 會丟例外、整個 relay 起不來），

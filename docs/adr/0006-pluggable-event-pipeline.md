@@ -41,7 +41,7 @@ RelayWorker ── IEventSource ──┬─ SseEventSource     （Last-Event-ID
 ```
 
 - `lastId`、`resumeAfter`、重連、退避從 `RelayWorker` 搬進 source。
-- 介面就是 `IAsyncEnumerable`，約定「拿下一筆 = 上一筆處理完」：SSE source 這時更新 `lastId`，broker source 這時 commit。worker 本來就逐筆處理，不用改。
+- 介面就是 `IAsyncEnumerable`，約定「拿下一筆 = 上一筆處理完」：SSE source 這時更新 `lastId`，broker source 這時 commit。worker 本來就逐筆處理，不用改。（後來多了一個 `Connected` 屬性給 relay 的 `/health`，broker source 也要回報自己連著沒，見 relay README〈健康檢查〉。）
 - 設定切換：`Relay:Source = Sse | …`。
 
 ## 事件契約：跟傳輸無關

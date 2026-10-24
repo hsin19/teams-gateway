@@ -11,6 +11,9 @@ public interface IEventSource
 {
     /// <param name="chats">只收這些 Teams 對話；null = 全部。</param>
     IAsyncEnumerable<StreamEvent> ReadAsync(IReadOnlyCollection<string>? chats, CancellationToken ct);
+
+    /// <summary>現在連著來源嗎（給 <c>/health</c>）：還沒開始讀、斷線後退避重連的空檔都是 false。</summary>
+    bool Connected { get; }
 }
 
 /// <summary>
@@ -22,6 +25,8 @@ public sealed class SseEventSource(GatewayEventStream stream, MessageLinks links
 {
     private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
+
+    public bool Connected => stream.Connected;
 
     /// <summary>斷線後第一次重連前等多久（測試調短）。</summary>
     internal TimeSpan FirstBackoff { get; init; } = MinBackoff;

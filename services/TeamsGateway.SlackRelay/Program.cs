@@ -4,7 +4,8 @@ using TeamsGateway.SlackRelay;
 // process 就卡在 100% CPU 不結束、restart policy 也不會動（ADR 0010）。自己印出來、回非 0 的 exit code。
 try
 {
-    var builder = Host.CreateApplicationBuilder(args);
+    // 是 worker，開 HTTP 只為了 /health、/alive（ServiceDefaults 的 MapDefaultEndpoints），沒有別的端點
+    var builder = WebApplication.CreateBuilder(args);
 
     // 部署專屬設定（Routes 等不進 repo 的對照）；gitignored，可選
     builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
@@ -12,8 +13,9 @@ try
     builder.AddServiceDefaults();
     builder.AddRelayServices();
 
-    var host = builder.Build();
-    host.Run();
+    var app = builder.Build();
+    app.MapDefaultEndpoints();
+    app.Run();
     return 0;
 }
 catch (Exception ex) when (ex is not HostAbortedException)

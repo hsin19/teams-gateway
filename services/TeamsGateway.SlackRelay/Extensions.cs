@@ -29,6 +29,9 @@ public static class Extensions
             throw new InvalidOperationException($"不支援的 Relay:Source「{source}」（目前只有 Sse）");
         builder.Services.AddSingleton<IEventSource, SseEventSource>();
 
+        // 只進 /health；/alive 照 ServiceDefaults 只看 process 有沒有回應
+        builder.Services.AddHealthChecks().AddCheck<RelayHealthCheck>("relay");
+
         // Slack 是短請求，走 factory：resilience 的 transient retry 反而有用
         builder.Services.AddHttpClient<SlackClient>((sp, http) =>
         {

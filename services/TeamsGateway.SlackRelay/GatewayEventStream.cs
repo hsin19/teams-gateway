@@ -19,6 +19,14 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
     // 少了這個，half-open 的 TCP 會讓 ReadLineAsync 永遠卡住，relay 默默停擺
     private readonly TimeSpan _idleTimeout = idleTimeout ?? TimeSpan.FromSeconds(60);
 
+    private volatile bool _connected;
+
+    /// <summary>
+    /// 現在正連著 gateway 的 SSE（給 <c>/health</c>）。半死的連線最多閒置逾時之後就會丟例外、變回 false，
+    /// 不會一直掛著 true。
+    /// </summary>
+    public bool Connected => _connected;
+
     /// <param name="afterMessage">沒有 <paramref name="lastEventId"/> 時（剛重啟），從這則 Teams 訊息之後續接。</param>
     public async IAsyncEnumerable<StreamEvent> ConnectAsync(
         string? chats, string? lastEventId, string? afterMessage, [EnumeratorCancellation] CancellationToken ct)
@@ -42,51 +50,58 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
         logger.LogInformation("已連上 gateway SSE（chats={Chats}）", chats ?? "全部");
-
-        string? eventType = null;
-        string? eventId = null;
-        var data = new StringBuilder();
-
-        while (!ct.IsCancellationRequested)
+        _connected = true;
+        try
         {
-            string? line;
-            // 每次讀各自計時：只算「等 gateway」的時間，呼叫端處理訊息（傳圖到 Slack 等）花多久都不算
-            using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            idle.CancelAfter(_idleTimeout);
-            try
-            {
-                line = await reader.ReadLineAsync(idle.Token);
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                throw new TimeoutException($"gateway SSE {_idleTimeout.TotalSeconds:0}s 沒有任何資料（連心跳都沒有），當作斷線");
-            }
-            if (line is null)
-                break; // 連線被對方關掉
+            string? eventType = null;
+            string? eventId = null;
+            var data = new StringBuilder();
 
-            if (line.Length == 0)
+            while (!ct.IsCancellationRequested)
             {
-                // 事件邊界：收完一個事件
-                var parsed = data.Length == 0 ? null : eventType switch
+                string? line;
+                // 每次讀各自計時：只算「等 gateway」的時間，呼叫端處理訊息（傳圖到 Slack 等）花多久都不算
+                using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                idle.CancelAfter(_idleTimeout);
+                try
                 {
-                    EventKinds.Message when TryParse(data.ToString(), ContractsJsonContext.Default.MessageDto) is { } message => new StreamEvent(eventId, message),
-                    EventKinds.Reaction when TryParse(data.ToString(), ContractsJsonContext.Default.ReactionDto) is { } reaction => new StreamEvent(eventId, Reaction: reaction),
-                    _ => (StreamEvent?)null, // 不認得的事件種類：略過
-                };
-                eventType = null;
-                eventId = null;
-                data.Clear();
-                if (parsed is { } evt)
-                    yield return evt;
-                continue;
-            }
+                    line = await reader.ReadLineAsync(idle.Token);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    throw new TimeoutException($"No data from the gateway SSE for {_idleTimeout.TotalSeconds:0}s (not even a heartbeat); treating it as disconnected");
+                }
+                if (line is null)
+                    break; // 連線被對方關掉
 
-            if (line.StartsWith("event:", StringComparison.Ordinal))
-                eventType = line["event:".Length..].Trim();
-            else if (line.StartsWith("data:", StringComparison.Ordinal))
-                data.Append(line["data:".Length..].TrimStart());
-            else if (line.StartsWith("id:", StringComparison.Ordinal))
-                eventId = line["id:".Length..].Trim(); // 事件序號，不是訊息 id（編輯會沿用訊息 id）
+                if (line.Length == 0)
+                {
+                    // 事件邊界：收完一個事件
+                    var parsed = data.Length == 0 ? null : eventType switch
+                    {
+                        EventKinds.Message when TryParse(data.ToString(), ContractsJsonContext.Default.MessageDto) is { } message => new StreamEvent(eventId, message),
+                        EventKinds.Reaction when TryParse(data.ToString(), ContractsJsonContext.Default.ReactionDto) is { } reaction => new StreamEvent(eventId, Reaction: reaction),
+                        _ => (StreamEvent?)null, // 不認得的事件種類：略過
+                    };
+                    eventType = null;
+                    eventId = null;
+                    data.Clear();
+                    if (parsed is { } evt)
+                        yield return evt;
+                    continue;
+                }
+
+                if (line.StartsWith("event:", StringComparison.Ordinal))
+                    eventType = line["event:".Length..].Trim();
+                else if (line.StartsWith("data:", StringComparison.Ordinal))
+                    data.Append(line["data:".Length..].TrimStart());
+                else if (line.StartsWith("id:", StringComparison.Ordinal))
+                    eventId = line["id:".Length..].Trim(); // 事件序號，不是訊息 id（編輯會沿用訊息 id）
+            }
+        }
+        finally
+        {
+            _connected = false;
         }
     }
 
