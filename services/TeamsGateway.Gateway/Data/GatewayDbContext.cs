@@ -35,6 +35,7 @@ public abstract class GatewayDbContext(DbContextOptions options) : DbContext(opt
             e.HasKey(m => m.Id);
             e.HasIndex(m => new { m.ConversationId, m.SequenceId });
             e.HasIndex(m => m.ReceivedAt);
+            e.HasIndex(m => new { m.SenderMri, m.ReceivedAt }); // 查按表情的人叫什麼（最近一則訊息的名字）
             e.HasOne(m => m.Conversation).WithMany(c => c.Messages).HasForeignKey(m => m.ConversationId);
         });
 
@@ -48,6 +49,7 @@ public abstract class GatewayDbContext(DbContextOptions options) : DbContext(opt
         {
             e.HasKey(p => p.Seq);
             e.HasIndex(p => p.PublishedAt); // 定期清舊事件用
+            e.HasIndex(p => p.MessageId);   // SSE 用 afterMessage 續接時找訊息第一次發出的事件
         });
 
         b.Entity<ApiKey>(e =>

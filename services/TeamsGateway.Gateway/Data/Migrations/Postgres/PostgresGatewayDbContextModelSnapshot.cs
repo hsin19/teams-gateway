@@ -130,6 +130,8 @@ namespace TeamsGateway.Gateway.Data.Migrations.Postgres
 
                     b.HasIndex("ConversationId", "SequenceId");
 
+                    b.HasIndex("SenderMri", "ReceivedAt");
+
                     b.ToTable("MessageEvents");
                 });
 
@@ -187,6 +189,8 @@ namespace TeamsGateway.Gateway.Data.Migrations.Postgres
                         .HasColumnType("integer");
 
                     b.HasKey("Seq");
+
+                    b.HasIndex("MessageId");
 
                     b.HasIndex("PublishedAt");
 

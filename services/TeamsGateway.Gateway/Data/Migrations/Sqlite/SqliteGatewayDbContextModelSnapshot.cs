@@ -125,6 +125,8 @@ namespace TeamsGateway.Gateway.Data.Migrations.Sqlite
 
                     b.HasIndex("ConversationId", "SequenceId");
 
+                    b.HasIndex("SenderMri", "ReceivedAt");
+
                     b.ToTable("MessageEvents");
                 });
 
@@ -180,6 +182,8 @@ namespace TeamsGateway.Gateway.Data.Migrations.Sqlite
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Seq");
+
+                    b.HasIndex("MessageId");
 
                     b.HasIndex("PublishedAt");
 
