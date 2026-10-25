@@ -172,6 +172,72 @@ public class MessageIngestorTests
         Assert.Equal(["8:bob", "8:carol"], people.Asked.Order());
     }
 
+    // 查人名要打 Teams（可能好幾秒，換 token 更久）：不能握著寫入鎖等，不然 Trouter、輪詢的其他訊息全部卡住
+    [Fact]
+    public async Task Slow_name_lookup_does_not_block_other_messages()
+    {
+        using var db = TestDb.OnDisk();
+        await AddConversationAsync(db, subscribed: true);
+        var people = new BlockingPeople();
+        var ingestor = new MessageIngestor(db, new GatewayEventBus(), people);
+        var ct = TestContext.Current.CancellationToken;
+        await ingestor.UpsertAsync(Msg("100", version: 100), "{}", publish: false, ct);
+
+        const string reacted = """{"properties":{"emotions":[{"key":"like","users":[{"mri":"8:bob","time":1792640000000}]}]}}""";
+        var lookingUp = ingestor.UpsertAsync(Msg("100", version: 200), reacted, publish: true, ct);
+        await people.Started.WaitAsync(ct); // 正在查 Bob 的名字
+
+        var other = ingestor.UpsertAsync(Msg("101", version: 101), "{}", publish: true, ct);
+        var first = await Task.WhenAny(other, Task.Delay(TimeSpan.FromSeconds(5), ct));
+        people.Release();
+        await lookingUp;
+        await other;
+
+        Assert.Same(other, first);
+    }
+
+    // 查名字跟寫入之間，同一則訊息被別的來源（例如輪詢）先更新了：照寫入當下的狀態比對，不重發、不漏發
+    [Fact]
+    public async Task Reactions_are_diffed_against_the_state_at_write_time()
+    {
+        using var db = TestDb.OnDisk();
+        await AddConversationAsync(db, subscribed: true);
+        var events = new NewEvents(db);
+        var people = new BlockingPeople();
+        var ingestor = new MessageIngestor(db, new GatewayEventBus(), people);
+        var ct = TestContext.Current.CancellationToken;
+        await ingestor.UpsertAsync(Msg("100", version: 100), "{}", publish: false, ct);
+
+        const string bob = """{"properties":{"emotions":[{"key":"like","users":[{"mri":"8:bob","time":1792640000000}]}]}}""";
+        var trouter = ingestor.UpsertAsync(Msg("100", version: 200), bob, publish: true, ct);
+        await people.Started.WaitAsync(ct);
+        // 查名字的同時，輪詢拿到同一版先寫進去了
+        var poll = ingestor.UpsertAsync(Msg("100", version: 200), bob, publish: true, ct);
+        people.Release();
+        await Task.WhenAll(trouter, poll);
+
+        var reaction = Assert.Single(events.Take());
+        Assert.Equal(("8:bob", "Bob"), (ReactionOf(reaction).UserMri, ReactionOf(reaction).UserName));
+    }
+
+    /// <summary>查名字時停住，等測試 <see cref="Release"/> 才回（每個人都叫 Bob）。</summary>
+    private sealed class BlockingPeople : IPeopleDirectory
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public void Release() => _release.TrySetResult();
+
+        public async Task<IReadOnlyDictionary<string, string>> DisplayNamesAsync(IReadOnlyCollection<string> mris, CancellationToken ct)
+        {
+            _started.TrySetResult();
+            await _release.Task.WaitAsync(ct);
+            return mris.ToDictionary(m => m, _ => "Bob");
+        }
+    }
+
     private sealed class FakePeople(IReadOnlyDictionary<string, string> known) : IPeopleDirectory
     {
         public List<string> Asked { get; } = [];
@@ -261,7 +327,7 @@ public class MessageIngestorTests
     public async Task Concurrent_upserts_of_the_same_message_insert_once()
     {
         // Trouter 推來的同時輪詢也抓到同一則：先查再插不能撞主鍵
-        using var db = new TestDb();
+        using var db = TestDb.OnDisk();
         await AddConversationAsync(db, subscribed: true);
         var ingestor = new MessageIngestor(db, new GatewayEventBus());
         var ct = TestContext.Current.CancellationToken;

@@ -29,10 +29,13 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
 
     public async Task<IngestResult> UpsertAsync(MessageDto dto, string rawJson, bool publish, CancellationToken ct)
     {
+        // 按表情的人的名字可能要問 Teams（好幾秒，換 token 更久）：拿寫入鎖之前先查好，鎖裡只剩 DB，
+        // 不然查名字的這段時間 Trouter、輪詢的其他訊息全部卡住
+        var names = publish ? await PrefetchReactorNamesAsync(dto, rawJson, ct) : NoNames;
         await _writeGate.WaitAsync(ct);
         try
         {
-            return await UpsertCoreAsync(dto, rawJson, publish, ct);
+            return await UpsertCoreAsync(dto, rawJson, publish, names, ct);
         }
         finally
         {
@@ -40,7 +43,36 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
         }
     }
 
-    private async Task<IngestResult> UpsertCoreAsync(MessageDto dto, string rawJson, bool publish, CancellationToken ct)
+    private static readonly IReadOnlyDictionary<string, string?> NoNames = new Dictionary<string, string?>();
+
+    /// <summary>
+    /// 照 DB 目前的版本先算一次表情變動，把按的人的名字查好。只是預先查：真正的比對在鎖裡照寫入當下的狀態重算，
+    /// 那時才多出來的人（查名字期間別的來源先寫了新版）只查 DB、不打 Teams。
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, string?>> PrefetchReactorNamesAsync(MessageDto dto, string rawJson, CancellationToken ct)
+    {
+        Dictionary<string, string?> names;
+        await using (var db = await factory.CreateDbContextAsync(ct))
+        {
+            var stored = await db.MessageEvents.Where(m => m.Id == dto.Id).Select(m => new { m.Version, m.RawJson }).FirstOrDefaultAsync(ct);
+            if (stored is not null && dto.Version <= stored.Version)
+                return NoNames; // 同版或更舊，鎖裡會直接略過
+            var changes = DiffReactions(ChatsvcClient.ParseReactions(stored?.RawJson ?? "{}"), ChatsvcClient.ParseReactions(rawJson), DateTimeOffset.UtcNow);
+            if (changes.Count == 0)
+                return NoNames;
+            names = await StoredNamesAsync(db, changes.Select(c => c.Mri).Distinct(), ct);
+        }
+
+        // 沒在訂閱群組講過話的（只按表情）去 Teams 查；DB 連線先關掉，不拿著它等
+        var unknown = names.Where(n => n.Value is null).Select(n => n.Key).ToList();
+        if (unknown.Count > 0 && people is not null)
+            foreach (var (mri, name) in await people.DisplayNamesAsync(unknown, ct))
+                names[mri] = name;
+        return names;
+    }
+
+    private async Task<IngestResult> UpsertCoreAsync(
+        MessageDto dto, string rawJson, bool publish, IReadOnlyDictionary<string, string?> names, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var existing = await db.MessageEvents.FindAsync([dto.Id], ct);
@@ -77,7 +109,7 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
                 outgoing.Add(Record(db, new GatewayEvent(Message: dto), rawJson));
                 // 晚到的訊息（睡眠 / 停機後才被輪詢、回補補到）第一次看到時可能已經有人按了表情：
                 // 之後的比對都以這版為準，現在不發就永遠發不出去
-                foreach (var reaction in await ReactionChangesAsync(db, beforeJson: "{}", rawJson, dto, ct))
+                foreach (var reaction in await ReactionChangesAsync(db, beforeJson: "{}", rawJson, dto, names, ct))
                     outgoing.Add(Record(db, new GatewayEvent(Reaction: reaction), rawJson));
             }
             result = IngestResult.Inserted;
@@ -89,7 +121,7 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
         else
         {
             // 表情：比對前後兩版誰按了 / 收回了什麼（有人按表情時 Teams 也會讓 version 往上跳）
-            var reactions = publish ? await ReactionChangesAsync(db, existing.RawJson, rawJson, dto, ct) : [];
+            var reactions = publish ? await ReactionChangesAsync(db, existing.RawJson, rawJson, dto, names, ct) : [];
 
             if (SameVisible(existing, dto))
             {
@@ -140,32 +172,39 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
         && (ChatsvcClient.ParseAttachments(stored.RawJson) ?? []).SequenceEqual(incoming.Attachments ?? []);
 
     /// <summary>
-    /// 前後兩版的表情變動。按的人的名字先用他在 DB 裡最近一則訊息的顯示名稱；沒在訂閱群組講過話的（只按表情）
-    /// 再去 Teams 查（<see cref="IPeopleDirectory"/>），都查不到就 null。
+    /// 前後兩版的表情變動。按的人的名字用鎖外預先查好的 <paramref name="prefetched"/>；
+    /// 沒預先查到的（查名字期間狀態變了）只查 DB，不在鎖裡打 Teams。
     /// </summary>
     private async Task<List<ReactionDto>> ReactionChangesAsync(
-        GatewayDbContext db, string beforeJson, string afterJson, MessageDto dto, CancellationToken ct)
+        GatewayDbContext db, string beforeJson, string afterJson, MessageDto dto, IReadOnlyDictionary<string, string?> prefetched, CancellationToken ct)
     {
         var changes = DiffReactions(ChatsvcClient.ParseReactions(beforeJson), ChatsvcClient.ParseReactions(afterJson), DateTimeOffset.UtcNow);
         if (changes.Count == 0)
             return [];
 
-        var names = new Dictionary<string, string?>();
-        foreach (var mri in changes.Select(c => c.Mri).Distinct())
-            names[mri] = await db.MessageEvents
-                .Where(m => m.SenderMri == mri && m.SenderName != null)
-                .OrderByDescending(m => m.ReceivedAt)
-                .Select(m => m.SenderName)
-                .FirstOrDefaultAsync(ct);
-        var unknown = names.Where(n => n.Value is null).Select(n => n.Key).ToList();
-        if (unknown.Count > 0 && people is not null)
-            foreach (var (mri, name) in await people.DisplayNamesAsync(unknown, ct))
-                names[mri] = name;
-
+        var missing = changes.Select(c => c.Mri).Distinct().Where(mri => !prefetched.ContainsKey(mri)).ToList();
+        var names = missing.Count == 0 ? prefetched : await StoredNamesAsync(db, missing, ct);
         return changes
-            .Select(c => new ReactionDto(dto.Id, dto.ConversationId, c.Emoji, c.Mri, names[c.Mri], c.Added, c.Time, c.Count))
+            .Select(c => new ReactionDto(dto.Id, dto.ConversationId, c.Emoji, c.Mri,
+                prefetched.TryGetValue(c.Mri, out var name) ? name : names.GetValueOrDefault(c.Mri), c.Added, c.Time, c.Count))
             .ToList();
     }
+
+    /// <summary>每個人在 DB 裡最近一則訊息的顯示名稱；沒講過話的是 null。</summary>
+    private static async Task<Dictionary<string, string?>> StoredNamesAsync(GatewayDbContext db, IEnumerable<string> mris, CancellationToken ct)
+    {
+        var names = new Dictionary<string, string?>();
+        foreach (var mri in mris)
+            names[mri] = await LatestSenderNameQuery(db, mri).FirstOrDefaultAsync(ct);
+        return names;
+    }
+
+    /// <summary>某人最近一則訊息的顯示名稱（新的在前）。<c>MessageEvents</c> 不清，要走索引。</summary>
+    internal static IQueryable<string?> LatestSenderNameQuery(GatewayDbContext db, string mri) =>
+        db.MessageEvents
+            .Where(m => m.SenderMri == mri && m.SenderName != null)
+            .OrderByDescending(m => m.ReceivedAt)
+            .Select(m => m.SenderName);
 
     internal readonly record struct ReactionChange(string Emoji, string Mri, bool Added, DateTimeOffset Time, int Count);
 

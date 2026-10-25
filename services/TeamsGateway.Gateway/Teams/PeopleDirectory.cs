@@ -14,7 +14,8 @@ public interface IPeopleDirectory
 /// <summary>
 /// 打網頁版遇到不認識的人時用的 <c>mt/beta/users/fetchShortProfile</c>（spike/profiles.py）：一次查多個，
 /// 要 MT 的 Bearer token 加 skypetoken（只帶 skypetoken 會 401）。查到的記一天——名字很少改，同一個人不重複查。
-/// 呼叫端（ingest）握著寫入鎖在等：每次查詢限 <see cref="Budget"/>，超過就當查不到，不拖住其他訊息。
+/// 呼叫端（ingest）在寫入這則訊息之前等它（不握寫入鎖，不擋其他訊息）：每次查詢限 <see cref="Budget"/>，超過就當查不到，
+/// 這則的事件不會因為查名字晚太久。
 /// 換 token 不限時——換到一半取消可能弄丟輪換過的登入 cookie，而且 token 本來別人也要用。
 /// </summary>
 public sealed class PeopleDirectory(IHttpClientFactory httpFactory, SkypeTokenProvider tokens, ILogger<PeopleDirectory> logger) : IPeopleDirectory
