@@ -30,7 +30,7 @@ public sealed class PollService(
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            // 先等一個 interval：重啟後讓 SSE 訂閱者先重連，補到的才有人收
+            // 先等一個 interval：重啟後讓沒帶游標的 SSE 訂閱者先重連（帶 Last-Event-ID 的晚連上也會從事件 log 補回）
             try
             {
                 await Task.Delay(interval, stoppingToken);

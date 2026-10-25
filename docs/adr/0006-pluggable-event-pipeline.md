@@ -49,8 +49,8 @@ RelayWorker ── IEventSource ──┬─ SseEventSource     （Last-Event-ID
 抽象要能換 infra，契約就只能承諾每種傳輸都做得到的事：
 
 - **所有事件種類同一個有序串流**（訊息、編輯、刪除、表情），用 `kind` 區分，不認得的 `kind` 跳過。表情一定要跟它的訊息在同一個串流，順序才保證得了。
-- **順序只保證在同一個對話內，分區鍵 = `conversationId`。** consumer 不能依賴跨對話的先後——現在 SSE 剛好是全域有序，但分區式的 broker 做不到，這是讓它們接得上的最低承諾。
-- **去重 / 游標分對話記。** 例如表情事件沒有版本號，重送會在 Slack 多一則「reacted」，要靠 seq 去重；記的是「每個對話處理到的 seq」，不能只記全域最大值——分區後，全域最大值會把別的對話還沒處理的事件當成處理過。
+- **順序只保證在同一個對話內，分區鍵 = `conversationId`。** consumer 不能依賴跨對話的先後——現在 SSE 剛好是全域有序，但分區式的 broker 做不到，這是讓它們接得上的最低承諾。（同一個對話內的順序是寫進 log 的順序，不一定是發話時間的順序：睡眠醒來回補缺口的同時 Trouter 推來新訊息，新訊息會比缺口裡較舊的訊息先拿到序號。要照發話時間排的 consumer 看 `time`。）
+- **去重 / 游標分對話記。** 例如表情事件沒有版本號，重送會在 Slack 多一則「reacted」，要靠 seq 去重；記的是「每個對話處理到的 seq」，不能只記全域最大值——分區後，全域最大值會把別的對話還沒處理的事件當成處理過。（relay 的 SSE source 目前沒照這條：重啟時用 Slack 上最新一則轉過的 Teams 訊息當全域的 `afterMessage` 續接點，靠的是 SSE 剛好全域有序。換成分區式的 broker source 時要改成分對話記。）
 - **內容一份，各傳輸自己決定放哪**：`seq`、`kind`、`conversationId`、`schemaVersion` + payload。SSE 放在 `id` / `event` / `data`。
 - **payload 要帶 Teams 原始 JSON**：DTO 是挑過的欄位，之後用新格式回放時，新邏輯要的欄位不一定在裡面。
 
