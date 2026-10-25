@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -31,10 +32,10 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         return result?.Ts;
     }
 
-    /// <summary>原地更新一則訊息（編輯用；Slack 自帶 "edited"）。metadata 要一起帶，不然更新後會掉。</summary>
-    public async Task UpdateMessageAsync(string channel, string ts, string text, string teamsId, long? version, IReadOnlyList<string> images, CancellationToken ct) =>
+    /// <summary>原地更新一則訊息（編輯用；Slack 自帶 "edited"）。metadata 要一起帶，不然更新後會掉。回傳有沒有更新成。</summary>
+    public async Task<bool> UpdateMessageAsync(string channel, string ts, string text, string teamsId, long? version, IReadOnlyList<string> images, CancellationToken ct) =>
         await SendAsync("chat.update", channel, text, images, clearBlocks: true,
-            (t, blocks) => new SlackMessageRequest(channel, t, blocks, Ts: ts, Metadata: Meta(teamsId, version)), ct);
+            (t, blocks) => new SlackMessageRequest(channel, t, blocks, Ts: ts, Metadata: Meta(teamsId, version)), ct) is not null;
 
     /// <summary>在某則訊息的 thread 底下回一則（舊版留證用）。</summary>
     public async Task PostReplyAsync(string channel, string threadTs, string text, IReadOnlyList<string> images, CancellationToken ct) =>
@@ -200,10 +201,14 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         return blocks;
     }
 
+    // Slack 那邊暫時性的錯誤（https://docs.slack.dev/apis/web-api/#errors）：重試會好，不能當成這則送不出去
+    private static readonly HashSet<string> TransientErrors = ["ratelimited", "internal_error", "fatal_error", "service_unavailable", "request_timeout"];
+
     /// <summary>
     /// 送一則訊息：有圖就帶 blocks（文字 section + image block），沒圖只帶 text。
     /// 圖剛上傳完 Slack 可能回 invalid_blocks，等一下重試；一直不行就拿掉圖、文字補註記改送純文字，至少內容送得到。
     /// <paramref name="clearBlocks"/>：chat.update 沒帶 blocks 時 Slack 會保留舊的（舊圖留著），所以沒圖要明確送空陣列。
+    /// 限流、Slack 自己出錯丟 <see cref="SlackTransientException"/> 讓呼叫端重試；其他錯誤（頻道不存在、沒權限…）重試也沒用，記 error 回 null。
     /// </summary>
     private async Task<PostResponse?> SendAsync(
         string method, string channel, string text, IReadOnlyList<string> images, bool clearBlocks,
@@ -214,7 +219,12 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         {
             IReadOnlyList<SlackBlock>? blocks = withImages ? ImageBlocks(text, images) : clearBlocks ? [] : null;
             using var resp = await http.PostAsJsonAsync(method, body(text, blocks), SlackJsonContext.Default.SlackMessageRequest, ct);
+            // 429 的 body 不一定是 JSON，先看狀態碼
+            if (resp.StatusCode == HttpStatusCode.TooManyRequests)
+                throw new SlackTransientException(method, "ratelimited", resp.Headers.RetryAfter?.Delta);
             var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.PostResponse, ct);
+            if (result is { Ok: false, Error: { } error } && TransientErrors.Contains(error))
+                throw new SlackTransientException(method, error, resp.Headers.RetryAfter?.Delta);
             if (withImages && result is { Ok: false, Error: "invalid_blocks" })
             {
                 if (attempt < FileNotReadyDelays.Length)
@@ -235,4 +245,15 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     }
 
     public readonly record struct RelayedMessage(string TeamsId, string Ts, string Text, long? Version);
+}
+
+/// <summary>Slack 回了暫時性的錯誤（限流、Slack 自己出錯），重試會好。<see cref="RetryAfter"/> 是 Slack 要我們等多久（有給的話）。</summary>
+public sealed class SlackTransientException(string method, string error, TimeSpan? retryAfter)
+    : Exception($"Slack {method} failed: {error}")
+{
+    public string Error => error;
+
+    public TimeSpan? RetryAfter => retryAfter;
+
+    public bool RateLimited => error == "ratelimited";
 }

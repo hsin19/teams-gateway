@@ -15,6 +15,8 @@ bot 的 app 定義在 [`slack-app-manifest.yaml`](slack-app-manifest.yaml)。到
 
 訊息裡的內嵌圖片：relay 經 gateway 的 `/v1/media` 抓下來，上傳成 Slack 檔案（不分享到頻道），再用 image block 貼在同一則訊息裡；抓不到或上傳失敗時文字照送，末尾註記幾張圖未能轉送。
 
+送不出去時：Slack 一時不通（連不上、`internal_error` 之類 Slack 自己的錯誤）每則重試兩次，還是不行就放棄那則、記 error；被限流（`ratelimited`，每頻道約每秒一則，睡眠醒來補一批時容易撞到）不算次數，照 `Retry-After` 等到送得出去為止，後面的事件跟著排隊。頻道不存在、沒權限這類重試也沒用的錯誤直接記 error 放棄。編輯時原地更新被拒，對照表留著舊版，不會當成已經更新過。
+
 ## 設定
 
 appsettings 放完整 default，secret 走 env（雙底線覆蓋）或 user-secrets。

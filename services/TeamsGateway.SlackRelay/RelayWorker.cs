@@ -57,7 +57,7 @@ public sealed class RelayWorker(
             if (evt.Message is { } message)
                 await RelayWithRetryAsync(message, routes, opts.Slack.DefaultChannel, ct);
             else if (evt.Reaction is { } reaction)
-                await WithRetryAsync($"表情 {reaction.Emoji}（訊息 {reaction.MessageId}）", () => RelayReactionAsync(reaction, Seq(evt.Id), ct), ct);
+                await WithRetryAsync($"reaction {reaction.Emoji} (message {reaction.MessageId})", () => RelayReactionAsync(reaction, Seq(evt.Id), ct), ct);
         }
     }
 
@@ -89,31 +89,43 @@ public sealed class RelayWorker(
     /// <summary>單則轉送失敗後的重試間隔；用完還失敗就放棄這則。</summary>
     internal TimeSpan[] RetryDelays { get; init; } = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10)];
 
+    /// <summary>Slack 限流卻沒說要等多久時等這麼久。</summary>
+    internal TimeSpan RateLimitFallback { get; init; } = TimeSpan.FromSeconds(30);
+
     /// <summary>
     /// 轉一則；Slack / gateway 一時不通就退避重試，還是不行記 error 放棄這則、繼續下一則。
+    /// 被 Slack 限流不算重試次數，照 Retry-After 等到能送為止：限流一定會過去，放棄就是掉訊息
+    /// （睡眠醒來補的一批訊息很容易撞到每頻道約每秒一則的上限）。
     /// 例外不能冒出去：外層會當成 SSE 斷線，重連後這則就默默消失、log 還寫成連線問題。
     /// （編輯在「舊版留證」成功、「原地更新」失敗時重試會多留一則證，可以接受。）
     /// </summary>
     internal Task RelayWithRetryAsync(MessageDto message, Dictionary<string, string> routes, string? defaultChannel, CancellationToken ct) =>
-        WithRetryAsync($"訊息 {message.Id}（{message.ConversationId}）", () => RelayAsync(message, routes, defaultChannel, ct), ct);
+        WithRetryAsync($"message {message.Id} ({message.ConversationId})", () => RelayAsync(message, routes, defaultChannel, ct), ct);
 
     private async Task WithRetryAsync(string what, Func<Task> relay, CancellationToken ct)
     {
-        for (var attempt = 0; ; attempt++)
+        var attempt = 0;
+        while (true)
         {
             try
             {
                 await relay();
                 return;
             }
+            catch (SlackTransientException ex) when (ex.RateLimited && !ct.IsCancellationRequested)
+            {
+                var wait = ex.RetryAfter ?? RateLimitFallback;
+                logger.LogWarning("Slack rate limited while relaying {What}; retrying in {Delay}", what, wait);
+                await Task.Delay(wait, ct);
+            }
             catch (Exception ex) when (!ct.IsCancellationRequested && attempt < RetryDelays.Length)
             {
-                logger.LogWarning(ex, "轉送{What}失敗，{Delay} 後重試", what, RetryDelays[attempt]);
-                await Task.Delay(RetryDelays[attempt], ct);
+                logger.LogWarning(ex, "Relaying {What} failed; retrying in {Delay}", what, RetryDelays[attempt]);
+                await Task.Delay(RetryDelays[attempt++], ct);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                logger.LogError(ex, "轉送{What}重試 {Attempts} 次仍失敗，放棄", what, RetryDelays.Length);
+                logger.LogError(ex, "Relaying {What} still failed after {Attempts} retries; giving up", what, RetryDelays.Length);
                 return;
             }
         }
@@ -167,8 +179,9 @@ public sealed class RelayWorker(
             var updated = message.Deleted
                 ? new SlackContent("_(message deleted)_", []) // 誰說的、原本寫什麼，在上面那則 thread 留證裡
                 : await FormatAsync(message, prior.Channel, ct);
-            await slack.UpdateMessageAsync(prior.Channel, prior.Ts, updated.Text, message.Id, version, updated.Images, ct);
-            links.Remember(message.Id, prior.Channel, prior.Ts, updated.Text, version, updated.Images);
+            // 更新被拒（SlackClient 已記 error）時 Slack 上還是舊版：對照表也留舊版，不然之後會以為已經更新過
+            if (await slack.UpdateMessageAsync(prior.Channel, prior.Ts, updated.Text, message.Id, version, updated.Images, ct))
+                links.Remember(message.Id, prior.Channel, prior.Ts, updated.Text, version, updated.Images);
             return;
         }
 
