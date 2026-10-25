@@ -5,7 +5,7 @@
 分兩階段：
 
 - **Phase 1（已做）Teams → Slack**：當 `GET /v1/events`（SSE）的訂閱者，把 Teams 訊息貼進對應的 Slack 頻道。斷線用 `Last-Event-ID`（事件序號）續接；relay 自己重啟時序號沒了，改從 Slack 上最後一則轉過去的 Teams 訊息之後續接（`afterMessage`；近 24 小時沒轉過東西就往更早的歷史找），停機期間的不會漏，重送的照版本去重。限制：Slack 上一則都沒轉過（例如剛清空），或那則訊息的事件已超過 gateway 的保留天數（預設 7 天），就只能從現在開始。60 秒沒收到任何資料（gateway 每 20 秒有心跳）就當連線半死、重連。
-- **Phase 2（未做）Slack → Teams**：Socket Mode 收 Slack 回覆 → 對應回 Teams 對話 → `POST /v1/chats/{id}/messages`。
+- **Phase 2（設計中）Slack → Teams**：訊息開頭 @bot → 只有本人看得到的確認 → 按 Send 才經 `POST /v1/chats/{id}/messages` 發出，狀態用表情標在那則上。Socket Mode 收事件。設計見 [ADR 0012](../../docs/adr/0012-slack-to-teams-send.md)。
 
 ## Slack app
 
