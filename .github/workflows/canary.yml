@@ -1,0 +1,50 @@
+name: Canary
+
+# 每天對部署端跑一次 live E2E，抓 Teams 改了非官方 API 把我們弄壞的情況。
+# 會真的發訊息，所以只有排程和手動觸發，不掛在 PR 或 push 上。
+# runner 上只有 gateway 的 API key，Teams cookie 一直待在 gateway 那台。
+on:
+  schedule:
+    - cron: "23 1 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    # fork 沒有部署端，也沒有這些 secret
+    if: ${{ !github.event.repository.fork }}
+    runs-on: ubuntu-24.04
+    environment: canary
+    timeout-minutes: 15
+    env:
+      GATEWAY_BASE_URL: ${{ secrets.GATEWAY_BASE_URL }}
+      GATEWAY_API_KEY: ${{ secrets.GATEWAY_API_KEY }}
+      TEAMS_E2E_CHAT: ${{ secrets.TEAMS_E2E_CHAT }}
+
+    steps:
+      # 測試沒有 API key 會整組 skip：少設 secret 會變成假綠燈，所以先擋
+      - name: Require canary secrets
+        run: |
+          for name in GATEWAY_BASE_URL GATEWAY_API_KEY TEAMS_E2E_CHAT; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Secret $name is not set on the canary environment"
+              exit 1
+            fi
+          done
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: E2E tests
+        run: dotnet test --project tests/TeamsGateway.Gateway.E2E

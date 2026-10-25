@@ -1,10 +1,9 @@
 name: Check
 
-# The single definition of "did this tree pass": build, unit tests, functional tests against both
-# SQLite and Postgres, and a shellcheck of the repo scripts. pr.yml and release.yml both call it, so
-# a PR and a release are held to the same bar and the list cannot drift between them. main has no
-# deploy workflow of its own, so the push trigger lives here; workflow_dispatch runs every check
-# against any ref. E2E tests hit a real Teams account and send real messages, so they never run here.
+# 「這棵樹過了沒」的唯一定義：build、unit test、SQLite 與 Postgres 兩套 functional test、repo 腳本的 shellcheck。
+# pr.yml 和 release.yml 都呼叫它，PR 和 release 用同一套標準，清單不會兩邊各長各的。
+# main 沒有自己的部署 workflow，所以 push 觸發放在這裡；workflow_dispatch 可以對任何 ref 跑全部檢查。
+# E2E 會真的在 Teams 發訊息，不在這裡跑，改由 canary.yml 排程。
 on:
   push:
     branches: [main]

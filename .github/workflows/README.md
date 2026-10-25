@@ -7,6 +7,7 @@ check.yml    push 到 main · workflow_call · workflow_dispatch
              → build · unit test · functional test（SQLite、Postgres）· shellcheck
 pr.yml       pull_request → check.yml · dependency review → auto-merge（Dependabot）
 release.yml  v* tag       → check.yml → 每個 image 在 x64 + arm64 runner 上 build、smoke check → 推 amd64 + arm64 到 GHCR
+canary.yml   每天 · workflow_dispatch → 對部署端跑 E2E（真的發訊息）
 ```
 
 `check.yml` 是「這棵樹過了沒」的唯一定義。另外兩個 workflow 都呼叫它，PR 和 release 用同一套標準，清單不會兩邊各長各的。
@@ -19,7 +20,7 @@ release.yml  v* tag       → check.yml → 每個 image 在 x64 + arm64 runner 
 Postgres 版的 functional test 經 Aspire 起 container（`GATEWAY_TEST_DB=postgres`）。runner 有 Docker，
 DCP 從 NuGet 來（測試專案設了 `AspireUseCliBundle=false`），所以不用裝 Aspire CLI。
 
-E2E 測試（`tests/TeamsGateway.Gateway.E2E`）刻意不跑：它會登入真的 Teams 帳號、真的發訊息。
+E2E 測試（`tests/TeamsGateway.Gateway.E2E`）不在這裡跑：它會真的在 Teams 發訊息，改由 `canary.yml` 每天打部署端。
 
 workflow 用觸發它的事件命名，不叫 `ci.yml`：它們跑的是同一套檢查，CI 不是分辨它們的地方。
 
@@ -41,6 +42,22 @@ workflow 用觸發它的事件命名，不叫 `ci.yml`：它們跑的是同一�
   每個正式 tag 都指向它。中途失敗的話，GHCR 上會留下幾個 `<版本>-<rid>`，但正式 tag 不會出現；部署用的是沒有後綴的正式 tag。
 - GHCR 新推的 package 預設是 private。到 package 設定改成 public 一次，或改成授權給部署端的 repo 讀取。
   `org.opencontainers.image.source` label 會把 package 連到這個 repo。
+
+## Canary
+
+`canary.yml` 每天對部署端跑一次 E2E，驗 Teams 的非官方 API 沒有改到讓我們壞掉；失敗時 GitHub 會寄信。
+它真的會發訊息，所以只有排程和手動觸發，不掛在 PR 或 push 上（fork 的 PR 本來也拿不到 secret）。
+
+設定放在 **canary** environment 的 secret（Settings → Environments → canary）：
+
+| secret | 內容 |
+|---|---|
+| `GATEWAY_BASE_URL` | 部署端 gateway 的公開網址 |
+| `GATEWAY_API_KEY` | canary 專用的 API key（`POST /admin/api-keys`，name 用 `e2e-canary`），不跟其他訂閱者共用，外洩時單獨撤掉 |
+| `TEAMS_E2E_CHAT` | 發話 round-trip 用的自測群 |
+
+runner 上只有 API key，Teams cookie 一直待在部署端。少了任一個 secret，第一個 step 就會失敗：
+不然測試會因為沒有 key 整組 skip，變成假綠燈。
 
 ## Dependency review
 

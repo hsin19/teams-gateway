@@ -23,6 +23,6 @@ GATEWAY_API_KEY=tgw_xxx dotnet test --project tests/TeamsGateway.Gateway.E2E/Tea
 
 形狀斷言共用 `packages/TeamsGateway.Contracts` 的 wire DTO：契約只有一份 source of truth，Teams 真的變了就一定被我們看到。
 
-## 排程（規劃）
+## 排程
 
-走 GitHub cron CI，每天打一次部署目標。只需 `GATEWAY_BASE_URL` + `GATEWAY_API_KEY` 當 secret——canary 打的是**我們自己的 gateway**，runner 上不放 Teams cookie（cookie 只待在 gateway 主機）。失敗才告警。
+`.github/workflows/canary.yml` 每天打一次部署端，設定與 secret 見 [workflow 說明](../../.github/workflows/README.md#canary)。canary 打的是**我們自己的 gateway**，runner 上不放 Teams cookie（cookie 只待在 gateway 主機）。失敗才告警。
