@@ -36,23 +36,38 @@ public sealed class WebhookSink(
     // webhook id → 下次重試的時間與目前的退避；只在投遞迴圈裡讀寫
     private readonly Dictionary<Guid, (DateTimeOffset At, TimeSpan Backoff)> _retry = [];
 
+    // webhook id → 正在送的那一趟（送到最新、或送失敗為止）；只在投遞迴圈裡讀寫
+    private readonly Dictionary<Guid, Task<bool>> _inFlight = [];
+
     public string Name => SinkName;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var subscription = bus.Subscribe();
+        Task<bool>? notified = null;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await DeliverDueAsync(stoppingToken);
+                await DispatchAsync(stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogError(ex, "webhook 投遞出錯");
+                logger.LogError(ex, "Webhook dispatch failed");
             }
-            await subscription.WaitAsync(NextWake(), stoppingToken);
+
+            // 有新事件、有一趟送完（它可能還有新的要送，或要排重試）、或有重試到期，就再派一次
+            notified ??= subscription.WaitAsync(Timeout.InfiniteTimeSpan, stoppingToken);
+            using var timer = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            var wake = Task.Delay(NextWake(), timer.Token);
+            var woke = await Task.WhenAny([notified, wake, .. _inFlight.Values]);
+            await timer.CancelAsync();
+            if (woke == notified)
+                notified = null;
         }
+
+        // 關機：stoppingToken 已經取消了正在送的那幾趟，等它們收掉，不留在背景碰 DB
+        await Task.WhenAll(_inFlight.Values.Cast<Task>()).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
 
     public async Task<long?> OldestPendingAsync(CancellationToken ct)
@@ -64,28 +79,37 @@ public sealed class WebhookSink(
         return cursor + 1;
     }
 
-    /// <summary>沒在退避中的 webhook 各自送到最新，彼此不互等；送失敗的排下一次重試。</summary>
-    internal async Task DeliverDueAsync(CancellationToken ct)
+    /// <summary>
+    /// 收掉送完的那幾趟（送失敗的排重試），再讓沒在送、也沒在退避中的 webhook 各自開一趟送到最新。
+    /// 不等任何一趟送完：一個目標很慢（還沒失敗、也還沒逾時）只卡它自己，其他 webhook 的新事件照樣即時送。
+    /// </summary>
+    internal async Task DispatchAsync(CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
+        foreach (var (id, trip) in _inFlight.Where(t => t.Value.IsCompleted).ToList())
+        {
+            _inFlight.Remove(id);
+            if (trip.IsFaulted)
+                logger.LogError(trip.Exception, "Webhook {Id} delivery failed", id);
+            if (trip.IsCompletedSuccessfully && trip.Result)
+            {
+                _retry.Remove(id);
+                continue;
+            }
+            var backoff = _retry.TryGetValue(id, out var last)
+                ? TimeSpan.FromTicks(Math.Min(last.Backoff.Ticks * 2, MaxBackoff.Ticks))
+                : MinBackoff;
+            _retry[id] = (now + backoff, backoff);
+        }
+
         var hooks = await ActiveHooksAsync(factory, ct);
         foreach (var gone in _retry.Keys.Except(hooks.Select(h => h.Id)).ToList())
             _retry.Remove(gone); // 刪掉 / 停用的不用再排重試
 
-        var due = hooks.Where(h => !_retry.TryGetValue(h.Id, out var r) || r.At <= now).ToList();
-        var delivered = await Task.WhenAll(due.Select(h => DrainAsync(h, ct)));
-        for (var i = 0; i < due.Count; i++)
-        {
-            if (delivered[i])
-            {
-                _retry.Remove(due[i].Id);
-                continue;
-            }
-            var backoff = _retry.TryGetValue(due[i].Id, out var last)
-                ? TimeSpan.FromTicks(Math.Min(last.Backoff.Ticks * 2, MaxBackoff.Ticks))
-                : MinBackoff;
-            _retry[due[i].Id] = (now + backoff, backoff);
-        }
+        // 游標只有自己那一趟會推進，所以等它送完才重讀、開下一趟
+        foreach (var hook in hooks)
+            if (!_inFlight.ContainsKey(hook.Id) && (!_retry.TryGetValue(hook.Id, out var r) || r.At <= now))
+                _inFlight[hook.Id] = DrainAsync(hook, ct);
     }
 
     /// <summary>

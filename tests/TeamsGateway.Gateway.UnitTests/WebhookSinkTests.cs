@@ -143,15 +143,43 @@ public class WebhookSinkTests
         Assert.Equal(2, await PublishedEventPruner.PruneAsync(db, [sink], cutoff, ct));
     }
 
+    // 一個目標很慢（還沒失敗、也還沒逾時）：其他 webhook 的新事件照樣即時送，不用等它這一輪送完
+    [Fact]
+    public async Task Slow_webhook_does_not_hold_up_the_others()
+    {
+        using var db = TestDb.OnDisk(); // 各 webhook 同時投遞，要各自的 DB 連線
+        var ct = TestContext.Current.CancellationToken;
+        var bus = new GatewayEventBus();
+        await AddHookAsync(db, url: "https://slow.example/in");
+        await AddHookAsync(db, url: "https://fast.example/in");
+        var target = new GatedTarget(slowHost: "slow.example");
+        var sink = new WebhookSink(bus, db, new SingleClientFactory(target), _secrets,
+            Options.Create(new GatewayOptions { EventRetentionDays = 7 }), NullLogger<WebhookSink>.Instance);
+        await sink.StartAsync(ct);
+        try
+        {
+            await PublishAsync(db, bus, "100");
+            Assert.Equal("1", await target.NextFastAsync(ct)); // 慢的那個卡在第 1 筆
+
+            await PublishAsync(db, bus, "200");
+            Assert.Equal("2", await target.NextFastAsync(ct));
+        }
+        finally
+        {
+            target.Release();
+            await sink.StopAsync(CancellationToken.None);
+        }
+    }
+
     private WebhookSink Sink(TestDb db, RecordingTarget target) =>
         new(new GatewayEventBus(), db, new SingleClientFactory(target), _secrets,
             Options.Create(new GatewayOptions { EventRetentionDays = 7 }), NullLogger<WebhookSink>.Instance);
 
-    private async Task<WebhookSubscription> AddHookAsync(TestDb db, string? conversationId = null, string? secret = null)
+    private async Task<WebhookSubscription> AddHookAsync(TestDb db, string? conversationId = null, string? secret = null, string url = "https://hook.example/in")
     {
         var ct = TestContext.Current.CancellationToken;
         var (key, _) = await new ApiKeyService(db).CreateAsync("hook", ct);
-        var hook = Hook(key.Id, "https://hook.example/in", conversationId);
+        var hook = Hook(key.Id, url, conversationId);
         hook.Secret = _secrets.Protect(secret);
         await using var ctx = db.CreateDbContext();
         ctx.WebhookSubscriptions.Add(hook);
@@ -159,7 +187,9 @@ public class WebhookSinkTests
         return hook;
     }
 
-    private static async Task PublishAsync(TestDb db, params string[] messageIds)
+    private static Task PublishAsync(TestDb db, params string[] messageIds) => PublishAsync(db, new GatewayEventBus(), messageIds);
+
+    private static async Task PublishAsync(TestDb db, GatewayEventBus bus, params string[] messageIds)
     {
         var ct = TestContext.Current.CancellationToken;
         await using (var ctx = db.CreateDbContext())
@@ -170,7 +200,7 @@ public class WebhookSinkTests
                 await ctx.SaveChangesAsync(ct);
             }
         }
-        var ingestor = new MessageIngestor(db, new GatewayEventBus());
+        var ingestor = new MessageIngestor(db, bus);
         foreach (var id in messageIds)
             await ingestor.UpsertAsync(new MessageDto(id, Conv, "8:me", "me", "Text", "hi", 1, DateTimeOffset.UtcNow, long.Parse(id)), "{}", publish: true, ct);
     }
@@ -207,6 +237,38 @@ public class WebhookSinkTests
                 request.Headers.TryGetValues("X-TeamsGateway-Signature", out var sig) ? sig.Single() : null,
                 await request.Content!.ReadAsStringAsync(cancellationToken)));
             return new HttpResponseMessage(Requests.Count <= FailFirst ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK);
+        }
+    }
+
+    /// <summary>送到 <paramref name="slowHost"/> 的請求停住、等 <see cref="Release"/>；其他的照收、回 200，收到的序號依序可讀。</summary>
+    private sealed class GatedTarget(string slowHost) : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly System.Threading.Channels.Channel<string> _fast = System.Threading.Channels.Channel.CreateUnbounded<string>();
+
+        public void Release() => _release.TrySetResult();
+
+        /// <summary>快的那個收到的下一個事件序號；5 秒沒收到就失敗。</summary>
+        public async Task<string> NextFastAsync(CancellationToken ct)
+        {
+            try
+            {
+                return await _fast.Reader.ReadAsync(ct).AsTask().WaitAsync(TimeSpan.FromSeconds(5), ct);
+            }
+            catch (TimeoutException)
+            {
+                Assert.Fail("The fast webhook got nothing within 5s: it is waiting on the slow one");
+                throw;
+            }
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.Host == slowHost)
+                await _release.Task.WaitAsync(cancellationToken);
+            else
+                await _fast.Writer.WriteAsync(request.Headers.GetValues("X-TeamsGateway-Seq").Single(), cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
         }
     }
 
