@@ -34,16 +34,26 @@ public sealed class AuthMonitor(
         }
     }
 
-    private async Task AlertAsync(IReadOnlyList<string> channels, CancellationToken ct)
+    internal async Task AlertAsync(IReadOnlyList<string> channels, CancellationToken ct)
     {
         const string text =
-            ":warning: *Teams 同步中斷*\n" +
-            "gateway 與 Teams 的連線認證失效（多半是登入 cookie 到期或帳號被登出），" +
-            "這個頻道暫時不會再收到新的 Teams 訊息。需重新匯入 cookie 後才會恢復。";
+            ":warning: *Teams sync interrupted*\n" +
+            "The gateway's Teams sign-in has stopped working (usually the login cookie expired or the account was signed out), " +
+            "so this channel won't receive new Teams messages until the cookie is re-imported.";
 
-        logger.LogWarning("Teams 認證失效，發同步中斷告警到 {Count} 個頻道", channels.Count);
+        logger.LogWarning("Teams auth failed; posting a sync-interrupted alert to {Count} channel(s)", channels.Count);
         foreach (var channel in channels)
-            await slack.PostMessageAsync(channel, text, teamsId: null, version: null, images: [], ct);
+        {
+            // 例外不能冒出去：BackgroundService 的未處理例外會讓整個 relay 停掉；一個頻道發不出去也要照發其他的
+            try
+            {
+                await slack.PostMessageAsync(channel, text, teamsId: null, version: null, images: [], ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogError(ex, "Posting the sync-interrupted alert to {Channel} failed", channel);
+            }
+        }
     }
 
     /// <summary>所有要告警的頻道 = Routes 的頻道 + DefaultChannel，去重。</summary>
