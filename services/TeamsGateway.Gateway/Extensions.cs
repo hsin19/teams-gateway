@@ -91,7 +91,7 @@ public static class Extensions
             options.AddDocumentTransformer((document, context, ct) =>
             {
                 document.Info.Title = "teams-gateway";
-                document.Info.Version = "v1";
+                document.Info.Version = AppVersion.Value;
                 document.Info.Description = "個人版 Teams 的 HTTP gateway。/v1 給訂閱者（Bearer tgw_…）、/admin 帶 X-Admin-Token。";
 
                 document.Components ??= new OpenApiComponents();

@@ -69,7 +69,7 @@ Relay__Gateway__ApiKey=tgw_… Relay__Slack__BotToken=xoxb-… Relay__Slack__Def
 
 ## 健康檢查
 
-relay 是 worker，開 HTTP（container 裡是 8080）只為了這兩個端點，沒有別的：
+relay 是 worker，開 HTTP（container 裡是 8080）只為了這兩個端點和回版本的 `/version`，沒有別的：
 
 | 端點 | Healthy 的條件 | 用途 |
 |---|---|---|

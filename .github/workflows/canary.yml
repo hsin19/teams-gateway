@@ -38,6 +38,13 @@ jobs:
             fi
           done
 
+      # 先記下打的是哪一版：失敗時對得上是哪次換版弄壞的。舊版沒有 /version，拿不到不算失敗
+      - name: Target version
+        run: |
+          version="$(curl -fsS --max-time 10 "$GATEWAY_BASE_URL/version" || echo unknown)"
+          echo "Target gateway version: $version"
+          echo "Target gateway version: \`$version\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Checkout
         uses: actions/checkout@v7
 

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Http.Resilience;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ServiceDiscovery;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
 namespace Microsoft.Extensions.Hosting;
@@ -18,6 +20,7 @@ public static class Extensions
 {
     private const string HealthEndpointPath = "/health";
     private const string AlivenessEndpointPath = "/alive";
+    private const string VersionEndpointPath = "/version";
 
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
@@ -55,6 +58,8 @@ public static class Extensions
         });
 
         builder.Services.AddOpenTelemetry()
+            // 每筆 trace / metric / log 都帶版本，換版前後的行為在 Grafana 上分得開
+            .ConfigureResource(resource => resource.AddAttributes([new("service.version", AppVersion.Value)]))
             .WithMetrics(metrics =>
             {
                 metrics.AddAspNetCoreInstrumentation()
@@ -122,6 +127,10 @@ public static class Extensions
         {
             Predicate = r => r.Tags.Contains("live")
         });
+
+        // 純文字回版本（例如 0.3.0+33be044），不用帶 key：部署端、E2E 拿來確認現在跑的是哪一版
+        // 用 RequestDelegate 版的 MapGet：library 沒有 request delegate generator，lambda 版在 AOT（relay）下不安全
+        app.MapGet(VersionEndpointPath, context => context.Response.WriteAsync(AppVersion.Value)).ExcludeFromDescription();
 
         return app;
     }

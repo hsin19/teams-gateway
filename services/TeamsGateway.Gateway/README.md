@@ -40,7 +40,7 @@ curl -X POST -H "X-Admin-Token: $TOKEN" -H "Content-Type: application/json" -d '
 
 ## 認證與角色
 
-端點只看角色（ADR 0011）：`/admin` 要 `admin`，`/v1`、`/mcp` 要 `api`；`/health`、`/alive`、`/scalar`、`/openapi` 不用。
+端點只看角色（ADR 0011）：`/admin` 要 `admin`，`/v1`、`/mcp` 要 `api`；`/health`、`/alive`、`/version`、`/scalar`、`/openapi` 不用。
 每種身分怎麼來、拿到什麼角色：
 
 | 身分 | 怎麼帶 | 角色 |
@@ -73,7 +73,7 @@ image、副本數與必要設定見根目錄 README〈部署〉。
 - **用 Cloudflare Access 時**：gateway 只驗 JWT 本身，除了經過 Cloudflare 之外不要有別的對外入口，不然拿到一張有效 JWT 的人可以繞過 Access 直接重放到它過期。
 - **`/data` 等於帳號本身**：登入 cookie、webhook secret 用 DataProtection 加密，但解密用的 key（`/data/keys`）就在同一個 volume、沒再加密：拿到 volume（用 Postgres 時再加上 DB）就拿得到 Teams 帳號。權限、備份要當密碼看待。
 - **對外連線**：要連得到 `login.live.com`、`teams.live.com`（chatsvc）、`*.trouter.skype.com`（WebSocket），受限網段要先開白名單。
-- **health**：`/health`（含 DB）、`/alive` 不需要認證，只回 `Healthy` / `Unhealthy`，不帶細節。
+- **health**：`/health`（含 DB）、`/alive` 不需要認證，只回 `Healthy` / `Unhealthy`，不帶細節。`/version` 也不需要認證，回版本與 7 碼 commit。
 
 ## 訂閱哪些對話（範圍）
 

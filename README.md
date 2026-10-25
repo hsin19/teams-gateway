@@ -63,11 +63,13 @@ gateway 的 bootstrap（綁定 Teams 帳號）與 API 見 [`services/TeamsGatewa
 |---|---|---|
 | 副本 | 1：一條 Trouter 連線、單一寫入者 | 1：多副本會重複貼 Slack |
 | 執行方式 | JIT（base image `aspnet` chiseled） | Native AOT（base image `runtime-deps` chiseled，image 小、記憶體少） |
-| 埠 | 8080（HTTP） | 8080（HTTP，只有 `/health`、`/alive`） |
+| 埠 | 8080（HTTP） | 8080（HTTP，只有 `/health`、`/alive`、`/version`） |
 | 持久化 | `/data` volume：DataProtection key，用 SQLite 時還有 `gateway.db`。要讓 uid 1654 寫得進去（bind mount 的話先 `chown 1654:1654`） | 無：狀態在 Slack 訊息的 metadata |
 | 健康檢查 | `/health`：含 DB | `/health`：設定齊全、連著 gateway 的事件串流才 Healthy；`/alive`：process 有回應 |
+| 版本 | `/version`（純文字，例如 `1.2.3+33be044`），OpenAPI 的 `info.version` 也是它 | `/version` |
 | 必要設定 | `Gateway__AdminToken`（或改用 Cloudflare Access 的身分，見 gateway README）；用 Postgres 時加 `Gateway__Database__Provider=Postgres`、`ConnectionStrings__gateway`（gateway 專用的資料庫） | `Relay__Gateway__BaseUrl`、`Relay__Gateway__ApiKey`、`Relay__Slack__BotToken`；Routes 掛檔到 `/app/appsettings.Local.json`（uid 1654 要讀得到） |
 
+- 版本是 build 時壓進去的：release 帶 tag 的版本號，後面接 7 碼 commit（Source Link 從 git 拿）；本機 build 是 `1.0.0+<commit>`。OTel 的 `service.version` 也帶它，log / trace 分得出是哪一版。
 - image 以非 root（uid 1654）執行，而且沒有 shell，`docker exec` 進不去；查問題看 log、OTel 與掛出來的 `/data`。
 - 開 init（compose 的 `init: true`）：不開的話 `dotnet` 是 container 的 PID 1，背景執行緒上的未處理例外會讓 process 卡在 100% CPU 不結束，restart policy 也不會動。啟動失敗（例如 `/data` 寫不進去、DB 連不上）由 `Program.cs` 接住，有沒有 init 都會以 exit code 1 結束（ADR 0010）。
 - schema 啟動時自動套用 migration（ADR 0009）。換版前先備份 `/data`，用 Postgres 時再加 `pg_dump`；tag 用版本號、不要用 `latest`，換版、退版才有依據。
