@@ -54,7 +54,7 @@ workflow 用觸發它的事件命名，不叫 `ci.yml`：它們跑的是同一�
 |---|---|
 | `GATEWAY_BASE_URL` | 部署端 gateway 的公開網址 |
 | `GATEWAY_API_KEY` | canary 專用的 API key（`POST /admin/api-keys`，name 用 `e2e-canary`），不跟其他訂閱者共用，外洩時單獨撤掉 |
-| `TEAMS_E2E_CHAT` | 發話 round-trip 用的自測群 |
+| `TEAMS_E2E_CHAT` | 發話 round-trip 用的自測群，要在部署端的 gateway 上訂閱（推播測試靠它） |
 
 runner 上只有 API key，Teams cookie 一直待在部署端。少了任一個 secret，第一個 step 就會失敗：
 不然測試會因為沒有 key 整組 skip，變成假綠燈。

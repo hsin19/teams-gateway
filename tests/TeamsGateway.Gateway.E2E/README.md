@@ -10,7 +10,7 @@
 |---|---|---|
 | `GATEWAY_API_KEY` | （無）| gateway 的 API key（`Bearer`）。**沒設 = skip** |
 | `GATEWAY_BASE_URL` | `http://localhost:5199` | 打哪台 gateway。本機先用預設，CI 指到部署目標 |
-| `TEAMS_E2E_CHAT` | 自測空群 | round-trip 發話的對話；預設只有自己的群，不吵到真群 |
+| `TEAMS_E2E_CHAT` | 自測空群 | round-trip 發話的對話；預設只有自己的群，不吵到真群。要先在 gateway 上訂閱（`PUT /admin/subscriptions`），不然收不到推播 |
 
 ```
 GATEWAY_API_KEY=tgw_xxx dotnet test --project tests/TeamsGateway.Gateway.E2E/TeamsGateway.Gateway.E2E.csproj
@@ -19,7 +19,7 @@ GATEWAY_API_KEY=tgw_xxx dotnet test --project tests/TeamsGateway.Gateway.E2E/Tea
 ## 驗什麼
 
 - **列對話** — 成功就隱含證明 skypetoken 換發（打得到 chatsvc）、讀路徑、回傳形狀還能反序列化進 `TeamsGateway.Contracts`（Teams 改 schema 會在這爆）。
-- **發話 → 讀回** — 發一則帶唯一標記的訊息到自測群，再從 Teams 讀回同一則。
+- **推播 + 發話 → 讀回** — 先連上 `/v1/events`（SSE），發一則帶唯一標記的訊息到自測群，10 秒內要從 SSE 收到它，再從 Teams 讀回同一則。輪詢會把 10 秒內的新訊息留給 Trouter，所以這段時間內收到就是 Trouter 推的；Trouter 壞了、只剩輪詢在補，這裡會失敗。
 
 形狀斷言共用 `packages/TeamsGateway.Contracts` 的 wire DTO：契約只有一份 source of truth，Teams 真的變了就一定被我們看到。
 
