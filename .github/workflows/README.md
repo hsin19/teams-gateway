@@ -68,16 +68,20 @@ runner 上只有 API key，Teams cookie 一直待在部署端。少了任一個 
 
 ## Dependabot auto-merge
 
-`pr.yml` 用 `secrets.AUTOMERGE_TOKEN` squash-merge 綠燈的 Dependabot PR。用專用的 token 而不是預設的
-`GITHUB_TOKEN`：`GITHUB_TOKEN` 做的 push 不會觸發別的 workflow，merge 之後的 `main` 就不會跑 `check.yml`。設定方式：
+`pr.yml` 的 `auto-merge` job 在 `check` 與 `dependency-review` 都綠燈後，把 Dependabot 的 PR 交給共用的
+[`dependabot-automerge.yml`](https://github.com/hsin19/actions)，用 `secrets.AUTOMERGE_TOKEN` squash-merge。check 跑完之後
+`main` 若動過，它改請 Dependabot rebase，rebase 後的 PR 會再過一次檢查；理由寫在那個 repo 的 README。
 
-1. 建一把只給這個 repo 的 fine-grained personal access token，**Contents** 與 **Pull requests** 設成 read and write。
+用專用的 token 而不是預設的 `GITHUB_TOKEN`：`GITHUB_TOKEN` 做的 push 不會觸發別的 workflow，merge 之後的 `main` 就不會跑
+`check.yml`。設定方式：
+
+1. 建一把只給這個 repo 的 fine-grained personal access token，**Contents** 與 **Pull requests** 設成 read and write，
+   **不設到期日**：token 過期的話，CI 照樣綠燈，auto-merge 卻會默默停擺。
 2. 加成 **Dependabot** secret，名稱 `AUTOMERGE_TOKEN`（Settings → Secrets and variables → Dependabot）。
    Dependabot 的 PR 讀的是 Dependabot 的 secret，不是 Actions 的。
 
-merge 之前，job 會確認 check 跑完之後 `main` 沒有動過。動過的話改請 Dependabot rebase，rebase 後的 PR 會再過一次檢查。
-
 `release.yml` 用到的 action 在 `check.yml` 也都有用到，所以 PR 綠燈就涵蓋了它們的升級。要維持這樣：
-只在打 tag 時才用到的 action，第一次跑就是真的 release，那它就要有自己的 Dependabot group、不能進 auto-merge。
+只在打 tag 時才用到的 action，第一次跑就是真的 release，那它就要放進名稱以 `-manual` 結尾的 Dependabot group，
+共用 workflow 會跳過這種 group、留給人看。
 
 base image 沒有固定版本，也不需要 Dependabot：`noble-chiseled` 是浮動 tag，每次 release 都會拿到最新修補過的 runtime。
