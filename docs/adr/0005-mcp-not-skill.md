@@ -14,7 +14,7 @@ gateway 原生開一個 MCP server（`/mcp`，Streamable HTTP），把讀 / 發�
 
 | 介面 | 給誰 | 性質 |
 |---|---|---|
-| **MCP `/mcp`** | agent（Claude Code / Desktop / Cursor…） | 請求／回應的 tool：list_chats / read_messages / send_message |
+| **MCP `/mcp`** | agent（Claude Code / Desktop / Cursor…） | 請求／回應的 tool：list_chats / read_messages / send_message（後來加了 get_attachments，輸出改成給 LLM 讀的 log 式純文字，見 `clients/mcp/README.md`） |
 | **REST `/v1` + SSE** | 程式、常駐訂閱（背景常駐的即時監控）、Python client | 含 SSE 長連線即時事件 |
 
 MCP 不取代 SSE：即時長連線訂閱還是走 SSE + Python client。

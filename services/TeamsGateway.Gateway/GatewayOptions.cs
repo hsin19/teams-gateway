@@ -6,6 +6,12 @@ public sealed class GatewayOptions
     /// <summary>發話時掛的顯示名稱。</summary>
     public string DisplayName { get; set; } = "teams-gateway";
 
+    /// <summary>
+    /// MCP tool 輸出的時間用哪個時區：UTC offset（<c>+08:00</c>）或 IANA 名稱（<c>Asia/Taipei</c>）；tool 的 <c>timezone</c> 參數可以蓋過。
+    /// IANA 名稱要主機有時區資料，部署的 chiseled image 沒有的話會查不到，用 offset 最保險。
+    /// </summary>
+    public string McpTimeZone { get; set; } = "UTC";
+
     /// <summary><c>/admin</c> 端點的 token（<c>X-Admin-Token</c>）；沒設定則這條路關閉（ADR 0011）。</summary>
     public string? AdminToken { get; set; }
 

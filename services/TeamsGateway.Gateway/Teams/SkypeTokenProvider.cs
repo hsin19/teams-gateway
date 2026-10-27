@@ -48,7 +48,7 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
             if (_cached is { } hit2 && hit2.ExpiresAt - RefreshSkew > DateTimeOffset.UtcNow)
                 return hit2;
             _cached = await MintTrackedAsync(ct);
-            logger.LogInformation("換到新的 skypetoken，skypeid={SkypeId}，到期 {ExpiresAt:u}", _cached.SkypeId, _cached.ExpiresAt);
+            logger.LogInformation("Got a new skypetoken: skypeid={SkypeId}, expires {ExpiresAt:u}", _cached.SkypeId, _cached.ExpiresAt);
             return _cached;
         }
         finally
@@ -69,7 +69,7 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
             if (CanReuse(_cached, rejectedToken, DateTimeOffset.UtcNow))
                 return _cached!;
             _cached = await MintTrackedAsync(ct);
-            logger.LogInformation("強制換 skypetoken，skypeid={SkypeId}", _cached.SkypeId);
+            logger.LogInformation("Forcing a skypetoken refresh: skypeid={SkypeId}", _cached.SkypeId);
             return _cached;
         }
         finally
@@ -103,7 +103,7 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
     private async Task<SkypeToken> MintAsync(CancellationToken ct)
     {
         var cookiesJson = await secureStore.GetAsync(CookieSecureKey, ct)
-            ?? throw new InvalidOperationException("還沒匯入登入 cookie（PUT /admin/login-cookies）");
+            ?? throw new InvalidOperationException("No login cookie imported yet (PUT /admin/login-cookies)");
 
         var container = BuildCookieContainer(cookiesJson);
         using var handler = new SocketsHttpHandler { AllowAutoRedirect = false, CookieContainer = container, UseCookies = true };
@@ -167,20 +167,20 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
             if (resp.StatusCode is not (>= HttpStatusCode.MovedPermanently and < (HttpStatusCode)400))
-                throw new InvalidOperationException($"靜默授權停在 HTTP {(int)resp.StatusCode}（登入 cookie 可能已失效，要重新匯入）");
+                throw new InvalidOperationException($"Silent authorization stopped at HTTP {(int)resp.StatusCode} (the login cookie may have expired; import it again)");
 
-            var location = resp.Headers.Location ?? throw new InvalidOperationException("授權 redirect 少了 Location");
+            var location = resp.Headers.Location ?? throw new InvalidOperationException("Authorization redirect has no Location");
             var next = new Uri(new Uri(url), location);
             if (next.GetLeftPart(UriPartial.Path).StartsWith(RedirectUri, StringComparison.Ordinal))
             {
                 var fragment = QueryHelpers.ParseQuery(next.Fragment.TrimStart('#'));
                 if (fragment.TryGetValue("code", out var code))
                     return code.ToString();
-                throw new InvalidOperationException($"授權回來沒有 code：{string.Join(",", fragment.Keys)}");
+                throw new InvalidOperationException($"Authorization returned no code: {string.Join(",", fragment.Keys)}");
             }
             url = next.ToString();
         }
-        throw new InvalidOperationException("靜默授權 redirect 次數過多");
+        throw new InvalidOperationException("Too many redirects during silent authorization");
     }
 
     private static async Task<JsonDocument> PostFormAsync(HttpClient http, string url, Dictionary<string, string> form, bool origin, CancellationToken ct)
@@ -191,7 +191,7 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
         using var resp = await http.SendAsync(req, ct);
         var body = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)
-            throw new InvalidOperationException($"POST {url} 失敗 HTTP {(int)resp.StatusCode}: {Truncate(body)}");
+            throw new InvalidOperationException($"POST {url} failed: HTTP {(int)resp.StatusCode}: {Truncate(body)}");
         return JsonDocument.Parse(body);
     }
 
@@ -206,7 +206,7 @@ public sealed class SkypeTokenProvider(SecureStore secureStore, ILogger<SkypeTok
         using var resp = await http.SendAsync(req, ct);
         var body = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)
-            throw new InvalidOperationException($"authz/consumer 失敗 HTTP {(int)resp.StatusCode}: {Truncate(body)}");
+            throw new InvalidOperationException($"authz/consumer failed: HTTP {(int)resp.StatusCode}: {Truncate(body)}");
 
         using var doc = JsonDocument.Parse(body);
         var st = doc.RootElement.GetProperty("skypeToken");

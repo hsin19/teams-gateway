@@ -39,6 +39,6 @@ public sealed class AuthTests(GatewayAppFixture fx) : IClassFixture<GatewayAppFi
         var resp = await fx.CreateAdminClient().PostAsync("/admin/auth/refresh", null, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadGateway, resp.StatusCode);
-        Assert.Contains("還沒匯入登入 cookie", await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Contains("No login cookie imported yet", await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
 }

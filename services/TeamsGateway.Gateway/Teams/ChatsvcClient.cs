@@ -46,14 +46,14 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         return hits.Count switch
         {
             1 => hits[0].Id,
-            0 => throw new InvalidOperationException($"找不到群 '{spec}'（名稱不符）"),
+            0 => throw new InvalidOperationException($"No chat named '{spec}'"),
             _ => throw new InvalidOperationException(Ambiguous(spec, hits)),
         };
     }
 
     /// <summary>群名對到不只一個時的說明，列出候選讓呼叫端改給完整名稱或 id。</summary>
     public static string Ambiguous(string spec, IReadOnlyList<ConversationDto> hits) =>
-        $"'{spec}' 對到 {hits.Count} 個群：{string.Join("、", hits.Take(10).Select(h => $"{h.Topic}（{h.Id}）"))}；請給更完整的名稱或 thread id";
+        $"'{spec}' matches {hits.Count} chats: {string.Join(", ", hits.Take(10).Select(h => $"{h.Topic} ({h.Id})"))}; give a fuller name or the thread id";
 
     public static bool IsThreadId(string spec) =>
         spec.StartsWith("19:", StringComparison.Ordinal) || spec.Contains("@thread", StringComparison.Ordinal);
@@ -82,7 +82,7 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
     public async Task<MessagePage> GetMessagesAsync(string threadId, int pageSize, string? cursor, CancellationToken ct = default)
     {
         if (cursor is not null && !IsValidCursor(threadId, cursor))
-            throw new ArgumentException("cursor 不是這個對話的翻頁游標", nameof(cursor));
+            throw new ArgumentException("cursor is not a paging cursor for this chat", nameof(cursor));
         var (items, next) = await FetchPageAsync(threadId, pageSize, cursor, ct);
         return new MessagePage(items.Select(i => i.Dto).ToList(), next);
     }
@@ -129,6 +129,49 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
             cursor = next;
         }
         return result;
+    }
+
+    private const int WindowPageSize = 200;
+    private const int MaxWindowPages = 40;
+
+    /// <summary>讀 [since, until) 內最新的 limit 則文字訊息（給 MCP）。什麼時候停見 <see cref="MessageWindowCollector"/>。</summary>
+    public async Task<MessageWindow> GetWindowAsync(string threadId, DateTimeOffset? since, DateTimeOffset? until, int limit, CancellationToken ct = default)
+    {
+        var collector = new MessageWindowCollector(since, until, limit);
+        string? cursor = null;
+        for (var page = 0; page < MaxWindowPages; page++)
+        {
+            var (items, next) = await FetchPageAsync(threadId, WindowPageSize, cursor, ct);
+            var done = collector.Add(items.Select(i => i.Dto).ToList());
+            if (next is null || items.Count == 0)
+                return collector.Build(reachedTop: true);
+            if (done)
+                return collector.Build(reachedTop: false);
+            cursor = next;
+        }
+        return collector.Build(reachedTop: false);
+    }
+
+    /// <summary>
+    /// 找一則訊息（給 MCP 看圖）。訊息 id 就是發話時間（Unix 毫秒），翻到 version 比它舊就表示不在了；
+    /// 留一分鐘餘裕，不賭 id 跟 version 用的是同一個時鐘。
+    /// </summary>
+    public async Task<MessageDto?> FindMessageAsync(string threadId, string messageId, CancellationToken ct = default)
+    {
+        if (!long.TryParse(messageId, NumberStyles.None, CultureInfo.InvariantCulture, out var composedAt))
+            return null;
+        string? cursor = null;
+        for (var page = 0; page < MaxWindowPages; page++)
+        {
+            var (items, next) = await FetchPageAsync(threadId, WindowPageSize, cursor, ct);
+            foreach (var item in items)
+                if (item.Dto.Id == messageId)
+                    return item.Dto;
+            if (next is null || items.Count == 0 || items.Any(i => i.Dto.Version > 0 && i.Dto.Version < composedAt - 60_000))
+                return null;
+            cursor = next;
+        }
+        return null;
     }
 
     private async Task<(List<RawMessage> Items, string? Next)> FetchPageAsync(string threadId, int pageSize, string? cursor, CancellationToken ct)
@@ -293,7 +336,7 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         var resp = await http.SendAsync(Apply(make(), token.Token), ct);
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
         {
-            logger.LogInformation("chatsvc 回 401，強制換 token 重試");
+            logger.LogInformation("chatsvc returned 401; refreshing the token and retrying");
             resp.Dispose();
             token = await tokens.RefreshAsync(token.Token, ct);
             resp = await http.SendAsync(Apply(make(), token.Token), ct);

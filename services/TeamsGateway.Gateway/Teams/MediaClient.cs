@@ -30,9 +30,9 @@ public sealed class MediaClient(HttpClient http, SkypeTokenProvider tokens)
         using (resp)
         {
             if (!resp.IsSuccessStatusCode)
-                throw new InvalidOperationException($"抓媒體失敗 HTTP {(int)resp.StatusCode}");
+                throw new InvalidOperationException($"Fetching media failed: HTTP {(int)resp.StatusCode}");
             if (resp.Content.Headers.ContentLength > MaxBytes)
-                throw new InvalidOperationException($"媒體太大（{resp.Content.Headers.ContentLength} bytes）");
+                throw new InvalidOperationException($"Media too large ({resp.Content.Headers.ContentLength} bytes)");
             var bytes = await ReadBoundedAsync(resp.Content, MaxBytes, ct);
             return (bytes, resp.Content.Headers.ContentType?.MediaType ?? "application/octet-stream");
         }
@@ -48,7 +48,7 @@ public sealed class MediaClient(HttpClient http, SkypeTokenProvider tokens)
         while ((read = await stream.ReadAsync(chunk, ct)) > 0)
         {
             if (buffer.Length + read > maxBytes)
-                throw new InvalidOperationException($"媒體太大（超過 {maxBytes} bytes）");
+                throw new InvalidOperationException($"Media too large (over {maxBytes} bytes)");
             buffer.Write(chunk, 0, read);
         }
         return buffer.ToArray();
