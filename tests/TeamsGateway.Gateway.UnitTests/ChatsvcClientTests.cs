@@ -158,6 +158,26 @@ public class ChatsvcClientTests
         Assert.Empty(ChatsvcClient.MatchByName(chats, "nope"));
     }
 
+    // chatsvc 的 topic 是 HTML 跳脫過的（實際資料：「Infosite Problem (IT&amp;RD)」）；
+    // 沒還原的話群名帶 & 的對話用名字找不到，顯示也是 &amp;
+    [Fact]
+    public void ParseConversations_decodes_html_escaped_topic()
+    {
+        var root = JsonDocument.Parse("""
+            {
+              "conversations": [
+                { "id": "19:a@thread.skype", "threadProperties": { "topic": "Ops (IT&amp;RD) &lt;prod&gt;" } },
+                { "id": "19:b@thread.skype", "threadProperties": { "topic": "R&amp;D" } }
+              ]
+            }
+            """).RootElement;
+
+        var chats = ChatsvcClient.ParseConversations(root);
+
+        Assert.Equal("Ops (IT&RD) <prod>", chats[0].Topic);
+        Assert.Equal(["19:b@thread.skype"], ChatsvcClient.MatchByName(chats, "R&D").Select(c => c.Id));
+    }
+
     // 發話不能撤回：「dev」要對到叫 dev 的群，而不是第一個 dev 開頭的
     [Fact]
     public void MatchByName_exact_beats_prefix()
