@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
+using TeamsGateway.Contracts;
 using Microsoft.Extensions.Options;
 
 namespace TeamsGateway.SlackRelay.UnitTests;
@@ -218,6 +219,71 @@ public class SlackSenderTests
         Assert.Contains("retrying is safe", Responses(s)[^1].GetProperty("blocks")[0].GetProperty("text").GetProperty("text").GetString());
     }
 
+    // 查詢失敗時保留 ⏳；Retry 先重新查對話，不可直接再 POST
+    [Fact]
+    public async Task Unknown_send_outcome_is_preserved_and_retry_checks_before_posting()
+    {
+        var s = Create();
+        s.Gateway.RespondAsync = (request, _) => Task.FromResult<(HttpStatusCode, string)?>(request.RequestUri!.AbsolutePath.EndsWith("/messages", StringComparison.Ordinal)
+            ? (HttpStatusCode.BadGateway, "")
+            : null);
+        var readHistory = s.Slack.Respond!;
+        s.Slack.Respond = uri =>
+        {
+            var json = readHistory(uri);
+            return uri.AbsolutePath.EndsWith("conversations.history", StringComparison.Ordinal)
+                   && s.Slack.Requests.Any(r => r.Method == "reactions.add" && r.Body.GetProperty("name").GetString() == "hourglass_flowing_sand")
+                ? json?.Replace("\"blocks\"", "\"reactions\":[{\"name\":\"hourglass_flowing_sand\",\"users\":[\"UBOT\"],\"count\":1}],\"blocks\"", StringComparison.Ordinal)
+                : json;
+        };
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
+
+        Assert.Single(s.Gateway.Requests, r => r.Method == "POST");
+        Assert.DoesNotContain(s.Slack.Requests, r => r.Method == "reactions.remove" && r.Body.GetProperty("name").GetString() == "hourglass_flowing_sand");
+        Assert.DoesNotContain("warning", Reactions(s, "reactions.add"));
+        Assert.Contains("outcome unknown", Responses(s)[^1].GetProperty("text").GetString(), StringComparison.OrdinalIgnoreCase);
+
+        await s.Sender.OnActionAsync(Click("retry", $"C1|{Ts}|"), Ct);
+
+        Assert.Single(s.Gateway.Requests, r => r.Method == "POST");
+        Assert.Contains("checking the chat failed", Responses(s)[^1].GetProperty("text").GetString());
+    }
+
+    // SSE 先確認成功時，稍後回來的空查詢不能把已送出的訊息降成失敗
+    [Fact]
+    public async Task Verification_cannot_downgrade_a_concurrently_confirmed_send()
+    {
+        var s = Create();
+        var verificationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseVerification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        s.Gateway.RespondAsync = async (request, ct) =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/messages", StringComparison.Ordinal))
+            {
+                if (request.Method == HttpMethod.Post)
+                    return (HttpStatusCode.BadGateway, "");
+                verificationStarted.TrySetResult();
+                await releaseVerification.Task.WaitAsync(ct);
+                return (HttpStatusCode.OK, """{"messages":[]}""");
+            }
+            return null;
+        };
+        var sending = s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
+        await verificationStarted.Task.WaitAsync(Ct);
+
+        await s.Worker.RelayWithRetryAsync(
+            new MessageDto(TeamsId, Chat, "8:me", "Me", "RichText/Html", "<p>hello</p>", 1,
+                DateTimeOffset.FromUnixTimeSeconds(1729834597), long.Parse(TeamsId), ClientMessageId: ClientMessageId),
+            new Dictionary<string, string> { [Chat] = "C1" }, null, Ct);
+        releaseVerification.SetResult();
+        await sending;
+
+        Assert.DoesNotContain("warning", Reactions(s, "reactions.add"));
+        Assert.True(Responses(s)[^1].GetProperty("delete_original").GetBoolean());
+        Assert.NotNull(s.Links.Lookup(TeamsId));
+    }
+
     // Cancel：收掉確認，什麼都不送
     [Fact]
     public async Task Cancel_removes_the_confirmation()
@@ -259,7 +325,7 @@ public class SlackSenderTests
 
     private static List<JsonElement> Responses(Setup s) => s.Slack.Requests.Where(r => r.Method == "respond").Select(r => r.Body).ToList();
 
-    private sealed record Setup(SlackSender Sender, RecordingSlack Slack, FakeGateway Gateway, MessageLinks Links);
+    private sealed record Setup(SlackSender Sender, RecordingSlack Slack, FakeGateway Gateway, MessageLinks Links, RelayWorker Worker);
 
     private static Setup Create(Action<RelayOptions.SlackSettings>? configure = null, string? message = null)
     {
@@ -299,6 +365,14 @@ public class SlackSenderTests
         configure?.Invoke(options.Slack);
         var links = new MessageLinks();
         var tracker = RelayFakes.Sends(slack, links, options);
+        var worker = new RelayWorker(
+            new SseEventSource(new GatewayEventStream(new HttpClient(), NullLogger<GatewayEventStream>.Instance), new MessageLinks(), NullLogger<SseEventSource>.Instance),
+            RelayFakes.Slack(slack),
+            new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
+            links,
+            tracker,
+            Options.Create(options),
+            NullLogger<RelayWorker>.Instance);
         var sender = new SlackSender(
             RelayFakes.Slack(slack),
             new GatewaySendClient(RelayFakes.Gateway(gateway), NullLogger<GatewaySendClient>.Instance),
@@ -306,6 +380,6 @@ public class SlackSenderTests
             tracker,
             Options.Create(options),
             NullLogger<SlackSender>.Instance) { VerifyDelay = TimeSpan.Zero };
-        return new Setup(sender, slack, gateway, links);
+        return new Setup(sender, slack, gateway, links, worker);
     }
 }

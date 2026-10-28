@@ -158,8 +158,18 @@ public sealed class RelayWorker(
         }
 
         // 不同 Teams 表情可能對到同一個 Slack 表情（like / yes 都是 👍）：其中一個收回到 0 就會拿掉，可以接受
-        if (TeamsEmoji.SlackName(reaction.Emoji) is { } name && (reaction.Added || reaction.Count == 0))
-            await slack.ReactAsync(target.Channel, target.Ts, name, add: reaction.Added, ct);
+        if (TeamsEmoji.SlackName(reaction.Emoji) is { } name && (reaction.Added || reaction.Count == 0)
+            && (target.ByBot || !sends.IsStatusEmoji(name)))
+        {
+            try
+            {
+                await slack.ReactAsync(target.Channel, target.Ts, name, add: reaction.Added, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "Mirroring Teams reaction {Emoji} to Slack failed", reaction.Emoji);
+            }
+        }
     }
 
     private async Task RelayAsync(MessageDto message, Dictionary<string, string> routes, string? defaultChannel, CancellationToken ct)
@@ -179,10 +189,7 @@ public sealed class RelayWorker(
             if (!prior.ByBot)
             {
                 // 人在 Slack 頂層發、送到 Teams 的那則（ADR 0012）在 Teams 上被改了：bot 改不了人發的訊息，新版貼在它的 thread
-                var changed = message.Deleted ? new SlackContent("", []) : await FormatAsync(message, prior.Channel, ct);
-                await slack.PostReplyAsync(prior.Channel, prior.Ts,
-                    message.Deleted ? "_Deleted in Teams_" : $"_Edited in Teams_\n{changed.Text}", changed.Images, ct);
-                links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, version, prior.Images, prior.Chat ?? message.ConversationId, byBot: false);
+                await RelayHumanSendEditAsync(message, prior, version, ct);
                 return;
             }
             await slack.PostReplyAsync(prior.Channel, prior.Ts, $"{VersionLabel(message.Id, prior.Version)}\n{prior.Text}", prior.Images, ct);
@@ -195,21 +202,34 @@ public sealed class RelayWorker(
             return;
         }
 
-        if (string.IsNullOrEmpty(message.Content) && message.Attachments is not { Count: > 0 })
-            return; // 新訊息但無文字也無附件（純系統事件），不轉
-
         // 從 Slack 發過去的（ADR 0012）：頂層發的那則就代表 Teams 上的這句，不再貼；thread 裡發的照一般訊息貼到頂層
         if (await sends.MatchAsync(message, channel, ct) is { } sent)
         {
             await sends.ConfirmAsync(sent, message.Id, message.ConversationId, ct);
             if (!sent.InThread)
+            {
+                if (links.Lookup(message.Id) is { ByBot: false } recovered && IsNewer(message, recovered.Version))
+                    await RelayHumanSendEditAsync(message, recovered, version, ct);
                 return;
+            }
         }
+
+        if (string.IsNullOrEmpty(message.Content) && message.Attachments is not { Count: > 0 })
+            return; // 新訊息但無文字也無附件（純系統事件），不轉
 
         var content = await FormatAsync(message, channel, ct);
         var ts = await slack.PostMessageAsync(channel, content.Text, message.Id, version, content.Images, ct, message.ConversationId);
         if (ts is not null)
             links.Remember(message.Id, channel, ts, content.Text, version, content.Images, message.ConversationId); // 記住對應，給之後的回覆 / 編輯用
+    }
+
+    private async Task RelayHumanSendEditAsync(MessageDto message, MessageLinks.SlackRef prior, long? version, CancellationToken ct)
+    {
+        var changed = message.Deleted ? new SlackContent("", []) : await FormatAsync(message, prior.Channel, ct);
+        if (await slack.PostReplyAsync(prior.Channel, prior.Ts,
+                message.Deleted ? "_Deleted in Teams_" : $"_Edited in Teams_\n{changed.Text}", changed.Images, ct))
+            links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, version, prior.Images,
+                prior.Chat ?? message.ConversationId, byBot: false);
     }
 
     /// <summary>

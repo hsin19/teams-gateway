@@ -38,9 +38,9 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
             (t, blocks) => new SlackMessageRequest(channel, t, blocks, Ts: ts, Metadata: Meta(teamsId, version, chat)), ct) is not null;
 
     /// <summary>在某則訊息的 thread 底下回一則（舊版留證用）。</summary>
-    public async Task PostReplyAsync(string channel, string threadTs, string text, IReadOnlyList<string> images, CancellationToken ct) =>
+    public async Task<bool> PostReplyAsync(string channel, string threadTs, string text, IReadOnlyList<string> images, CancellationToken ct) =>
         await SendAsync("chat.postMessage", channel, text, images, clearBlocks: false,
-            (t, blocks) => new SlackMessageRequest(channel, t, blocks, ThreadTs: threadTs), ct);
+            (t, blocks) => new SlackMessageRequest(channel, t, blocks, ThreadTs: threadTs), ct) is not null;
 
     /// <summary>在某則訊息的 thread 底下留表情留言，夾著 gateway 的事件序號 <paramref name="seq"/>（見 <see cref="ReadReactionSeqsAsync"/>）；回傳有沒有貼成。</summary>
     public async Task<bool> PostReactionNoteAsync(string channel, string threadTs, string text, long? seq, CancellationToken ct) =>
@@ -105,15 +105,19 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     {
         var method = add ? "reactions.add" : "reactions.remove";
         using var resp = await http.PostAsJsonAsync(method, new ReactionRequest(channel, ts, name), SlackJsonContext.Default.ReactionRequest, ct);
+        if (resp.StatusCode == HttpStatusCode.TooManyRequests)
+            throw new SlackTransientException(method, "ratelimited", resp.Headers.RetryAfter?.Delta);
         var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.PostResponse, ct);
         if (result is { Error: "invalid_name" })
             return false;
         if (result is { Ok: true } or { Error: "already_reacted" or "no_reaction" })
             return true;
-        logger.LogWarning("Slack {Method} 失敗（channel={Channel}, name={Name}）：{Error}{Hint}", method, channel, name,
-            result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture),
-            result?.Error == "missing_scope" ? "（Slack app 要加 reactions:write 並重新安裝）" : "");
-        return true;
+        var error = result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture);
+        logger.LogWarning("Slack {Method} failed (channel={Channel}, name={Name}): {Error}{Hint}", method, channel, name,
+            error, result?.Error == "missing_scope" ? " (add reactions:write to the Slack app and reinstall it)" : "");
+        if (TransientErrors.Contains(error))
+            throw new SlackTransientException(method, error, resp.Headers.RetryAfter?.Delta);
+        throw new InvalidOperationException($"Slack {method} failed: {error}");
     }
 
     // ---- Slack → Teams 發話（ADR 0012）用到的 ----

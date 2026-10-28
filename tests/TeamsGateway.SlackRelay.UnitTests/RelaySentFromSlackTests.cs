@@ -60,6 +60,62 @@ public class RelaySentFromSlackTests
         Assert.False(links.Lookup(TeamsId)?.ByBot);
     }
 
+    // 重啟後先收到編輯事件：恢復對應後仍要送出 Teams 編輯通知
+    [Fact]
+    public async Task Recovered_top_level_send_edit_is_posted_to_its_thread()
+    {
+        var (worker, slack, links, _) = Worker();
+        slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT"}""";
+        slack.Responses["reactions.get"] = """
+            {"ok":true,"type":"message","message":{"ts":"1729834567.123456","user":"UME","reactions":[{"name":"outbox_tray","users":["UBOT"],"count":1}]}}
+            """;
+
+        await worker.RelayWithRetryAsync(
+            Echo() with { Content = "<p>fixed</p>", Version = 1793220599999, Edited = true }, Routes, null, Ct);
+
+        var note = Assert.Single(slack.Requests, r => r.Method == "chat.postMessage").Body;
+        Assert.Equal(Ts, note.GetProperty("thread_ts").GetString());
+        Assert.StartsWith("_Edited in Teams_", note.GetProperty("text").GetString());
+        Assert.Equal(1793220599999, links.Lookup(TeamsId)?.Version);
+    }
+
+    [Fact]
+    public async Task Recovered_top_level_send_deletion_is_posted_to_its_thread()
+    {
+        var (worker, slack, _, _) = Worker();
+        slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT"}""";
+        slack.Responses["reactions.get"] = """
+            {"ok":true,"type":"message","message":{"ts":"1729834567.123456","user":"UME","reactions":[{"name":"outbox_tray","users":["UBOT"],"count":1}]}}
+            """;
+
+        await worker.RelayWithRetryAsync(
+            Echo() with { Content = null, Version = 1793220599999, Deleted = true }, Routes, null, Ct);
+
+        var note = Assert.Single(slack.Requests, r => r.Method == "chat.postMessage").Body;
+        Assert.Equal(Ts, note.GetProperty("thread_ts").GetString());
+        Assert.StartsWith("_Deleted in Teams_", note.GetProperty("text").GetString());
+    }
+
+    // Slack 沒有貼成編輯通知時版本不能前進，否則相同事件重播會被當成已處理
+    [Fact]
+    public async Task Failed_edit_note_does_not_advance_the_link_version()
+    {
+        var (worker, slack, links, _) = Worker();
+        links.Remember(TeamsId, "C1", Ts, "", null, chat: Chat, byBot: false);
+        slack.RespondToBody = (method, _) =>
+            method == "chat.postMessage" ? """{"ok":false,"error":"channel_not_found"}""" : null;
+        var edited = Echo() with { Content = "<p>fixed</p>", Version = 1793220599999, Edited = true };
+
+        await worker.RelayWithRetryAsync(edited, Routes, null, Ct);
+
+        Assert.Null(links.Lookup(TeamsId)?.Version);
+        slack.RespondToBody = null;
+        await worker.RelayWithRetryAsync(edited, Routes, null, Ct);
+
+        Assert.Equal(2, slack.Requests.Count(r => r.Method == "chat.postMessage"));
+        Assert.Equal(1793220599999, links.Lookup(TeamsId)?.Version);
+    }
+
     // 不是從 Slack 發的（例如 MCP 發的，id 是 19 碼）：照 Phase 1 由 bot 轉送，不問 Slack
     [Fact]
     public async Task Other_sends_are_relayed_as_usual()

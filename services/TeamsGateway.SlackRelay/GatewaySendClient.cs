@@ -35,9 +35,21 @@ public sealed class GatewaySendClient(HttpClient http, ILogger<GatewaySendClient
     /// <summary>對話近期訊息裡帶這個 <paramref name="clientMessageId"/> 的那則的 Teams id；沒有回 null。gateway 不通就丟例外。</summary>
     public async Task<string?> FindSentAsync(string chat, string clientMessageId, CancellationToken ct)
     {
-        var page = await http.GetFromJsonAsync($"/v1/chats/{Uri.EscapeDataString(chat)}/messages?limit=50",
-            ContractsJsonContext.Default.MessagePage, ct);
-        return page?.Messages.FirstOrDefault(m => m.ClientMessageId == clientMessageId)?.Id;
+        string? cursor = null;
+        var seenCursors = new HashSet<string>(StringComparer.Ordinal);
+        do
+        {
+            var url = $"/v1/chats/{Uri.EscapeDataString(chat)}/messages?limit=200"
+                      + (cursor is null ? "" : $"&cursor={Uri.EscapeDataString(cursor)}");
+            var page = await http.GetFromJsonAsync(url, ContractsJsonContext.Default.MessagePage, ct)
+                       ?? throw new InvalidDataException("The gateway returned an empty message page.");
+            if (page.Messages.FirstOrDefault(m => m.ClientMessageId == clientMessageId) is { } sent)
+                return sent.Id;
+            cursor = page.NextCursor;
+            if (cursor is not null && !seenCursors.Add(cursor))
+                throw new InvalidDataException("The gateway repeated a message-page cursor.");
+        } while (cursor is not null);
+        return null;
     }
 }
 

@@ -192,20 +192,34 @@ public sealed class SlackSender(
                 }
             }
 
-            if (outcome.Status == SendStatus.Sent)
+            if (outcome.Status == SendStatus.Sent || pending.Confirmed)
             {
                 await tracker.ConfirmAsync(pending, outcome.MessageId, target.Chat, ct);
                 await slack.RespondAsync(responseUrl, new ResponseUrlRequest(DeleteOriginal: true), ct); // 已送出看表情
                 return;
             }
 
-            tracker.Forget(clientMessageId);
-            await tracker.MarkFailedAsync(r.Channel, r.Ts, ct);
+            if (outcome.Status == SendStatus.Unknown && verifyError is not null)
+            {
+                var unknownValue = Ref(r.Channel, r.Ts, r.ThreadTs);
+                var unknownWhy = $"Teams may have received this message, but checking the chat failed ({verifyError}). Retry will check again before sending.";
+                logger.LogWarning("Sending Slack message {Channel}/{Ts} has an unknown outcome: {Why}", r.Channel, r.Ts, unknownWhy);
+                await slack.RespondAsync(responseUrl, new ResponseUrlRequest(
+                    Text: "Send outcome unknown",
+                    Blocks: [SlackBlock.Section($":warning: Send outcome unknown. {Escape(unknownWhy)}"),
+                             SlackBlock.Actions(SlackButton.Of("Retry", RetryAction, unknownValue, "primary"), SlackButton.Of("Cancel", CancelAction, unknownValue))],
+                    ReplaceOriginal: true), ct);
+                return;
+            }
+
+            if (!await tracker.TryMarkFailedAsync(pending, clientMessageId, ct))
+            {
+                await slack.RespondAsync(responseUrl, new ResponseUrlRequest(DeleteOriginal: true), ct);
+                return;
+            }
             var why = outcome.Status == SendStatus.Rejected
                 ? $"The gateway refused it ({outcome.Error})."
-                : verifyError is null
-                    ? $"Teams didn't answer ({outcome.Error}), and the message isn't in the chat, so retrying is safe."
-                    : $"Teams didn't answer ({outcome.Error}), and checking the chat failed too ({verifyError}). Look at the Teams chat before retrying, or it may be sent twice.";
+                : $"Teams didn't answer ({outcome.Error}), and the message isn't in the chat, so retrying is safe.";
             logger.LogWarning("Sending Slack message {Channel}/{Ts} to Teams failed: {Why}", r.Channel, r.Ts, why);
             var value = Ref(r.Channel, r.Ts, r.ThreadTs);
             await slack.RespondAsync(responseUrl, new ResponseUrlRequest(

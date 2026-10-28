@@ -102,7 +102,40 @@ public class SendTrackerTests
         await tracker.ConfirmAsync(tracker.Register("1729834568000000", "C1", "1729834568.000000", inThread: true), null, null, TestContext.Current.CancellationToken);
 
         var added = slack.Requests.Where(r => r.Method == "reactions.add").Select(r => r.Body.GetProperty("name").GetString());
-        Assert.Equal(["teams-relay", "outbox_tray", "outbox_tray"], added);
+        Assert.Equal(["outbox_tray", "teams-relay", "outbox_tray"], added);
+    }
+
+    // 自訂顯示表情不變時也總是留下固定標記；之後設定改名，重啟後仍能辨認舊訊息
+    [Fact]
+    public async Task Stable_success_marker_survives_a_sent_emoji_change()
+    {
+        var (original, slack, _) = Tracker(sentEmoji: "old-name");
+        await original.ConfirmAsync(original.Register(ClientMessageId, "C1", Ts, inThread: true), null, null, TestContext.Current.CancellationToken);
+
+        slack.Responses["auth.test"] = AuthTest;
+        slack.Responses["reactions.get"] = $$$"""
+            {"ok":true,"type":"message","message":{"ts":"{{{Ts}}}","user":"UME","reactions":[{"name":"outbox_tray","users":["UBOT"],"count":1}]}}
+            """;
+        var changed = RelayFakes.Sends(slack, new MessageLinks(),
+            new RelayOptions { Slack = { AppToken = "xapp-1", SentEmoji = "new-name" } });
+
+        Assert.NotNull(await changed.MatchAsync(Echo(), "C1", TestContext.Current.CancellationToken));
+    }
+
+    // Slack 的暫時性錯誤不能被當成成功；⏳ 保留，Confirmed 也不能設起來
+    [Fact]
+    public async Task Failed_success_marker_write_preserves_the_pending_send()
+    {
+        var (tracker, slack, _) = Tracker();
+        slack.RespondToBody = (method, _) =>
+            method == "reactions.add" ? """{"ok":false,"error":"internal_error"}""" : null;
+        var send = tracker.Register(ClientMessageId, "C1", Ts, inThread: true);
+
+        await Assert.ThrowsAsync<SlackTransientException>(() =>
+            tracker.ConfirmAsync(send, null, null, TestContext.Current.CancellationToken));
+
+        Assert.False(send.Confirmed);
+        Assert.DoesNotContain(slack.Requests, r => r.Method == "reactions.remove");
     }
 
     private static MessageDto Echo() =>

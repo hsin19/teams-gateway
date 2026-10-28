@@ -11,7 +11,7 @@
 
 bot 的 app 定義在 [`slack-app-manifest.yaml`](slack-app-manifest.yaml)。到 api.slack.com/apps → Create New App → From an app manifest 貼它建立，Install 後把 **Bot User OAuth Token**（`xoxb-…`）設成 `Relay__Slack__BotToken`。各 scope 的用途寫在 manifest 註解；改了 scope 要重新 Install 才生效。
 
-表情：Teams 有人按 / 收回表情時，在那則 Slack 訊息的 thread 留一句「*誰* reacted 👀」/「removed」，bot 也在原訊息按上同一個 Slack 表情（最後一個人收回時拿掉），頻道裡一眼看得到有人按。留言的 metadata 夾著 gateway 的事件序號（`teams_reaction`）：relay 重啟後從 Slack 上最後一則續接會重送之後的表情事件（表情沒有版本號可去重），貼之前先讀那則 thread（`conversations.replies`，之後記在記憶體），同一個序號貼過就不再貼。表情代碼對照見 `TeamsEmoji`，對不到 Slack 表情的只留言（顯示原始代碼）。訊息晚到時（例如 gateway 睡眠後才補到），當時已經有人按的表情會在訊息貼出後接著補上。需要 `reactions:write`（manifest 已列，舊的 app 要加上並重新 Install）。
+表情：Teams 有人按 / 收回表情時，在那則 Slack 訊息的 thread 留一句「*誰* reacted 👀」/「removed」，bot 也在原訊息按上同一個 Slack 表情（最後一個人收回時拿掉），頻道裡一眼看得到有人按。送到 Teams 的 Slack 訊息會保留送出狀態表情；若 Teams 的表情對應到同一個名稱，只留 thread 通知、不鏡像，以免移除狀態標記。留言的 metadata 夾著 gateway 的事件序號（`teams_reaction`）：relay 重啟後從 Slack 上最後一則續接會重送之後的表情事件（表情沒有版本號可去重），貼之前先讀那則 thread（`conversations.replies`，之後記在記憶體），同一個序號貼過就不再貼。表情代碼對照見 `TeamsEmoji`，對不到 Slack 表情的只留言（顯示原始代碼）。訊息晚到時（例如 gateway 睡眠後才補到），當時已經有人按的表情會在訊息貼出後接著補上。需要 `reactions:write`（manifest 已列，舊的 app 要加上並重新 Install）。
 
 訊息裡的內嵌圖片：relay 經 gateway 的 `/v1/media` 抓下來，上傳成 Slack 檔案（不分享到頻道），再用 image block 貼在同一則訊息裡；抓不到或上傳失敗時文字照送，末尾註記幾張圖未能轉送。
 
@@ -25,7 +25,7 @@ bot 的 app 定義在 [`slack-app-manifest.yaml`](slack-app-manifest.yaml)。到
 - **送去哪**：在轉過來的 Teams 訊息的 thread 裡發，送到那則所在的對話、當成那則的**引用回覆**。在頂層（或上層是頻道裡的討論）發，這個頻道在 Routes 裡只對到一個對話才送；`DefaultChannel`、或一個頻道對到多個對話時頂層不能發，請改在那則 Teams 訊息的 thread 裡發。
 - **內容**：按 Send 時才重讀那則訊息，所以確認前改錯字會送改過的版本。Slack 的格式（粗體、斜體、刪除線、code、連結、條列、引用、程式碼區塊、emoji）照樣轉成 Teams 的 HTML，@人 換成名字。附件、圖片這一版不送。
 - **誰能發**：`Relay:Slack:Senders` 裡的 Slack user id，而且只能送自己寫的那則。發話用的是 gateway 綁的 Teams 帳號，不要隨便加人。
-- **狀態**：bot 在那則按 ⏳（送出中）→ Teams 收下後換成已送出表情（`Relay:Slack:SentEmoji`，預設 📤）。失敗時按 ⚠️，確認那則改成原因加 **Retry**。gateway 沒給明確結果時，relay 會先到對話裡找那則有沒有送到，找不到才給 Retry（Teams 不會替同一則去重，直接重送可能變兩則）。確認那則不見了（ephemeral 不保存）就重新 @bot 一次。
+- **狀態**：bot 在那則按 ⏳（送出中）→ Teams 收下後換成已送出表情（`Relay:Slack:SentEmoji`，預設 📤）；固定的 📤 標記會保留，讓改設定或重啟後仍能去重。失敗時按 ⚠️，確認那則改成原因加 **Retry**。gateway 沒給明確結果時，relay 會先到完整對話歷史裡找那則有沒有送到；查詢失敗時保留 ⏳，Retry 會再查一次才送（Teams 不會替同一則去重，直接重送可能變兩則）。確認那則不見了（ephemeral 不保存）就重新 @bot 一次。
 - **Teams 推回來時**：頂層發的那則就代表 Teams 上的這句，不再貼；thread 裡發的由 bot 照一般訊息貼到頂層（Teams 個人版沒有 thread，頂層才拼得出 Teams 上的對話），因為是引用回覆，會畫成「*名字* replied to <連結>」。之後 Teams 上有人引用、按表情，都接得回 Slack 上那則。
 - **Teams 上改了頂層發的那則**：bot 改不了人發的訊息，在那則的 thread 貼「_Edited in Teams_」加新版（刪除是「_Deleted in Teams_」），Slack 上的原文不動。反過來，在 Slack 上編輯、刪除已送出的那則，Teams 不會跟著變。
 
@@ -34,7 +34,7 @@ bot 的 app 定義在 [`slack-app-manifest.yaml`](slack-app-manifest.yaml)。到
 1. 用更新過的 [`slack-app-manifest.yaml`](slack-app-manifest.yaml) 更新 app（多了 Socket Mode、interactivity、`app_mention` 事件與 `app_mentions:read`、`reactions:read`、`users:read`），然後重新 Install。
 2. Basic Information → App-Level Tokens 建一個有 `connections:write` 的 token（`xapp-…`），設成 `Relay__Slack__AppToken`。
 3. 把能發話的人的 Slack user id 設進 `Relay__Slack__Senders__0`、`__1`…
-4. 想用自訂的已送出表情（例如用 relay 的 icon 做 `:teams-relay:`），先在 Slack 手動上傳，再設 `Relay__Slack__SentEmoji=teams-relay`；Slack 不認得這個名稱時會退回 📤 並記 warning。
+4. 想用自訂的已送出顯示表情（例如用 relay 的 icon 做 `:teams-relay:`），先在 Slack 手動上傳，再設 `Relay__Slack__SentEmoji=teams-relay`；固定的 📤 去重標記仍會保留，Slack 不認得自訂名稱時會只用 📤 並記 warning。
 
 ## 設定
 
@@ -51,7 +51,7 @@ appsettings 放完整 default，secret 走 env（雙底線覆蓋）或 user-secr
 | `Relay:Links:RetentionHours` | `Relay__Links__RetentionHours` | 啟動時從 Slack 歷史回補多久內的訊息對應（預設 24），給回覆連結 / 原地編輯用；重啟的續接點不受這個限制 |
 | `Relay:Slack:AppToken` | `Relay__Slack__AppToken` | Socket Mode 的 app-level token（`xapp-…`，`connections:write`）。設了才開「從 Slack 發到 Teams」 |
 | `Relay:Slack:Senders` | `Relay__Slack__Senders__<i>` | 能從 Slack 發到 Teams 的 Slack user id（list）；空的 = 誰都不能發 |
-| `Relay:Slack:SentEmoji` | `Relay__Slack__SentEmoji` | 送到 Teams 後 bot 按的表情名稱（不含冒號，預設 `outbox_tray`） |
+| `Relay:Slack:SentEmoji` | `Relay__Slack__SentEmoji` | 送到 Teams 後 bot 按的顯示表情名稱（不含冒號，預設 `outbox_tray`；固定 `outbox_tray` 去重標記會保留） |
 
 **頻道策略**：有 `Routes` 就只訂閱表內那些 Teams 對話、各自轉到對應頻道；要「全部進一個頻道」就只設 `DefaultChannel`、不填 Routes。
 

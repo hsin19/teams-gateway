@@ -48,6 +48,31 @@ public class RelayReactionTests
         Assert.Equal("heart", slack.Requests.Single(r => r.Method == "reactions.remove").Body.GetProperty("name").GetString());
     }
 
+    // 人從 Slack 發到 Teams 的訊息用反應表情作為送出狀態時，Teams 的同名表情不能移除它
+    [Fact]
+    public async Task Human_send_status_reaction_is_not_removed_by_mirroring()
+    {
+        var (worker, slack) = Worker(sentEmoji: "+1", byBot: false);
+
+        await worker.RelayReactionAsync(Reaction("like", added: false, count: 0), Seq, TestContext.Current.CancellationToken);
+
+        Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
+        Assert.DoesNotContain(slack.Requests, r => r.Method.StartsWith("reactions.", StringComparison.Ordinal));
+    }
+
+    // Teams 的反應鏡像失敗不影響 thread 通知或事件串流
+    [Fact]
+    public async Task Failed_reaction_mirror_is_best_effort()
+    {
+        var (worker, slack) = Worker();
+        slack.RespondToBody = (method, _) =>
+            method == "reactions.add" ? """{"ok":false,"error":"internal_error"}""" : null;
+
+        await worker.RelayReactionAsync(Reaction("heart", added: true, count: 1), Seq, TestContext.Current.CancellationToken);
+
+        Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
+    }
+
     // 對不到 Slack 表情：留言照留（顯示原始代碼），不按原生表情
     [Fact]
     public async Task Unknown_emoji_is_noted_without_mirror()
@@ -128,18 +153,19 @@ public class RelayReactionTests
         return slack;
     }
 
-    private static (RelayWorker Worker, RecordingSlack Slack) Worker()
+    private static (RelayWorker Worker, RecordingSlack Slack) Worker(string sentEmoji = "outbox_tray", bool byBot = true)
     {
         var slack = new RecordingSlack();
         var links = new MessageLinks();
-        links.Remember(MessageId, "C1", "111.222", "*Bob*:\nhello", long.Parse(MessageId));
+        links.Remember(MessageId, "C1", "111.222", "*Bob*:\nhello", long.Parse(MessageId), byBot: byBot);
+        var options = new RelayOptions { Slack = { SentEmoji = sentEmoji } };
         var worker = new RelayWorker(
             new SseEventSource(new GatewayEventStream(new HttpClient(), NullLogger<GatewayEventStream>.Instance), new MessageLinks(), NullLogger<SseEventSource>.Instance),
             new SlackClient(new HttpClient(slack) { BaseAddress = new Uri("https://slack.com/api/") }, NullLogger<SlackClient>.Instance),
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,
-            RelayFakes.Sends(slack, links),
-            Options.Create(new RelayOptions()),
+            RelayFakes.Sends(slack, links, options),
+            Options.Create(options),
             NullLogger<RelayWorker>.Instance);
         return (worker, slack);
     }

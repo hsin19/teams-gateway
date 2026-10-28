@@ -27,11 +27,15 @@ internal sealed class FakeGateway : HttpMessageHandler
     /// <summary>「POST /v1/chats/19:a@thread.v2/messages」→（狀態碼, JSON）。路徑是解碼過的。</summary>
     public Dictionary<string, (HttpStatusCode Status, string Body)> Responses { get; } = [];
 
+    public Func<HttpRequestMessage, CancellationToken, Task<(HttpStatusCode Status, string Body)?>>? RespondAsync { get; set; }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var path = Uri.UnescapeDataString(request.RequestUri!.AbsolutePath);
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
         Requests.Add((request.Method.Method, path, body));
+        if (RespondAsync is not null && await RespondAsync(request, cancellationToken) is { } response)
+            return new HttpResponseMessage(response.Status) { Content = new StringContent(response.Body, Encoding.UTF8, "application/json") };
         var (status, json) = Responses.TryGetValue($"{request.Method.Method} {path}", out var canned) ? canned : (HttpStatusCode.OK, "{}");
         return new HttpResponseMessage(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
     }
