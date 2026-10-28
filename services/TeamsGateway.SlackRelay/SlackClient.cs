@@ -13,7 +13,7 @@ namespace TeamsGateway.SlackRelay;
 /// </summary>
 public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
 {
-    private const string MetaEventType = "teams_relay";
+    internal const string MetaEventType = "teams_relay";
     private const string ReactionEventType = "teams_reaction";
     private const int SectionMaxChars = 3000;
 
@@ -99,17 +99,125 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     /// <summary>
     /// bot 在某則訊息按 / 收回一個原生表情（需要 <c>reactions:write</c>）。已經按過 / 本來就沒按、或 Slack 不認得這個表情名稱，
     /// 都當成沒事：這只是讓人在頻道裡看得到「有人按了」，誰按的在 thread 留言裡。
+    /// 回傳 false = Slack 不認得這個表情名稱（<c>invalid_name</c>），呼叫端要換一個的話看這個。
     /// </summary>
-    public async Task ReactAsync(string channel, string ts, string name, bool add, CancellationToken ct)
+    public async Task<bool> ReactAsync(string channel, string ts, string name, bool add, CancellationToken ct)
     {
         var method = add ? "reactions.add" : "reactions.remove";
         using var resp = await http.PostAsJsonAsync(method, new ReactionRequest(channel, ts, name), SlackJsonContext.Default.ReactionRequest, ct);
         var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.PostResponse, ct);
-        if (result is { Ok: true } or { Error: "already_reacted" or "no_reaction" or "invalid_name" })
-            return;
+        if (result is { Error: "invalid_name" })
+            return false;
+        if (result is { Ok: true } or { Error: "already_reacted" or "no_reaction" })
+            return true;
         logger.LogWarning("Slack {Method} 失敗（channel={Channel}, name={Name}）：{Error}{Hint}", method, channel, name,
             result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture),
             result?.Error == "missing_scope" ? "（Slack app 要加 reactions:write 並重新安裝）" : "");
+        return true;
+    }
+
+    // ---- Slack → Teams 發話（ADR 0012）用到的 ----
+
+    /// <summary>bot 自己的 user id（<c>auth.test</c>）：認 @bot、認 bot 按的表情用。查不到回 null。</summary>
+    public async Task<string?> GetBotUserIdAsync(CancellationToken ct)
+    {
+        using var resp = await http.PostAsync("auth.test", null, ct);
+        var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.AuthTestResponse, ct);
+        if (result is { Ok: true, UserId: { } id })
+            return id;
+        logger.LogWarning("Slack auth.test failed: {Error}", result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture));
+        return null;
+    }
+
+    /// <summary>只有 <paramref name="user"/> 看得到的訊息（<c>chat.postEphemeral</c>）；在 thread 裡要帶 <paramref name="threadTs"/>。</summary>
+    internal async Task<bool> PostEphemeralAsync(string channel, string user, string text, IReadOnlyList<SlackBlock>? blocks, string? threadTs, CancellationToken ct)
+    {
+        using var resp = await http.PostAsJsonAsync("chat.postEphemeral", new EphemeralRequest(channel, user, text, blocks, threadTs),
+            SlackJsonContext.Default.EphemeralRequest, ct);
+        var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.PostResponse, ct);
+        if (result is { Ok: true })
+            return true;
+        logger.LogWarning("Slack chat.postEphemeral failed (channel={Channel}): {Error}", channel,
+            result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture));
+        return false;
+    }
+
+    /// <summary>
+    /// 經按鈕事件的 <c>response_url</c> 改掉或刪掉那則 ephemeral（ephemeral 只能這樣改）。網址來自 Socket Mode 的事件，
+    /// 還是只接受 Slack 自己的主機：bot token 在預設 header 裡，不能送去別的地方。
+    /// </summary>
+    internal async Task RespondAsync(string responseUrl, ResponseUrlRequest body, CancellationToken ct)
+    {
+        if (!IsSlackUrl(responseUrl))
+        {
+            logger.LogWarning("Ignoring a response_url outside slack.com: {Url}", responseUrl);
+            return;
+        }
+        using var resp = await http.PostAsJsonAsync(responseUrl, body, SlackJsonContext.Default.ResponseUrlRequest, ct);
+        if (!resp.IsSuccessStatusCode)
+            logger.LogWarning("Slack response_url returned HTTP {Status}", (int)resp.StatusCode);
+    }
+
+    internal static bool IsSlackUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps
+        && (uri.Host == "slack.com" || uri.Host.EndsWith(".slack.com", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// 讀頻道裡的一則訊息，thread 裡的回覆要給 <paramref name="threadTs"/>（history 讀不到 thread 裡的）。
+    /// 一定核對 ts：那則被刪掉時 Slack 會回範圍內的別則（replies 也一定先回上層那則），不核對就會讀到別人的話。
+    /// 那則不在回 null。
+    /// </summary>
+    internal async Task<HistoryMessage?> GetMessageAsync(string channel, string ts, string? threadTs, CancellationToken ct)
+    {
+        var range = $"oldest={Uri.EscapeDataString(ts)}&latest={Uri.EscapeDataString(ts)}&inclusive=true";
+        var (method, query) = threadTs is null || threadTs == ts
+            ? ("conversations.history", range)
+            : ("conversations.replies", $"ts={Uri.EscapeDataString(threadTs)}&{range}");
+        await foreach (var m in ReadPagesAsync(method, channel, query, ct, pages: 1))
+            if (m.Ts == ts)
+                return m;
+        return null;
+    }
+
+    /// <summary>一則訊息連同上面的表情（<c>reactions.get</c>，需要 <c>reactions:read</c>）；查不到回 null。</summary>
+    internal async Task<HistoryMessage?> GetReactionsAsync(string channel, string ts, CancellationToken ct)
+    {
+        using var resp = await http.GetAsync($"reactions.get?channel={Uri.EscapeDataString(channel)}&timestamp={Uri.EscapeDataString(ts)}&full=true", ct);
+        var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.ReactionsResponse, ct);
+        if (result is { Ok: true, Message: { } message })
+            return message;
+        if (result?.Error is not "message_not_found")
+            logger.LogWarning("Slack reactions.get failed (channel={Channel}): {Error}{Hint}", channel,
+                result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture),
+                result?.Error == "missing_scope" ? " (add reactions:read to the Slack app and reinstall it)" : "");
+        return null;
+    }
+
+    /// <summary>Slack 使用者的顯示名稱（<c>users.info</c>，需要 <c>users:read</c>）；查不到回 null。</summary>
+    public async Task<string?> GetUserNameAsync(string user, CancellationToken ct)
+    {
+        using var resp = await http.GetAsync($"users.info?user={Uri.EscapeDataString(user)}", ct);
+        var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.UserInfoResponse, ct);
+        if (result is { Ok: true, User: { } u })
+            return new[] { u.Profile?.DisplayName, u.Profile?.RealName, u.RealName, u.Name }.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+        logger.LogWarning("Slack users.info failed (user={User}): {Error}", user,
+            result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture));
+        return null;
+    }
+
+    /// <summary>Socket Mode 的連線網址（<c>apps.connections.open</c>，要用 app-level token，不是 bot token）。失敗回 null。</summary>
+    public async Task<Uri?> OpenSocketAsync(string appToken, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, "apps.connections.open");
+        req.Headers.Authorization = new("Bearer", appToken);
+        using var resp = await http.SendAsync(req, ct);
+        var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.ConnectionsOpenResponse, ct);
+        if (result is { Ok: true, Url: { } url } && Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return uri;
+        logger.LogWarning("Slack apps.connections.open failed: {Error}{Hint}",
+            result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture),
+            result?.Error is "invalid_auth" or "not_allowed_token_type" ? " (Relay:Slack:AppToken must be an app-level xapp- token with connections:write)" : "");
+        return null;
     }
 
     /// <summary>頻道名稱（不含 <c>#</c>），啟動時印路由用；需要 <c>channels:read</c>（private 頻道 <c>groups:read</c>），查不到回 null。</summary>
@@ -169,10 +277,10 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     }
 
     /// <summary><c>conversations.history</c> / <c>conversations.replies</c> 共用的翻頁（帶 metadata）。失敗記 warning，停在已讀到的地方。</summary>
-    private async IAsyncEnumerable<HistoryMessage> ReadPagesAsync(string method, string channel, string query, [EnumeratorCancellation] CancellationToken ct)
+    private async IAsyncEnumerable<HistoryMessage> ReadPagesAsync(string method, string channel, string query, [EnumeratorCancellation] CancellationToken ct, int pages = 20)
     {
         string? cursor = null;
-        for (var page = 0; page < 20; page++) // 上限保護
+        for (var page = 0; page < pages; page++) // 上限保護
         {
             var url = $"{method}?channel={Uri.EscapeDataString(channel)}{(query.Length > 0 ? "&" + query : "")}&limit=200&include_all_metadata=true"
                       + (string.IsNullOrEmpty(cursor) ? "" : $"&cursor={Uri.EscapeDataString(cursor)}");

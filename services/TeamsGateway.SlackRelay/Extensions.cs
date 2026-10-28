@@ -41,12 +41,20 @@ public static class Extensions
                 http.DefaultRequestHeaders.Authorization = new("Bearer", slack.BotToken);
         });
 
-        // 查 gateway /v1/status、/v1/chats、代抓圖片 /v1/media 的短請求，走 factory
+        // 查 gateway /v1/status、/v1/chats、代抓圖片 /v1/media、發話的短請求，走 factory（發話是 POST，resilience 不會重送）
         builder.Services.AddHttpClient<GatewayStatusClient>(ConfigureGateway);
         builder.Services.AddHttpClient<GatewayMediaClient>(ConfigureGateway);
+        builder.Services.AddHttpClient<GatewaySendClient>(ConfigureGateway);
 
         builder.Services.AddSingleton<MessageLinks>();
+        builder.Services.AddSingleton<SendTracker>();
         builder.Services.AddHostedService<RelayWorker>();
+
+        // Slack → Teams 發話（ADR 0012）：沒設 Relay:Slack:AppToken 時 Socket Mode 不連，其他照常
+        builder.Services.AddSingleton<SlackSender>();
+        builder.Services.AddSingleton<SlackSocketMode>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<SlackSocketMode>());
+        builder.Services.AddSingleton<ISlackSocket>(sp => sp.GetRequiredService<SlackSocketMode>());
         builder.Services.AddHostedService<AuthMonitor>();
         builder.Services.AddHostedService<RouteLogger>();
     }

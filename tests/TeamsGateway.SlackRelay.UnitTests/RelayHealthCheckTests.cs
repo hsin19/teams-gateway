@@ -37,14 +37,29 @@ public class RelayHealthCheckTests
     }
 
     // 只有路由、沒 DefaultChannel 也算有地方轉
+    // 開了發話（有 AppToken）：Socket Mode 斷了，發話就壞了，要看得出來；沒開時不看
+    [Theory]
+    [InlineData("xapp-1", false, HealthStatus.Unhealthy)]
+    [InlineData("xapp-1", true, HealthStatus.Healthy)]
+    [InlineData(null, false, HealthStatus.Healthy)]
+    public async Task Socket_mode_counts_only_when_sending_is_on(string? appToken, bool socketConnected, HealthStatus expected)
+    {
+        var slack = Configured();
+        slack.AppToken = appToken;
+
+        var result = await Check(slack, connected: true, socketConnected);
+
+        Assert.Equal(expected, result.Status);
+    }
+
     private static RelayOptions.SlackSettings Configured() => new()
     {
         BotToken = "xoxb-1",
         Routes = [new() { Chat = "19:x@thread.v2", Channel = "C0ABC" }],
     };
 
-    private static Task<HealthCheckResult> Check(RelayOptions.SlackSettings slack, bool connected) =>
-        new RelayHealthCheck(new FakeSource(connected), Options.Create(new RelayOptions { Slack = slack }))
+    private static Task<HealthCheckResult> Check(RelayOptions.SlackSettings slack, bool connected, bool socketConnected = false) =>
+        new RelayHealthCheck(new FakeSource(connected), new FakeSocket(socketConnected), Options.Create(new RelayOptions { Slack = slack }))
             .CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
 
     private sealed class FakeSource(bool connected) : IEventSource
@@ -53,5 +68,10 @@ public class RelayHealthCheckTests
 
         public IAsyncEnumerable<StreamEvent> ReadAsync(IReadOnlyCollection<string>? chats, CancellationToken ct) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class FakeSocket(bool connected) : ISlackSocket
+    {
+        public bool Connected => connected;
     }
 }

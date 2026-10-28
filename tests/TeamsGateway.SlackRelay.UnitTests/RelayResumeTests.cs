@@ -95,6 +95,7 @@ public class RelayResumeTests
             new SlackClient(new HttpClient(slack) { BaseAddress = new Uri("https://slack.com/api/") }, NullLogger<SlackClient>.Instance),
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,
+            RelayFakes.Sends(slack, links),
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance);
         return (worker, links, slack);

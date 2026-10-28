@@ -108,6 +108,7 @@ public class RelayRetryTests
             new SlackClient(new HttpClient(slackHandler) { BaseAddress = new Uri("https://slack.com/api/") }, NullLogger<SlackClient>.Instance),
             new GatewayMediaClient(unused, NullLogger<GatewayMediaClient>.Instance),
             links,
+            RelayFakes.Sends(slackHandler, links),
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance)
         {

@@ -1,0 +1,138 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+using Microsoft.Extensions.Options;
+using TeamsGateway.Contracts;
+
+namespace TeamsGateway.SlackRelay;
+
+/// <summary>
+/// 從 Slack 發到 Teams 的那幾則（ADR 0012）。送出前登記 clientMessageId → 那則 Slack 訊息，Teams 推回來時才認得出是自己發的
+/// （推播可能比 API 回應早到）；那則上的狀態表情（⏳ 送出中 / 已送出 / ⚠️ 失敗）也在這裡換。
+/// 發話（<see cref="SlackSender"/>）與轉送（<see cref="RelayWorker"/>）兩條路同時用，狀態都要能並行存取。
+/// </summary>
+public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<RelayOptions> options, ILogger<SendTracker> logger)
+{
+    public const string DefaultSentEmoji = "outbox_tray";
+    internal const string SendingEmoji = "hourglass_flowing_sand";
+    internal const string FailedEmoji = "warning";
+
+    /// <summary>clientMessageId 換回的 ts 最多可以比 Teams 訊息早多久（從 @bot 到按 Send 的間隔）；更早的當成 Teams client 自己的亂數。</summary>
+    internal static readonly TimeSpan MaxSendDelay = TimeSpan.FromHours(24);
+
+    // 兩邊的時鐘可能差一點
+    private static readonly TimeSpan ClockSkew = TimeSpan.FromMinutes(5);
+
+    // 登記的留多久：推回來通常不到一秒；留久一點是為了 SSE 重送時還認得。過期的推回來還是能靠表情認出來
+    private static readonly TimeSpan PendingTtl = TimeSpan.FromHours(1);
+
+    private readonly ConcurrentDictionary<string, PendingSend> _pending = new();
+    private string? _botUserId;
+    private string? _sentEmojiFallback;
+
+    /// <summary>有沒有開發話（設了 <c>Relay:Slack:AppToken</c>）。沒開時推回來的不必去 Slack 查表情。</summary>
+    public bool Enabled => !string.IsNullOrWhiteSpace(options.Value.Slack.AppToken);
+
+    /// <summary>bot 自己的 user id；第一次用到才查，查不到下次再查。</summary>
+    public async Task<string?> BotUserIdAsync(CancellationToken ct) => _botUserId ??= await slack.GetBotUserIdAsync(ct);
+
+    /// <summary>Slack ts → clientMessageId：去掉小數點（<c>1729834567.123456</c> → <c>1729834567123456</c>）。</summary>
+    public static string ClientMessageId(string ts) => ts.Replace(".", "", StringComparison.Ordinal);
+
+    /// <summary>
+    /// clientMessageId → 可能是哪一則 Slack 訊息的 ts；不像就回 null。Teams 自己的 client 產生的 id 也有 16 碼，長度分不開，
+    /// 所以換回的時間要落在 Teams 訊息之前 <see cref="MaxSendDelay"/> 內才算，亂數幾乎不會剛好落進來。只做字串處理，不經過浮點數。
+    /// </summary>
+    public static string? TsFromClientMessageId(string? clientMessageId, DateTimeOffset messageTime)
+    {
+        if (clientMessageId is not { Length: 16 } || !clientMessageId.All(char.IsAsciiDigit))
+            return null;
+        var sentAt = DateTimeOffset.FromUnixTimeSeconds(long.Parse(clientMessageId[..10], CultureInfo.InvariantCulture));
+        if (sentAt > messageTime + ClockSkew || sentAt < messageTime - MaxSendDelay)
+            return null;
+        return $"{clientMessageId[..10]}.{clientMessageId[10..]}";
+    }
+
+    /// <summary>送出前登記；推回來時 <see cref="MatchAsync"/> 查得到。</summary>
+    public PendingSend Register(string clientMessageId, string channel, string ts, bool inThread)
+    {
+        var cutoff = DateTimeOffset.UtcNow - PendingTtl;
+        foreach (var (id, old) in _pending)
+            if (old.RegisteredAt < cutoff)
+                _pending.TryRemove(id, out _);
+        return _pending[clientMessageId] = new PendingSend(channel, ts, inThread, DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>確定沒送出：拿掉登記。</summary>
+    public void Forget(string clientMessageId) => _pending.TryRemove(clientMessageId, out _);
+
+    /// <summary>
+    /// Teams 推回來的這則是不是從 Slack 發的。先查記憶體；查不到（relay 重啟過）就把 clientMessageId 換回 ts，
+    /// 看 <paramref name="channel"/> 裡那則上有沒有 bot 的狀態表情（重啟時可能還停在 ⏳；⚠️ 的其實送到了）。不是就回 null。
+    /// </summary>
+    public async Task<PendingSend?> MatchAsync(MessageDto message, string channel, CancellationToken ct)
+    {
+        if (message.ClientMessageId is not { } id)
+            return null;
+        if (_pending.TryGetValue(id, out var pending))
+            return pending;
+        if (!Enabled || TsFromClientMessageId(id, message.Time) is not { } ts)
+            return null;
+        if (await slack.GetReactionsAsync(channel, ts, ct) is not { } sent
+            || await BotUserIdAsync(ct) is not { } bot
+            || !HasStatus(sent, bot, includeFailed: true))
+            return null;
+        var inThread = sent.ThreadTs is { } threadTs && threadTs != ts;
+        return _pending[id] = new PendingSend(channel, ts, inThread, DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>那則上有沒有 bot 按的狀態表情：⏳、已送出（設定的與預設的都算，改過設定後之前發的照樣認得），要的話加上 ⚠️。</summary>
+    internal bool HasStatus(HistoryMessage message, string botUserId, bool includeFailed) =>
+        message.Reactions?.Any(r => r.Users?.Contains(botUserId) == true
+                                    && (r.Name is SendingEmoji or DefaultSentEmoji || r.Name == options.Value.Slack.SentEmoji
+                                        || (includeFailed && r.Name == FailedEmoji))) == true;
+
+    public async Task MarkSendingAsync(string channel, string ts, CancellationToken ct)
+    {
+        await slack.ReactAsync(channel, ts, FailedEmoji, add: false, ct); // Retry 時上一次的 ⚠️
+        await slack.ReactAsync(channel, ts, SendingEmoji, add: true, ct);
+    }
+
+    public async Task MarkFailedAsync(string channel, string ts, CancellationToken ct)
+    {
+        await slack.ReactAsync(channel, ts, SendingEmoji, add: false, ct);
+        await slack.ReactAsync(channel, ts, FailedEmoji, add: true, ct);
+    }
+
+    /// <summary>
+    /// Teams 收下了（API 回了 id，或推回來了）：狀態換成已送出；頂層發的那則記進 <see cref="MessageLinks"/>
+    /// （Teams 那邊引用它、按表情時接得回來）。發話與推回兩邊都會叫，重複叫沒關係。
+    /// </summary>
+    public async Task ConfirmAsync(PendingSend send, string? teamsId, string? chat, CancellationToken ct)
+    {
+        if (!send.InThread && teamsId is not null && links.Lookup(teamsId) is null)
+            links.Remember(teamsId, send.Channel, send.Ts, "", long.TryParse(teamsId, out var version) ? version : null, chat: chat, byBot: false);
+        if (send.Confirmed)
+            return;
+        await slack.ReactAsync(send.Channel, send.Ts, SendingEmoji, add: false, ct);
+        await slack.ReactAsync(send.Channel, send.Ts, FailedEmoji, add: false, ct);
+        await AddSentEmojiAsync(send.Channel, send.Ts, ct);
+        send.Confirmed = true;
+    }
+
+    // 自訂表情打錯或還沒上傳時 Slack 回 invalid_name：退回預設的，之後都用預設的
+    private async Task AddSentEmojiAsync(string channel, string ts, CancellationToken ct)
+    {
+        var name = _sentEmojiFallback ?? options.Value.Slack.SentEmoji;
+        if (await slack.ReactAsync(channel, ts, name, add: true, ct) || name == DefaultSentEmoji)
+            return;
+        logger.LogWarning("Slack doesn't know the emoji :{Emoji}: (Relay:Slack:SentEmoji); using :{Default}: instead", name, DefaultSentEmoji);
+        _sentEmojiFallback = DefaultSentEmoji;
+        await slack.ReactAsync(channel, ts, DefaultSentEmoji, add: true, ct);
+    }
+}
+
+/// <summary>一則從 Slack 發出的訊息：在哪個頻道、哪一則、是不是 thread 裡的回覆。<c>Confirmed</c> = 已經換成已送出表情。</summary>
+public sealed record PendingSend(string Channel, string Ts, bool InThread, DateTimeOffset RegisteredAt)
+{
+    public bool Confirmed { get; set; }
+}

@@ -13,6 +13,7 @@ public sealed class RelayWorker(
     SlackClient slack,
     GatewayMediaClient media,
     MessageLinks links,
+    SendTracker sends,
     IOptions<RelayOptions> options,
     ILogger<RelayWorker> logger) : BackgroundService
 {
@@ -175,6 +176,15 @@ public sealed class RelayWorker(
         {
             if (!IsNewer(message, prior.Version))
                 return; // 重送（斷線補收等），Slack 上已經是這一版：不要再留證一次
+            if (!prior.ByBot)
+            {
+                // 人在 Slack 頂層發、送到 Teams 的那則（ADR 0012）在 Teams 上被改了：bot 改不了人發的訊息，新版貼在它的 thread
+                var changed = message.Deleted ? new SlackContent("", []) : await FormatAsync(message, prior.Channel, ct);
+                await slack.PostReplyAsync(prior.Channel, prior.Ts,
+                    message.Deleted ? "_Deleted in Teams_" : $"_Edited in Teams_\n{changed.Text}", changed.Images, ct);
+                links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, version, prior.Images, prior.Chat ?? message.ConversationId, byBot: false);
+                return;
+            }
             await slack.PostReplyAsync(prior.Channel, prior.Ts, $"{VersionLabel(message.Id, prior.Version)}\n{prior.Text}", prior.Images, ct);
             var updated = message.Deleted
                 ? new SlackContent("_(message deleted)_", []) // 誰說的、原本寫什麼，在上面那則 thread 留證裡
@@ -187,6 +197,14 @@ public sealed class RelayWorker(
 
         if (string.IsNullOrEmpty(message.Content) && message.Attachments is not { Count: > 0 })
             return; // 新訊息但無文字也無附件（純系統事件），不轉
+
+        // 從 Slack 發過去的（ADR 0012）：頂層發的那則就代表 Teams 上的這句，不再貼；thread 裡發的照一般訊息貼到頂層
+        if (await sends.MatchAsync(message, channel, ct) is { } sent)
+        {
+            await sends.ConfirmAsync(sent, message.Id, message.ConversationId, ct);
+            if (!sent.InThread)
+                return;
+        }
 
         var content = await FormatAsync(message, channel, ct);
         var ts = await slack.PostMessageAsync(channel, content.Text, message.Id, version, content.Images, ct, message.ConversationId);
