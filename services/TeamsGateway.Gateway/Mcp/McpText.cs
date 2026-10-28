@@ -37,16 +37,24 @@ internal static partial class McpText
         return text.ToString();
     }
 
-    public static string Chats(IReadOnlyList<ConversationDto> chats, TimeZoneInfo zone)
+    /// <summary>最近有動靜的在前，只留前 <paramref name="limit"/> 個：帳號裡大半是好幾年沒動的對話，全列會吃掉幾萬 token。</summary>
+    public static string Chats(IReadOnlyList<ConversationDto> chats, TimeZoneInfo zone, int limit, int offset = 0)
     {
+        offset = Math.Max(0, offset);
+        var sorted = chats.OrderByDescending(c => c.LastMessageTime ?? DateTimeOffset.MinValue).ToList();
+        var shown = sorted.Skip(offset).Take(limit).ToList();
+        var count = shown.Count == chats.Count ? $"{chats.Count}" : $"{shown.Count} of {chats.Count}";
         var text = new StringBuilder();
-        text.Append(CultureInfo.InvariantCulture, $"# {chats.Count} chats | times in {ZoneLabel(zone)}\n");
-        foreach (var c in chats.OrderByDescending(c => c.LastMessageTime ?? DateTimeOffset.MinValue))
+        text.Append(CultureInfo.InvariantCulture, $"# {count} chats | times in {ZoneLabel(zone)}\n");
+        foreach (var c in shown)
         {
             var topic = string.IsNullOrWhiteSpace(c.Topic) ? "(no topic)" : c.Topic.Trim();
             var last = c.LastMessageTime is { } t ? Format(t, zone, TimeFormat) : "-";
             text.Append(CultureInfo.InvariantCulture, $"{c.Id} | {topic} | last {last}\n");
         }
+        var nextOffset = offset + shown.Count;
+        if (nextOffset < sorted.Count)
+            text.Append(CultureInfo.InvariantCulture, $"# more: offset={nextOffset} ({sorted.Count - nextOffset} chats not shown)\n");
         return text.ToString();
     }
 
@@ -133,7 +141,7 @@ internal static partial class McpText
         }
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
         {
-            throw new McpException($"Unknown timezone '{spec}': use a UTC offset such as +08:00, or an IANA name such as Asia/Taipei if the server has time zone data");
+            throw new McpException($"Unknown timezone '{spec}': use a UTC offset such as +08:00");
         }
     }
 

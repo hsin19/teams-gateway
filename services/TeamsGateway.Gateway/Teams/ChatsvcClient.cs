@@ -18,7 +18,12 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
     {
         using var resp = await SendAsync(() => new HttpRequestMessage(HttpMethod.Get, $"conversations?view={View}&pageSize=500"), ct);
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
-        if (!doc.RootElement.TryGetProperty("conversations", out var convs))
+        return ParseConversations(doc.RootElement);
+    }
+
+    public static IReadOnlyList<ConversationDto> ParseConversations(JsonElement root)
+    {
+        if (!root.TryGetProperty("conversations", out var convs))
             return [];
 
         var result = new List<ConversationDto>();
@@ -28,9 +33,11 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
             if (id is null)
                 continue;
             var tp = c.TryGetProperty("threadProperties", out var p) ? p : default;
+            // topic 是 HTML 跳脫過的（& → &amp;），不還原的話群名帶 & 的對話用名字找不到
+            var topic = GetString(tp, "topic");
             result.Add(new ConversationDto(
                 id,
-                GetString(tp, "topic"),
+                topic is null ? null : WebUtility.HtmlDecode(topic),
                 GetString(tp, "productThreadType"),
                 ParseTime(GetString(Child(c, "lastMessage"), "composetime"))));
         }
