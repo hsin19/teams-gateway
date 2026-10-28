@@ -227,7 +227,7 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         // 引用只能放在 HTML 裡，純文字先轉成段落
         var html = message.Html ? message.Content : TextToHtml(message.Content);
         var id = long.Parse(quote.Id, NumberStyles.None, CultureInfo.InvariantCulture);
-        var refs = JsonSerializer.Serialize([new QuotedMessageRef(id, quote.SenderMri, id)], TeamsJsonContext.Default.QuotedMessageRefArray);
+        var refs = JsonSerializer.Serialize([new QuotedMessageRef(quote.Id, quote.SenderMri, id)], TeamsJsonContext.Default.QuotedMessageRefArray);
         return new(QuoteBlock(quote) + html, "RichText/Html", "text", clientMessageId, displayName, new ChatsvcSendProperties(refs));
     }
 

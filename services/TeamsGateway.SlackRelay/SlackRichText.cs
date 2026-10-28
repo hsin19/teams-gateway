@@ -61,12 +61,20 @@ internal static partial class SlackRichText
     /// <summary>HTML 裡有沒有看得到的內容（拿掉開頭的 @bot 後可能什麼都不剩）。</summary>
     public static bool IsBlank(string html) => string.IsNullOrWhiteSpace(WebUtility.HtmlDecode(TagRegex().Replace(html, "")));
 
-    /// <summary>確認訊息裡的預覽：原文（拿掉開頭的 @bot）放在 Slack 的引用裡，Slack 自己畫格式與名字。</summary>
-    public static string Preview(string? text, string botUserId)
+    /// <summary>
+    /// 確認訊息裡的預覽：原文（拿掉開頭的 @bot）放在 Slack 的引用裡，Slack 自己畫格式與名字。
+    /// 太長就截斷：section 上限 3000 字，超過的話整則確認貼不出來。
+    /// </summary>
+    public static string Preview(string? text, string botUserId, int maxChars = PreviewMaxChars)
     {
         var body = StripMention(text ?? "", botUserId).Trim();
-        return body.Length == 0 ? "> _(empty)_" : string.Join('\n', body.Split('\n').Select(line => $"> {line}"));
+        if (body.Length == 0)
+            return "> _(empty)_";
+        var quoted = string.Join('\n', body.Split('\n').Select(line => $"> {line}"));
+        return quoted.Length <= maxChars ? quoted : $"{quoted[..maxChars].TrimEnd()}…";
     }
+
+    internal const int PreviewMaxChars = 2500;
 
     internal static string StripMention(string text, string botUserId)
     {

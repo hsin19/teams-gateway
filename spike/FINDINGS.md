@@ -71,7 +71,7 @@
 - `RichText/Html`：`b`、`i`、`s`、`code`、`a`、`br`、`ul` / `ol`、`blockquote`、`pre`、`table` 都畫得出來；存下來的 HTML 只多了 `\r\n` 與 `<tbody>`。
 - 引用回覆（`messagetype: RichText/Html`）：內容前面加
   `<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="<被引用 id>"><strong itemprop="mri" itemid="<作者 MRI>">名字</strong><span itemprop="time" itemid="<被引用 id>"></span><p itemprop="preview">預覽</p></blockquote>`，
-  `properties.qtdMsgs` 放 JSON 字串 `[{"messageId":<id>,"sender":"<作者 MRI>","time":<id>}]`。
+  `properties.qtdMsgs` 放 JSON 字串 `[{"messageId":"<id>","sender":"<作者 MRI>","time":<id>}]`（`messageId` 用讀回來的字串，伺服器存回來時變成數字）。
   - 兩個都有：`qtdMsgs` 回來多了 `validationResult: "Valid"`、`properties` 多 `hasValidMsgReferences`；伺服器照原訊息重寫 blockquote，
     作者名變成 `Display Name`、預覽換成原文（Teams 引用裡的作者名不可靠就是這樣來的）。畫成正常的回覆。
   - 只有 blockquote：照原樣存，畫得出引用，但旁邊多一個 ⓘ（看起來是驗證不到原訊息）。

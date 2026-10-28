@@ -79,7 +79,7 @@ public class RelaySentFromSlackTests
     public async Task Teams_edit_of_a_top_level_send_goes_to_its_thread(bool deleted, string label)
     {
         var (worker, slack, links, _) = Worker();
-        links.Remember(TeamsId, "C1", Ts, "", long.Parse(TeamsId), chat: Chat, byBot: false);
+        links.Remember(TeamsId, "C1", Ts, "", null, chat: Chat, byBot: false);
         var edited = Echo() with { Content = "<p>fixed</p>", Version = 1793220599999, Edited = !deleted, Deleted = deleted };
 
         await worker.RelayWithRetryAsync(edited, Routes, null, Ct);

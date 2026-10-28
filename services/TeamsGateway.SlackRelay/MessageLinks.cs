@@ -36,13 +36,19 @@ public sealed class MessageLinks
                 _byTeamsId.TryRemove(teamsId, out _);
     }
 
-    /// <summary>最後轉出去（Slack 上最新）的那則 Teams 訊息 id；重啟後沒有事件序號時，從它之後續接。</summary>
+    /// <summary>
+    /// 最後轉出去（Slack 上最新）的那則 Teams 訊息 id；重啟後沒有事件序號時，從它之後續接。
+    /// 人從 Slack 發的那幾則不算（ADR 0012）：它們可能在續接點定下來前才記進來（剛啟動就按了 Send），
+    /// 算進去的話會跳過停機期間 Teams 上的訊息。
+    /// </summary>
     public string? NewestTeamsId()
     {
         string? newest = null;
         var newestAt = DateTimeOffset.MinValue;
         foreach (var (teamsId, slackRef) in _byTeamsId)
         {
+            if (!slackRef.ByBot)
+                continue;
             var at = PostedAt(slackRef.Ts);
             if (at != DateTimeOffset.MaxValue && at > newestAt)
                 (newest, newestAt) = (teamsId, at);

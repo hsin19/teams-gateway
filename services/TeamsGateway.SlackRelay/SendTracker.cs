@@ -85,22 +85,32 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
         return _pending[id] = new PendingSend(channel, ts, inThread, DateTimeOffset.UtcNow);
     }
 
-    /// <summary>那則上有沒有 bot 按的狀態表情：⏳、已送出（設定的與預設的都算，改過設定後之前發的照樣認得），要的話加上 ⚠️。</summary>
+    /// <summary>那則上有沒有 bot 按的狀態表情：⏳、已送出，要的話加上 ⚠️。</summary>
     internal bool HasStatus(HistoryMessage message, string botUserId, bool includeFailed) =>
-        message.Reactions?.Any(r => r.Users?.Contains(botUserId) == true
-                                    && (r.Name is SendingEmoji or DefaultSentEmoji || r.Name == options.Value.Slack.SentEmoji
-                                        || (includeFailed && r.Name == FailedEmoji))) == true;
+        IsSent(message, botUserId) || IsSending(message, botUserId) || (includeFailed && ByBot(message, botUserId, FailedEmoji));
+
+    /// <summary>bot 按了已送出表情（設定的與預設的都算，改過設定後之前發的照樣認得）。</summary>
+    internal bool IsSent(HistoryMessage message, string botUserId) =>
+        ByBot(message, botUserId, DefaultSentEmoji) || ByBot(message, botUserId, options.Value.Slack.SentEmoji);
+
+    /// <summary>還停在 ⏳：正在送，或上次送到一半 relay 重啟 / Slack 出錯，不知道送了沒。</summary>
+    internal static bool IsSending(HistoryMessage message, string botUserId) => ByBot(message, botUserId, SendingEmoji);
+
+    private static bool ByBot(HistoryMessage message, string botUserId, string emoji) =>
+        message.Reactions?.Any(r => r.Name == emoji && r.Users?.Contains(botUserId) == true) == true;
+
+    // 換表情都是先按新的再拿掉舊的：中間一步失敗（例如被限流）時那則至少還帶著一個狀態，防重送與重啟後的辨認都靠它
 
     public async Task MarkSendingAsync(string channel, string ts, CancellationToken ct)
     {
-        await slack.ReactAsync(channel, ts, FailedEmoji, add: false, ct); // Retry 時上一次的 ⚠️
         await slack.ReactAsync(channel, ts, SendingEmoji, add: true, ct);
+        await slack.ReactAsync(channel, ts, FailedEmoji, add: false, ct); // Retry 時上一次的 ⚠️
     }
 
     public async Task MarkFailedAsync(string channel, string ts, CancellationToken ct)
     {
-        await slack.ReactAsync(channel, ts, SendingEmoji, add: false, ct);
         await slack.ReactAsync(channel, ts, FailedEmoji, add: true, ct);
+        await slack.ReactAsync(channel, ts, SendingEmoji, add: false, ct);
     }
 
     /// <summary>
@@ -109,13 +119,14 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
     /// </summary>
     public async Task ConfirmAsync(PendingSend send, string? teamsId, string? chat, CancellationToken ct)
     {
+        // 版本記 null：之後有沒有被改看 Edited / Deleted 標記，不靠「版本 = id」這個假設
         if (!send.InThread && teamsId is not null && links.Lookup(teamsId) is null)
-            links.Remember(teamsId, send.Channel, send.Ts, "", long.TryParse(teamsId, out var version) ? version : null, chat: chat, byBot: false);
+            links.Remember(teamsId, send.Channel, send.Ts, "", null, chat: chat, byBot: false);
         if (send.Confirmed)
             return;
+        await AddSentEmojiAsync(send.Channel, send.Ts, ct);
         await slack.ReactAsync(send.Channel, send.Ts, SendingEmoji, add: false, ct);
         await slack.ReactAsync(send.Channel, send.Ts, FailedEmoji, add: false, ct);
-        await AddSentEmojiAsync(send.Channel, send.Ts, ct);
         send.Confirmed = true;
     }
 

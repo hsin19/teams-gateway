@@ -78,6 +78,16 @@ public class SlackRichTextTests
     public void Preview_quotes_the_text_without_the_mention() =>
         Assert.Equal("> hi *there*\n> second", SlackRichText.Preview("<@UBOT> hi *there*\nsecond", Bot));
 
+    // 太長截斷：確認訊息的 section 上限 3000 字，超過整則貼不出來
+    [Fact]
+    public void Long_preview_is_truncated()
+    {
+        var preview = SlackRichText.Preview("<@UBOT> " + new string('x', 5000), Bot);
+
+        Assert.Equal(SlackRichText.PreviewMaxChars + 1, preview.Length);
+        Assert.EndsWith("…", preview);
+    }
+
     private static HistoryMessage Message(string blocks) =>
         new("1.2", "<@UBOT> …", null, User: "UME", Blocks: JsonDocument.Parse(blocks).RootElement.Clone());
 }

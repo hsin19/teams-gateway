@@ -134,6 +134,34 @@ public class SlackSenderTests
         Assert.Contains("already sent", Responses(s)[^1].GetProperty("text").GetString());
     }
 
+    // 停在 ⏳ 卻沒人在送（上次送到一半 relay 重啟）：先到對話裡找，已經在就補成已送出、不再送
+    [Fact]
+    public async Task Leftover_hourglass_that_reached_teams_is_not_sent_again()
+    {
+        var s = Create(message: Message(reactions: """[{"name":"hourglass_flowing_sand","users":["UBOT"],"count":1}]"""));
+        s.Gateway.Responses[$"GET /v1/chats/{Chat}/messages"] = (HttpStatusCode.OK, $$"""
+            {"messages":[{"id":"{{TeamsId}}","conversationId":"{{Chat}}","clientMessageId":"{{ClientMessageId}}","sequenceId":1,"time":"2026-10-29T00:00:00Z"}]}
+            """);
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
+
+        Assert.DoesNotContain(s.Gateway.Requests, r => r.Method == "POST");
+        Assert.Equal(["outbox_tray"], Reactions(s, "reactions.add"));
+        Assert.Contains("already sent", Responses(s)[^1].GetProperty("text").GetString());
+    }
+
+    // 停在 ⏳、對話裡也沒有：上次根本沒送出去，照常送
+    [Fact]
+    public async Task Leftover_hourglass_that_never_reached_teams_is_sent()
+    {
+        var s = Create(message: Message(reactions: """[{"name":"hourglass_flowing_sand","users":["UBOT"],"count":1}]"""));
+        s.Gateway.Responses[$"GET /v1/chats/{Chat}/messages"] = (HttpStatusCode.OK, """{"messages":[]}""");
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
+
+        Assert.Single(s.Gateway.Requests, r => r.Method == "POST");
+    }
+
     // 別人按（不在白名單）：不送
     [Fact]
     public async Task Click_by_someone_not_on_the_list_sends_nothing()

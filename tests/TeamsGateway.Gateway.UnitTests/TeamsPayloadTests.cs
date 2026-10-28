@@ -126,7 +126,7 @@ public class TeamsPayloadTests
             + """<strong itemprop="mri" itemid="8:live:alice">Alice &lt;A&gt;</strong><span itemprop="time" itemid="1793220565129"></span>"""
             + """<p itemprop="preview">earlier &amp; older</p></blockquote><p>sure &lt;ok&gt;<br>see you</p>""",
             reply.Content);
-        Assert.Equal("""[{"messageId":1793220565129,"sender":"8:live:alice","time":1793220565129}]""", reply.Properties!.QtdMsgs);
+        Assert.Equal("""[{"messageId":"1793220565129","sender":"8:live:alice","time":1793220565129}]""", reply.Properties!.QtdMsgs);
     }
 
     [Fact]

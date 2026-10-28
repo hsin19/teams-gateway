@@ -50,7 +50,8 @@ internal sealed record ChatsvcSendRequest(
 /// </summary>
 internal sealed record ChatsvcSendProperties(string QtdMsgs);
 
-internal sealed record QuotedMessageRef(long MessageId, string Sender, long Time);
+/// <summary><c>MessageId</c> 跟讀回來的訊息 id 一樣是字串（spike 驗證過這個形式；伺服器存回來時會變成數字）。</summary>
+internal sealed record QuotedMessageRef(string MessageId, string Sender, long Time);
 
 /// <summary><c>mt/beta/users/fetchShortProfile</c> 的回應（只取用得到的欄位）。</summary>
 internal sealed record ShortProfiles(IReadOnlyList<ShortProfile>? Value);

@@ -125,7 +125,7 @@ public sealed class SlackSender(
                 await Respond(responseUrl, "That message is gone (deleted?), so nothing was sent.", ct);
                 return;
             }
-            if (tracker.HasStatus(message, bot, includeFailed: false))
+            if (tracker.IsSent(message, bot))
             {
                 await Respond(responseUrl, "This message was already sent to Teams.", ct);
                 return;
@@ -149,6 +149,27 @@ public sealed class SlackSender(
             }
 
             var clientMessageId = SendTracker.ClientMessageId(r.Ts);
+            if (SendTracker.IsSending(message, bot))
+            {
+                // 停在 ⏳ 卻沒人在送（這裡已經上了鎖）：上次送到一半 relay 重啟或 Slack 出錯，不知道送了沒，先到對話裡找
+                string? earlier;
+                try
+                {
+                    earlier = await gateway.FindSentAsync(target.Chat!, clientMessageId, ct);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    await Respond(responseUrl, $"An earlier attempt may have reached Teams, and checking the chat failed ({ex.Message}). Try again later.", ct);
+                    return;
+                }
+                if (earlier is not null)
+                {
+                    await tracker.ConfirmAsync(tracker.Register(clientMessageId, r.Channel, r.Ts, inThread: r.ThreadTs is not null), earlier, target.Chat, ct);
+                    await Respond(responseUrl, "This message was already sent to Teams.", ct);
+                    return;
+                }
+            }
+
             // 先登記再送：推回來可能比 API 回應早到
             var pending = tracker.Register(clientMessageId, r.Channel, r.Ts, inThread: r.ThreadTs is not null);
             await tracker.MarkSendingAsync(r.Channel, r.Ts, ct);

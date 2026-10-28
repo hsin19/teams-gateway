@@ -34,6 +34,7 @@ public sealed class SlackSocketMode(SlackClient slack, SlackSender sender, IOpti
         while (!ct.IsCancellationRequested)
         {
             var refresh = false;
+            var greeted = false;
             try
             {
                 if (await slack.OpenSocketAsync(appToken, ct) is { } url)
@@ -44,7 +45,6 @@ public sealed class SlackSocketMode(SlackClient slack, SlackSender sender, IOpti
                     ws.Options.KeepAliveTimeout = TimeSpan.FromSeconds(30);
                     await ws.ConnectAsync(url, ct);
                     refresh = await ReceiveAsync(ws, ct);
-                    backoff = MinBackoff;
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -53,13 +53,17 @@ public sealed class SlackSocketMode(SlackClient slack, SlackSender sender, IOpti
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Slack Socket Mode connection failed; reconnecting in {Delay}", backoff);
+                logger.LogWarning(ex, "Slack Socket Mode connection dropped; reconnecting");
             }
             finally
             {
+                greeted = _connected;
                 _connected = false;
             }
 
+            // 連上過（收過 hello）就從短的等起：用了幾小時後斷一次，不該跟連不上一樣越等越久
+            if (greeted)
+                backoff = MinBackoff;
             if (refresh)
                 continue;
             await Task.Delay(backoff, ct);

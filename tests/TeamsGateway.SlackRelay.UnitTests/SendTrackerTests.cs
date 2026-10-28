@@ -73,7 +73,7 @@ public class SendTrackerTests
         Assert.Empty(slack.Requests);
     }
 
-    // 送到了：拿掉 ⏳ / ⚠️、按上已送出；頂層發的那則記進對應表（不是 bot 的訊息）
+    // 送到了：先按上已送出再拿掉 ⏳ / ⚠️（中間失敗時至少還帶著一個狀態）；頂層發的那則記進對應表（不是 bot 的訊息、版本不記）
     [Fact]
     public async Task Confirm_swaps_reactions_and_links_a_top_level_send()
     {
@@ -84,10 +84,10 @@ public class SendTrackerTests
         await tracker.ConfirmAsync(send, "1793220563903", "19:a@thread.v2", TestContext.Current.CancellationToken); // 推回來時又叫一次
 
         Assert.Equal(
-            [("reactions.remove", "hourglass_flowing_sand"), ("reactions.remove", "warning"), ("reactions.add", "outbox_tray")],
+            [("reactions.add", "outbox_tray"), ("reactions.remove", "hourglass_flowing_sand"), ("reactions.remove", "warning")],
             slack.Requests.Select(r => (r.Method, r.Body.GetProperty("name").GetString())));
         var link = links.Lookup("1793220563903");
-        Assert.Equal(("C1", Ts, false, "19:a@thread.v2", 1793220563903L), (link?.Channel, link?.Ts, link?.ByBot, link?.Chat, link?.Version));
+        Assert.Equal(("C1", Ts, false, "19:a@thread.v2", (long?)null), (link?.Channel, link?.Ts, link?.ByBot, link?.Chat, link?.Version));
     }
 
     // 自訂的已送出表情 Slack 不認得（打錯、還沒上傳）：退回 📤，之後都用 📤
