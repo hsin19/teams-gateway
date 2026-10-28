@@ -204,6 +204,21 @@ public class RelaySentFromSlackTests
         Assert.DoesNotContain(slack.Requests, r => r.Method == "chat.postMessage");
     }
 
+    // 推回來補換表情又失敗（不是限流）：記 warning 就好，不走整筆重試卡住後面的事件
+    [Fact]
+    public async Task Failed_status_retry_on_echo_does_not_stall_the_stream()
+    {
+        var (worker, slack, links, sends) = Worker();
+        var send = sends.Register(ClientMessageId, "C1", Ts, inThread: false);
+        links.Remember(TeamsId, "C1", Ts, "", null, chat: Chat, byBot: false);
+        slack.RespondToBody = (method, _) => method == "reactions.add" ? """{"ok":false,"error":"message_not_found"}""" : null;
+
+        await worker.RelayWithRetryAsync(Echo(), Routes, null, Ct).WaitAsync(TimeSpan.FromSeconds(1), Ct);
+
+        Assert.Single(slack.Requests, r => r.Method == "reactions.add");
+        Assert.False(send.Confirmed);
+    }
+
     // thread 裡發的推回來時被限流：整筆等一下重來（還沒貼），不能吞掉
     [Fact]
     public async Task Rate_limited_status_swap_retries_the_whole_thread_echo()

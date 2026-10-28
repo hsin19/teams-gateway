@@ -189,7 +189,7 @@ public sealed class RelayWorker(
                 // 重送（斷線補收等），Slack 上已經是這一版：不要再留證一次。
                 // 頂層發的那則在 API 回應時就記了對應，推回來會走到這裡；那時換表情要是失敗了，趁這次再試（還記得的話）
                 if (!prior.ByBot && sends.Pending(message.ClientMessageId) is { Confirmed: false } unconfirmed)
-                    await sends.ConfirmAsync(unconfirmed, message.Id, message.ConversationId, ct);
+                    await TryConfirmAsync(unconfirmed, message, ct);
                 return;
             }
             if (!prior.ByBot)
@@ -218,16 +218,8 @@ public sealed class RelayWorker(
                     await RelayHumanSendEditAsync(message, recovered, version, ct);
                 return;
             }
-            try
-            {
-                await sends.ConfirmAsync(sent, message.Id, message.ConversationId, ct);
-            }
-            catch (Exception ex) when (ex is not SlackTransientException { RateLimited: true } && !ct.IsCancellationRequested)
-            {
-                // 送到的事已經記在記憶體（發話那邊不會再把它標成失敗），表情沒換成的話之後按 Send 也會先查到它；
-                // Teams 上已經有這句，頂層一定要貼，不然只看頂層就缺一句。被限流就整筆等一下重來（還沒貼）
-                logger.LogWarning(ex, "Marking Slack message {Channel}/{Ts} as sent failed; posting the Teams echo anyway", sent.Channel, sent.Ts);
-            }
+            // Teams 上已經有這句，頂層一定要貼，不然只看頂層就缺一句
+            await TryConfirmAsync(sent, message, ct);
         }
 
         if (string.IsNullOrEmpty(message.Content) && message.Attachments is not { Count: > 0 })
@@ -237,6 +229,22 @@ public sealed class RelayWorker(
         var ts = await slack.PostMessageAsync(channel, content.Text, message.Id, version, content.Images, ct, message.ConversationId);
         if (ts is not null)
             links.Remember(message.Id, channel, ts, content.Text, version, content.Images, message.ConversationId); // 記住對應，給之後的回覆 / 編輯用
+    }
+
+    /// <summary>
+    /// 推回來時換成已送出表情，失敗只記 warning、不卡住後面的事件：送到的事已經記在記憶體（發話那邊不會再把它標成失敗），
+    /// 表情沒換成的話之後按 Send 也會先查到它已經送過。被限流就讓整筆等一下重來。
+    /// </summary>
+    private async Task TryConfirmAsync(PendingSend send, MessageDto message, CancellationToken ct)
+    {
+        try
+        {
+            await sends.ConfirmAsync(send, message.Id, message.ConversationId, ct);
+        }
+        catch (Exception ex) when (ex is not SlackTransientException { RateLimited: true } && !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Marking Slack message {Channel}/{Ts} as sent failed", send.Channel, send.Ts);
+        }
     }
 
     /// <summary>

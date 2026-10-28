@@ -60,6 +60,32 @@ public class SlackSenderTests
         Assert.Equal("cancel", buttons[1].GetProperty("action_id").GetString());
     }
 
+    // 讀那則來做預覽失敗：預覽改用事件裡的文字，確認照樣出來（按 Send 時本來就會再讀一次）
+    [Fact]
+    public async Task Preview_falls_back_to_the_event_text_when_reading_fails()
+    {
+        var s = Create();
+        s.Slack.Respond = uri => uri.AbsolutePath.EndsWith("conversations.history", StringComparison.Ordinal) ? """{"ok":false,"error":"internal_error"}""" : null;
+
+        await s.Sender.OnMentionAsync(new SlackEvent("app_mention", "UME", "<@UBOT> hello", Ts, "C1"), Ct);
+
+        var blocks = Assert.Single(s.Slack.Requests, r => r.Method == "chat.postEphemeral").Body.GetProperty("blocks");
+        Assert.Contains("> hello", blocks[0].GetProperty("text").GetProperty("text").GetString());
+    }
+
+    // 頻道沒連到 Teams 對話：說真正的原因，不要被讀訊息的錯誤蓋掉（那種錯誤重試也沒用）
+    [Fact]
+    public async Task Unlinked_channel_is_reported_even_when_reading_fails()
+    {
+        var s = Create();
+        s.Slack.Respond = uri => uri.AbsolutePath.EndsWith("conversations.history", StringComparison.Ordinal) ? """{"ok":false,"error":"missing_scope"}""" : null;
+
+        await s.Sender.OnMentionAsync(new SlackEvent("app_mention", "UME", "<@UBOT> hello", Ts, "C9"), Ct);
+
+        var ephemeral = Assert.Single(s.Slack.Requests, r => r.Method == "chat.postEphemeral").Body;
+        Assert.Contains("isn't linked", ephemeral.GetProperty("text").GetString());
+    }
+
     // DefaultChannel 收所有對話：頂層不知道送哪個，請改在 thread 裡發
     [Fact]
     public async Task Top_level_in_the_default_channel_cannot_send()

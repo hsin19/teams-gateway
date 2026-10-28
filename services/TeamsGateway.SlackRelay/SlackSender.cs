@@ -70,22 +70,32 @@ public sealed class SlackSender(
             return;
         }
         SendTarget target;
-        HistoryMessage? message;
         try
         {
             target = await ResolveTargetAsync(channel, threadTs, ct);
-            message = await slack.GetMessageAsync(channel, ts, threadTs, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            logger.LogWarning(ex, "Preparing the confirmation for {Channel}/{Ts} failed", channel, ts);
-            await slack.PostEphemeralAsync(channel, user, $"Couldn't read this from Slack ({ex.Message}). @mention again to retry.", null, threadTs, ct);
+            // 讀不到 thread 上層那則就不知道送去哪，不能退回頻道的規則亂猜
+            logger.LogWarning(ex, "Resolving the Teams chat for {Channel}/{Ts} failed", channel, ts);
+            await slack.PostEphemeralAsync(channel, user, $"Couldn't read the thread from Slack ({ex.Message}). @mention again to retry.", null, threadTs, ct);
             return;
         }
         if (target.Error is { } error)
         {
             await slack.PostEphemeralAsync(channel, user, error, null, threadTs, ct);
             return;
+        }
+
+        // 只是預覽：讀不到就用事件裡的文字，按 Send 時本來就會再讀一次
+        HistoryMessage? message = null;
+        try
+        {
+            message = await slack.GetMessageAsync(channel, ts, threadTs, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Reading {Channel}/{Ts} for the preview failed; using the event text", channel, ts);
         }
 
         var lines = new List<string>
