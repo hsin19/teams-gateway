@@ -146,7 +146,27 @@ public class McpTextTests
             + "19:family@thread.v2 | Family | last 2026-01-02 07:30:00\n"
             + "19:classmates@thread.v2 | Class Reunion | last 2026-01-01 07:30:00\n"
             + "8:live:someone | (no topic) | last -\n",
-            McpText.Chats(chats, Taipei));
+            McpText.Chats(chats, Taipei, limit: 30));
+    }
+
+    // 帳號裡多的是好幾年沒動的對話：只留最近有動靜的 limit 個，標頭寫總數、最後一行提示還有更舊的
+    [Fact]
+    public void Chats_keep_only_the_most_recent_up_to_limit()
+    {
+        ConversationDto[] chats =
+        [
+            new("19:old@thread.skype", null, "Chat", At.AddYears(-8)),
+            new("19:family@thread.v2", "Family", "Chat", At),
+            new("19:empty@thread.v2", null, null, null),
+            new("19:classmates@thread.v2", "Class Reunion", "Chat", At.AddDays(-1)),
+        ];
+
+        Assert.Equal(
+            "# 2 of 4 chats | times in UTC+08:00\n"
+            + "19:family@thread.v2 | Family | last 2026-01-02 07:30:00\n"
+            + "19:classmates@thread.v2 | Class Reunion | last 2026-01-01 07:30:00\n"
+            + "# more: 2 older chats not shown; raise limit or filter with query\n",
+            McpText.Chats(chats, Taipei, limit: 2));
     }
 
     // 時區：offset 幾種寫法都收；查不到的回 McpException（訊息才會傳到 agent）

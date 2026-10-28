@@ -18,7 +18,8 @@ namespace TeamsGateway.Gateway.Mcp;
 public sealed class TeamsTools // 不能是 static：WithTools<T> 要拿它當型別參數
 {
     private const int DefaultLimit = 50;
-    // 一則一行大約幾十 token；壓在 client 對單次 tool 輸出的限制（Claude Code 預設 25k token）以下
+    private const int DefaultChatLimit = 30;
+    // 一則（一個對話）一行大約幾十 token；壓在 client 對單次 tool 輸出的限制（Claude Code 預設 25k token）以下
     private const int MaxLimit = 200;
     private const int MaxImages = 10;
     // Claude 單張圖片的上限
@@ -26,14 +27,15 @@ public sealed class TeamsTools // 不能是 static：WithTools<T> 要拿它當�
 
     private const string ChatHelp = "Thread id (19:…) or group name";
     private const string TimezoneHelp =
-        "Timezone for the times shown, and for since/until given without an offset: a UTC offset like +08:00, or an IANA name like Asia/Taipei. Default: the server setting";
+        "Timezone for the times shown, and for since/until given without an offset, as a UTC offset like +08:00. Default: the server setting";
 
     [McpServerTool(Name = "list_chats"), Description(
-        "List Teams chats (groups and 1:1), most recent activity first, one per line: `<thread id> | <topic> | last <time>`. Pass the thread id as `chat` to the other tools.")]
+        "List Teams chats (groups and 1:1), most recent activity first, one per line: `<thread id> | <topic> | last <time>`. Only the most recent `limit` are listed; if more were left out, the last line is `# more: ...`. Pass the thread id as `chat` to the other tools.")]
     public static async Task<string> ListChats(
         ChatsvcClient chatsvc,
         IOptions<GatewayOptions> options,
         [Description("Keyword to filter topics by, case-insensitive (optional)")] string? query = null,
+        [Description("Max chats, 1-200 (default 30); the most recently active ones are kept")] int limit = DefaultChatLimit,
         [Description(TimezoneHelp)] string? timezone = null,
         CancellationToken ct = default)
     {
@@ -41,7 +43,7 @@ public sealed class TeamsTools // 不能是 static：WithTools<T> 要拿它當�
         var chats = await CallTeams(() => chatsvc.GetConversationsAsync(ct));
         if (!string.IsNullOrWhiteSpace(query))
             chats = chats.Where(c => c.Topic?.Contains(query.Trim(), StringComparison.OrdinalIgnoreCase) == true).ToList();
-        return McpText.Chats(chats, zone);
+        return McpText.Chats(chats, zone, Math.Clamp(limit, 1, MaxLimit));
     }
 
     [McpServerTool(Name = "read_messages"), Description("""
