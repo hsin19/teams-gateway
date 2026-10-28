@@ -20,14 +20,14 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
     internal static readonly TimeSpan MaxSendDelay = TimeSpan.FromHours(24);
 
     // 兩邊的時鐘可能差一點
-    private static readonly TimeSpan ClockSkew = TimeSpan.FromMinutes(5);
+    internal static readonly TimeSpan ClockSkew = TimeSpan.FromMinutes(5);
 
     // 登記的留多久：推回來通常不到一秒；留久一點是為了 SSE 重送時還認得。過期的推回來還是能靠表情認出來
     private static readonly TimeSpan PendingTtl = TimeSpan.FromHours(1);
 
     private readonly ConcurrentDictionary<string, PendingSend> _pending = new();
     private string? _botUserId;
-    private string? _sentEmojiFallback;
+    private bool _customSentEmojiUnknown;
 
     /// <summary>有沒有開發話（設了 <c>Relay:Slack:AppToken</c>）。沒開時推回來的不必去 Slack 查表情。</summary>
     public bool Enabled => !string.IsNullOrWhiteSpace(options.Value.Slack.AppToken);
@@ -51,6 +51,15 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
             return null;
         return $"{clientMessageId[..10]}.{clientMessageId[10..]}";
     }
+
+    /// <summary>
+    /// 從這則 Slack 訊息發出的話，Teams 上最早可能出現的時間：clientMessageId 換回的 ts 減掉時鐘誤差。
+    /// 到對話裡找那則時翻到比這更早就可以停。看不懂（不是 16 碼數字）回 null。
+    /// </summary>
+    internal static DateTimeOffset? EarliestSend(string clientMessageId) =>
+        clientMessageId is { Length: 16 } && clientMessageId.All(char.IsAsciiDigit)
+            ? DateTimeOffset.FromUnixTimeSeconds(long.Parse(clientMessageId[..10], CultureInfo.InvariantCulture)) - ClockSkew
+            : null;
 
     /// <summary>送出前登記；推回來時 <see cref="MatchAsync"/> 查得到。</summary>
     public PendingSend Register(string clientMessageId, string channel, string ts, bool inThread)
@@ -93,8 +102,7 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
     internal bool IsStatusEmoji(string name) =>
         name is SendingEmoji or FailedEmoji
         || name == DefaultSentEmoji
-        || name == options.Value.Slack.SentEmoji
-        || name == _sentEmojiFallback;
+        || name == options.Value.Slack.SentEmoji;
 
     /// <summary>還停在 ⏳：正在送，或上次送到一半 relay 重啟 / Slack 出錯，不知道送了沒。</summary>
     internal static bool IsSending(HistoryMessage message, string botUserId) => ByBot(message, botUserId, SendingEmoji);
@@ -134,6 +142,10 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
     /// </summary>
     public async Task ConfirmAsync(PendingSend send, string? teamsId, string? chat, CancellationToken ct)
     {
+        // 對應表先記、不管確認過沒：先確認的那邊（API 回應）可能沒帶 Teams id，推回來那次才補得上。
+        // 版本記 null：之後有沒有被改看 Edited / Deleted 標記，不靠「版本 = id」這個假設
+        if (!send.InThread && teamsId is not null && links.Lookup(teamsId) is null)
+            links.Remember(teamsId, send.Channel, send.Ts, "", null, chat: chat, byBot: false);
         await send.CompletionGate.WaitAsync(ct);
         try
         {
@@ -142,9 +154,6 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
             await AddSentEmojiAsync(send.Channel, send.Ts, ct);
             await ReactStatusAsync(send.Channel, send.Ts, SendingEmoji, add: false, ct);
             await ReactStatusAsync(send.Channel, send.Ts, FailedEmoji, add: false, ct);
-            // 版本記 null：之後有沒有被改看 Edited / Deleted 標記，不靠「版本 = id」這個假設
-            if (!send.InThread && teamsId is not null && links.Lookup(teamsId) is null)
-                links.Remember(teamsId, send.Channel, send.Ts, "", null, chat: chat, byBot: false);
             send.SetConfirmed();
         }
         finally
@@ -153,15 +162,25 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
         }
     }
 
-    // 自訂表情打錯或還沒上傳時 Slack 回 invalid_name：退回預設的，之後都用預設的
+    // 📤 是固定標記，一律先按：防重送與重啟後的辨認都靠它，改了 SentEmoji 之前發的照樣認得。
+    // 自訂的只是顯示：打錯或還沒上傳（invalid_name）就之後不再試，其他失敗也只記 warning，不能讓已送出的那則卡住
     private async Task AddSentEmojiAsync(string channel, string ts, CancellationToken ct)
     {
         await ReactStatusAsync(channel, ts, DefaultSentEmoji, add: true, ct);
-        var name = _sentEmojiFallback ?? options.Value.Slack.SentEmoji;
-        if (name == DefaultSentEmoji || await slack.ReactAsync(channel, ts, name, add: true, ct))
+        var name = options.Value.Slack.SentEmoji;
+        if (name == DefaultSentEmoji || _customSentEmojiUnknown)
             return;
-        logger.LogWarning("Slack doesn't know the emoji :{Emoji}: (Relay:Slack:SentEmoji); using :{Default}: instead", name, DefaultSentEmoji);
-        _sentEmojiFallback = DefaultSentEmoji;
+        try
+        {
+            if (await slack.ReactAsync(channel, ts, name, add: true, ct))
+                return;
+            logger.LogWarning("Slack doesn't know the emoji :{Emoji}: (Relay:Slack:SentEmoji); only :{Default}: is added", name, DefaultSentEmoji);
+            _customSentEmojiUnknown = true;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Adding the display emoji :{Emoji}: failed; :{Default}: is there", name, DefaultSentEmoji);
+        }
     }
 
     private async Task ReactStatusAsync(string channel, string ts, string name, bool add, CancellationToken ct)
@@ -176,6 +195,8 @@ public sealed record PendingSend(string Channel, string Ts, bool InThread, DateT
 {
     private int _confirmed;
 
+    // 送到了（推回來或 API 回應）與送失敗（API 失敗、查不到）兩邊可能同時結束：同一則一次只讓一邊換狀態，
+    // 後到的看到已確認就收手，不會把送到的那則標成失敗
     internal SemaphoreSlim CompletionGate { get; } = new(1, 1);
 
     public bool Confirmed => Volatile.Read(ref _confirmed) != 0;

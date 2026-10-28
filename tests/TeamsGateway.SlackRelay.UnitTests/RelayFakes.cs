@@ -27,6 +27,7 @@ internal sealed class FakeGateway : HttpMessageHandler
     /// <summary>「POST /v1/chats/19:a@thread.v2/messages」→（狀態碼, JSON）。路徑是解碼過的。</summary>
     public Dictionary<string, (HttpStatusCode Status, string Body)> Responses { get; } = [];
 
+    /// <summary>依整個請求決定回應（要等待、或依 method / query 分流時用）；回 null 就照 <see cref="Responses"/>。</summary>
     public Func<HttpRequestMessage, CancellationToken, Task<(HttpStatusCode Status, string Body)?>>? RespondAsync { get; set; }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

@@ -105,16 +105,20 @@ public class SendTrackerTests
         Assert.Equal(["outbox_tray", "teams-relay", "outbox_tray"], added);
     }
 
-    // 自訂顯示表情不變時也總是留下固定標記；之後設定改名，重啟後仍能辨認舊訊息
+    // 不管設了哪個自訂表情都會按上固定的 📤；之後設定改名、重啟，舊訊息照樣認得
     [Fact]
     public async Task Stable_success_marker_survives_a_sent_emoji_change()
     {
         var (original, slack, _) = Tracker(sentEmoji: "old-name");
         await original.ConfirmAsync(original.Register(ClientMessageId, "C1", Ts, inThread: true), null, null, TestContext.Current.CancellationToken);
+        var added = slack.Requests.Where(r => r.Method == "reactions.add").Select(r => r.Body.GetProperty("name").GetString()!).ToList();
+        Assert.Equal(["outbox_tray", "old-name"], added);
 
+        // 重啟後讀到的是那則上實際按了的表情
         slack.Responses["auth.test"] = AuthTest;
+        var reactions = string.Join(",", added.Select(name => $$"""{"name":"{{name}}","users":["UBOT"],"count":1}"""));
         slack.Responses["reactions.get"] = $$$"""
-            {"ok":true,"type":"message","message":{"ts":"{{{Ts}}}","user":"UME","reactions":[{"name":"outbox_tray","users":["UBOT"],"count":1}]}}
+            {"ok":true,"type":"message","message":{"ts":"{{{Ts}}}","user":"UME","reactions":[{{{reactions}}}]}}
             """;
         var changed = RelayFakes.Sends(slack, new MessageLinks(),
             new RelayOptions { Slack = { AppToken = "xapp-1", SentEmoji = "new-name" } });
@@ -136,6 +140,48 @@ public class SendTrackerTests
 
         Assert.False(send.Confirmed);
         Assert.DoesNotContain(slack.Requests, r => r.Method == "reactions.remove");
+    }
+
+    // 推回那邊已經確認送到：發話那邊之後的「標失敗」什麼都不做（不碰表情、不拿掉登記）
+    [Fact]
+    public async Task Marking_a_confirmed_send_as_failed_does_nothing()
+    {
+        var (tracker, slack, _) = Tracker();
+        var send = tracker.Register(ClientMessageId, "C1", Ts, inThread: true);
+        await tracker.ConfirmAsync(send, null, null, TestContext.Current.CancellationToken);
+        var calls = slack.Requests.Count;
+
+        Assert.False(await tracker.TryMarkFailedAsync(send, ClientMessageId, TestContext.Current.CancellationToken));
+        Assert.Equal(calls, slack.Requests.Count);
+        Assert.Same(send, await tracker.MatchAsync(Echo(), "C1", TestContext.Current.CancellationToken));
+    }
+
+    // API 回應沒帶 Teams id 就先確認了：推回來那次還是要把頂層那則記進對應表
+    [Fact]
+    public async Task Echo_records_the_link_after_a_confirmation_without_an_id()
+    {
+        var (tracker, _, links) = Tracker();
+        var send = tracker.Register(ClientMessageId, "C1", Ts, inThread: false);
+
+        await tracker.ConfirmAsync(send, null, "19:a@thread.v2", TestContext.Current.CancellationToken);
+        await tracker.ConfirmAsync(send, "1793220563903", "19:a@thread.v2", TestContext.Current.CancellationToken);
+
+        Assert.Equal(("C1", Ts, false), (links.Lookup("1793220563903")?.Channel, links.Lookup("1793220563903")?.Ts, links.Lookup("1793220563903")?.ByBot));
+    }
+
+    // 自訂的顯示表情按失敗（不是不認得，是 Slack 出錯）：📤 已經在，送出照樣算確認
+    [Fact]
+    public async Task Display_emoji_failure_does_not_block_confirmation()
+    {
+        var (tracker, slack, _) = Tracker(sentEmoji: "teams-relay");
+        slack.RespondToBody = (method, body) =>
+            method == "reactions.add" && body.GetProperty("name").GetString() == "teams-relay" ? """{"ok":false,"error":"internal_error"}""" : null;
+        var send = tracker.Register(ClientMessageId, "C1", Ts, inThread: true);
+
+        await tracker.ConfirmAsync(send, null, null, TestContext.Current.CancellationToken);
+
+        Assert.True(send.Confirmed);
+        Assert.Contains(slack.Requests, r => r.Method == "reactions.remove" && r.Body.GetProperty("name").GetString() == "hourglass_flowing_sand");
     }
 
     private static MessageDto Echo() =>

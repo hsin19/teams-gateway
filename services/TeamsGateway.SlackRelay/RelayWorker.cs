@@ -188,7 +188,6 @@ public sealed class RelayWorker(
                 return; // 重送（斷線補收等），Slack 上已經是這一版：不要再留證一次
             if (!prior.ByBot)
             {
-                // 人在 Slack 頂層發、送到 Teams 的那則（ADR 0012）在 Teams 上被改了：bot 改不了人發的訊息，新版貼在它的 thread
                 await RelayHumanSendEditAsync(message, prior, version, ct);
                 return;
             }
@@ -205,12 +204,22 @@ public sealed class RelayWorker(
         // 從 Slack 發過去的（ADR 0012）：頂層發的那則就代表 Teams 上的這句，不再貼；thread 裡發的照一般訊息貼到頂層
         if (await sends.MatchAsync(message, channel, ct) is { } sent)
         {
-            await sends.ConfirmAsync(sent, message.Id, message.ConversationId, ct);
             if (!sent.InThread)
             {
+                await sends.ConfirmAsync(sent, message.Id, message.ConversationId, ct);
+                // 重啟後第一個收到的可能是 Teams 上的編輯 / 刪除，不是原本那則
                 if (links.Lookup(message.Id) is { ByBot: false } recovered && IsNewer(message, recovered.Version))
                     await RelayHumanSendEditAsync(message, recovered, version, ct);
                 return;
+            }
+            try
+            {
+                await sends.ConfirmAsync(sent, message.Id, message.ConversationId, ct);
+            }
+            catch (Exception ex) when (ex is not SlackTransientException { RateLimited: true } && !ct.IsCancellationRequested)
+            {
+                // 狀態表情只是顯示；Teams 上已經有這句，頂層一定要貼，不然只看頂層就缺一句。被限流就整筆等一下重來（還沒貼）
+                logger.LogWarning(ex, "Marking Slack message {Channel}/{Ts} as sent failed; posting the Teams echo anyway", sent.Channel, sent.Ts);
             }
         }
 
@@ -223,13 +232,24 @@ public sealed class RelayWorker(
             links.Remember(message.Id, channel, ts, content.Text, version, content.Images, message.ConversationId); // 記住對應，給之後的回覆 / 編輯用
     }
 
+    /// <summary>
+    /// 人在 Slack 頂層發、送到 Teams 的那則（ADR 0012）在 Teams 上被改了：bot 改不了人發的訊息，新版貼在它的 thread。
+    /// 對應表沒記版本（剛送出、或重啟後從表情補回來的）時先看 thread 裡貼過哪一版：重啟後 gateway 會重送之前的編輯，不要每次重啟都再貼。
+    /// 貼成了才記版本，沒貼成的下次重送還會再試。
+    /// </summary>
     private async Task RelayHumanSendEditAsync(MessageDto message, MessageLinks.SlackRef prior, long? version, CancellationToken ct)
     {
+        var chat = prior.Chat ?? message.ConversationId;
+        if (prior.Version is null && version is { } incoming
+            && await slack.ReadEditNoteVersionAsync(prior.Channel, prior.Ts, message.Id, ct) is { } noted && noted >= incoming)
+        {
+            links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, noted, prior.Images, chat, byBot: false);
+            return;
+        }
         var changed = message.Deleted ? new SlackContent("", []) : await FormatAsync(message, prior.Channel, ct);
-        if (await slack.PostReplyAsync(prior.Channel, prior.Ts,
-                message.Deleted ? "_Deleted in Teams_" : $"_Edited in Teams_\n{changed.Text}", changed.Images, ct))
-            links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, version, prior.Images,
-                prior.Chat ?? message.ConversationId, byBot: false);
+        if (await slack.PostEditNoteAsync(prior.Channel, prior.Ts,
+                message.Deleted ? "_Deleted in Teams_" : $"_Edited in Teams_\n{changed.Text}", changed.Images, message.Id, version, ct))
+            links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, version, prior.Images, chat, byBot: false);
     }
 
     /// <summary>

@@ -1,8 +1,8 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
-using TeamsGateway.Contracts;
 using Microsoft.Extensions.Options;
+using TeamsGateway.Contracts;
 
 namespace TeamsGateway.SlackRelay.UnitTests;
 
@@ -246,8 +246,11 @@ public class SlackSenderTests
 
         await s.Sender.OnActionAsync(Click("retry", $"C1|{Ts}|"), Ct);
 
+        // 再查一次也失敗：還是不知道，照樣留著 Retry（重新 @bot 會是新的 ts，等於跳過檢查）
         Assert.Single(s.Gateway.Requests, r => r.Method == "POST");
-        Assert.Contains("checking the chat failed", Responses(s)[^1].GetProperty("text").GetString());
+        var last = Responses(s)[^1];
+        Assert.Contains("checking the chat failed", last.GetProperty("blocks")[0].GetProperty("text").GetProperty("text").GetString());
+        Assert.Equal("retry", last.GetProperty("blocks")[1].GetProperty("elements")[0].GetProperty("action_id").GetString());
     }
 
     // SSE 先確認成功時，稍後回來的空查詢不能把已送出的訊息降成失敗
@@ -282,6 +285,95 @@ public class SlackSenderTests
         Assert.DoesNotContain("warning", Reactions(s, "reactions.add"));
         Assert.True(Responses(s)[^1].GetProperty("delete_original").GetBoolean());
         Assert.NotNull(s.Links.Lookup(TeamsId));
+    }
+
+    // 推回那邊正在換成已送出表情（拿著鎖）時，發話那邊的空查詢進到標失敗：要等它做完、看到已確認就收手
+    [Fact]
+    public async Task Failure_marking_waits_for_an_in_flight_confirmation()
+    {
+        var s = Create();
+        var verificationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseVerification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var confirming = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseConfirm = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        s.Gateway.RespondAsync = async (request, ct) =>
+        {
+            if (!request.RequestUri!.AbsolutePath.EndsWith("/messages", StringComparison.Ordinal))
+                return null;
+            if (request.Method == HttpMethod.Post)
+                return (HttpStatusCode.BadGateway, "");
+            verificationStarted.TrySetResult();
+            await releaseVerification.Task.WaitAsync(ct);
+            return (HttpStatusCode.OK, """{"messages":[]}""");
+        };
+        s.Slack.BeforeRespondAsync = async (method, body, ct) =>
+        {
+            if (method == "reactions.add" && body.GetProperty("name").GetString() == "outbox_tray")
+            {
+                confirming.TrySetResult();
+                await releaseConfirm.Task.WaitAsync(ct);
+            }
+        };
+
+        var sending = s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
+        await verificationStarted.Task.WaitAsync(Ct);
+        var echo = s.Worker.RelayWithRetryAsync(
+            new MessageDto(TeamsId, Chat, "8:me", "Me", "RichText/Html", "<p>hello</p>", 1,
+                DateTimeOffset.FromUnixTimeSeconds(1729834597), long.Parse(TeamsId), ClientMessageId: ClientMessageId),
+            new Dictionary<string, string> { [Chat] = "C1" }, null, Ct);
+        await confirming.Task.WaitAsync(Ct);
+        releaseVerification.SetResult();
+        await Task.Delay(200, Ct); // 讓發話那邊走到標失敗、卡在鎖上
+        releaseConfirm.SetResult();
+        await Task.WhenAll(sending, echo);
+
+        Assert.DoesNotContain("warning", Reactions(s, "reactions.add"));
+        Assert.True(Responses(s)[^1].GetProperty("delete_original").GetBoolean());
+        Assert.NotNull(s.Links.Lookup(TeamsId));
+    }
+
+    // 送到了但換表情失敗：一定要回話，而且不能給 Retry（訊息已經在 Teams 上，Teams 不去重）
+    [Fact]
+    public async Task Sent_message_is_reported_even_when_its_status_emoji_fails()
+    {
+        var s = Create();
+        s.Slack.RespondToBody = (method, body) =>
+            method == "reactions.add" && body.GetProperty("name").GetString() == "outbox_tray" ? """{"ok":false,"error":"internal_error"}""" : null;
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
+
+        Assert.Single(s.Gateway.Requests, r => r.Method == "POST");
+        var last = Responses(s)[^1];
+        Assert.Contains("Sent to Teams", last.GetProperty("text").GetString());
+        Assert.False(last.TryGetProperty("blocks", out _));
+    }
+
+    // gateway 拒絕、⚠️ 又按不上：還是要給 Retry，不能停在「Sending…」
+    [Fact]
+    public async Task Refused_send_offers_a_retry_even_when_the_warning_emoji_fails()
+    {
+        var s = Create();
+        s.Gateway.Responses[$"POST /v1/chats/{Chat}/messages"] = (HttpStatusCode.BadRequest, """{"error":"nope"}""");
+        s.Slack.RespondToBody = (method, body) =>
+            method == "reactions.add" && body.GetProperty("name").GetString() == "warning" ? """{"ok":false,"error":"internal_error"}""" : null;
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
+
+        Assert.Equal("retry", Responses(s)[^1].GetProperty("blocks")[1].GetProperty("elements")[0].GetProperty("action_id").GetString());
+    }
+
+    // ⏳ 按不上：什麼都不送，給 Retry
+    [Fact]
+    public async Task Failure_to_mark_sending_sends_nothing_and_offers_a_retry()
+    {
+        var s = Create();
+        s.Slack.RespondToBody = (method, body) =>
+            method == "reactions.add" && body.GetProperty("name").GetString() == "hourglass_flowing_sand" ? """{"ok":false,"error":"internal_error"}""" : null;
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
+
+        Assert.DoesNotContain(s.Gateway.Requests, r => r.Method == "POST");
+        Assert.Equal("retry", Responses(s)[^1].GetProperty("blocks")[1].GetProperty("elements")[0].GetProperty("action_id").GetString());
     }
 
     // Cancel：收掉確認，什麼都不送

@@ -32,12 +32,22 @@ public sealed class GatewaySendClient(HttpClient http, ILogger<GatewaySendClient
         }
     }
 
-    /// <summary>對話近期訊息裡帶這個 <paramref name="clientMessageId"/> 的那則的 Teams id；沒有回 null。gateway 不通就丟例外。</summary>
+    /// <summary>最多翻幾頁（每頁 200 則）；翻完還沒到那則 Slack 訊息寫下的時間就算查不完。</summary>
+    internal const int MaxSearchPages = 40;
+
+    /// <summary>
+    /// 對話裡帶這個 <paramref name="clientMessageId"/> 的那則的 Teams id；確定沒有回 null。
+    /// 只翻到那則 Slack 訊息寫下之前（clientMessageId 就是 Slack ts，送出不可能比它早，見 <see cref="SendTracker.EarliestSend"/>），
+    /// 或翻到對話開頭（沒有下一頁、空頁）。gateway 不通、游標重複、翻了 <see cref="MaxSearchPages"/> 頁還沒到都丟例外：
+    /// 呼叫端要當成結果不明，不能當成確定沒送而重送（Teams 不會去重）。
+    /// </summary>
     public async Task<string?> FindSentAsync(string chat, string clientMessageId, CancellationToken ct)
     {
+        // 停止點看 version 不看 composetime：chatsvc 的排序沒驗證過，最近被改的舊訊息可能排在前面；version 一定不小於 id
+        var notBefore = SendTracker.EarliestSend(clientMessageId)?.ToUnixTimeMilliseconds();
         string? cursor = null;
         var seenCursors = new HashSet<string>(StringComparer.Ordinal);
-        do
+        for (var pages = 0; pages < MaxSearchPages; pages++)
         {
             var url = $"/v1/chats/{Uri.EscapeDataString(chat)}/messages?limit=200"
                       + (cursor is null ? "" : $"&cursor={Uri.EscapeDataString(cursor)}");
@@ -45,11 +55,14 @@ public sealed class GatewaySendClient(HttpClient http, ILogger<GatewaySendClient
                        ?? throw new InvalidDataException("The gateway returned an empty message page.");
             if (page.Messages.FirstOrDefault(m => m.ClientMessageId == clientMessageId) is { } sent)
                 return sent.Id;
-            cursor = page.NextCursor;
-            if (cursor is not null && !seenCursors.Add(cursor))
+            if (page.NextCursor is null || page.Messages.Count == 0
+                || (notBefore is { } cutoff && page.Messages.Any(m => m.Version > 0 && m.Version < cutoff)))
+                return null;
+            if (!seenCursors.Add(page.NextCursor))
                 throw new InvalidDataException("The gateway repeated a message-page cursor.");
-        } while (cursor is not null);
-        return null;
+            cursor = page.NextCursor;
+        }
+        throw new InvalidDataException($"Searched {MaxSearchPages} pages without reaching the time the Slack message was written.");
     }
 }
 

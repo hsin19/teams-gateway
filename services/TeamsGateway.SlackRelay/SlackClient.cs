@@ -15,6 +15,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
 {
     internal const string MetaEventType = "teams_relay";
     private const string ReactionEventType = "teams_reaction";
+    private const string EditNoteEventType = "teams_edit_note";
     private const int SectionMaxChars = 3000;
 
     // 剛上傳的檔 Slack 可能還沒處理完，這時引用它的 image block 會回 invalid_blocks
@@ -37,7 +38,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         await SendAsync("chat.update", channel, text, images, clearBlocks: true,
             (t, blocks) => new SlackMessageRequest(channel, t, blocks, Ts: ts, Metadata: Meta(teamsId, version, chat)), ct) is not null;
 
-    /// <summary>在某則訊息的 thread 底下回一則（舊版留證用）。</summary>
+    /// <summary>在某則訊息的 thread 底下回一則（舊版留證用）；回傳有沒有貼成。</summary>
     public async Task<bool> PostReplyAsync(string channel, string threadTs, string text, IReadOnlyList<string> images, CancellationToken ct) =>
         await SendAsync("chat.postMessage", channel, text, images, clearBlocks: false,
             (t, blocks) => new SlackMessageRequest(channel, t, blocks, ThreadTs: threadTs), ct) is not null;
@@ -97,9 +98,9 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     }
 
     /// <summary>
-    /// bot 在某則訊息按 / 收回一個原生表情（需要 <c>reactions:write</c>）。已經按過 / 本來就沒按、或 Slack 不認得這個表情名稱，
-    /// 都當成沒事：這只是讓人在頻道裡看得到「有人按了」，誰按的在 thread 留言裡。
-    /// 回傳 false = Slack 不認得這個表情名稱（<c>invalid_name</c>），呼叫端要換一個的話看這個。
+    /// bot 在某則訊息按 / 收回一個原生表情（需要 <c>reactions:write</c>）。已經按過 / 本來就沒按當成成功；
+    /// 回傳 false = Slack 不認得這個表情名稱（<c>invalid_name</c>）。其他失敗都丟例外（限流、Slack 自己出錯是
+    /// <see cref="SlackTransientException"/>）：發話的狀態表情是防重送的依據，不能默默失敗；只是鏡像 Teams 表情的呼叫端自己吞掉。
     /// </summary>
     public async Task<bool> ReactAsync(string channel, string ts, string name, bool add, CancellationToken ct)
     {
@@ -278,6 +279,26 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
             if (m.Metadata?.EventType == ReactionEventType && m.Metadata.EventPayload?.Seq is { } seq)
                 seqs.Add(seq);
         return seqs;
+    }
+
+    /// <summary>
+    /// 在人從 Slack 發的那則（ADR 0012）的 thread 貼 Teams 上的新版（「Edited / Deleted in Teams」），夾著 Teams id 與版本：
+    /// 重啟後 gateway 重送同一個編輯時，<see cref="ReadEditNoteVersionAsync"/> 認得出貼過了。回傳有沒有貼成。
+    /// </summary>
+    public async Task<bool> PostEditNoteAsync(string channel, string threadTs, string text, IReadOnlyList<string> images, string teamsId, long? version, CancellationToken ct) =>
+        await SendAsync("chat.postMessage", channel, text, images, clearBlocks: false,
+            (t, blocks) => new SlackMessageRequest(channel, t, blocks, ThreadTs: threadTs,
+                Metadata: new SlackMetadata(EditNoteEventType, new SlackRelayPayload(teamsId, version))), ct) is not null;
+
+    /// <summary>那則 thread 裡已經貼過的 Teams 新版裡最新的版本（<see cref="PostEditNoteAsync"/> 夾的）；沒貼過回 null。</summary>
+    public async Task<long?> ReadEditNoteVersionAsync(string channel, string threadTs, string teamsId, CancellationToken ct)
+    {
+        long? newest = null;
+        await foreach (var m in ReadPagesAsync("conversations.replies", channel, $"ts={Uri.EscapeDataString(threadTs)}", ct))
+            if (m.Metadata is { EventType: EditNoteEventType, EventPayload: { Version: { } version } payload } && payload.TeamsId == teamsId
+                && version > (newest ?? long.MinValue))
+                newest = version;
+        return newest;
     }
 
     /// <summary><c>conversations.history</c> / <c>conversations.replies</c> 共用的翻頁（帶 metadata）。失敗記 warning，停在已讀到的地方。</summary>

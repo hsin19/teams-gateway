@@ -79,6 +79,7 @@ public class RelaySentFromSlackTests
         Assert.Equal(1793220599999, links.Lookup(TeamsId)?.Version);
     }
 
+    // 重啟後先收到刪除事件：補回對應後一樣在那則的 thread 貼 Deleted in Teams（沒有內容也要處理，不能被空內容的檢查擋掉）
     [Fact]
     public async Task Recovered_top_level_send_deletion_is_posted_to_its_thread()
     {
@@ -145,6 +146,54 @@ public class RelaySentFromSlackTests
         Assert.Equal(Ts, note.GetProperty("thread_ts").GetString());
         Assert.StartsWith(label, note.GetProperty("text").GetString());
         Assert.Equal(1793220599999, links.Lookup(TeamsId)?.Version);
+    }
+
+    // 重啟後 gateway 重送之前的編輯：thread 裡已經貼過這一版（看留言的 metadata），不要每次重啟都再貼一次
+    [Fact]
+    public async Task Edit_already_noted_is_not_posted_again_after_a_restart()
+    {
+        var (worker, slack, links, _) = Worker();
+        slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT"}""";
+        slack.Responses["reactions.get"] = """
+            {"ok":true,"type":"message","message":{"ts":"1729834567.123456","user":"UME","reactions":[{"name":"outbox_tray","users":["UBOT"],"count":1}]}}
+            """;
+        slack.Responses["conversations.replies"] = """
+            {"ok":true,"messages":[{"ts":"1729834567.123456","user":"UME","text":"hello"},
+              {"ts":"1729834600.000100","bot_id":"B1","text":"_Edited in Teams_","metadata":{"event_type":"teams_edit_note","event_payload":{"teams_id":"1793220563903","version":1793220599999}}}]}
+            """;
+
+        await worker.RelayWithRetryAsync(Echo() with { Content = "<p>fixed</p>", Version = 1793220599999, Edited = true }, Routes, null, Ct);
+
+        Assert.DoesNotContain(slack.Requests, r => r.Method == "chat.postMessage");
+        Assert.Equal(1793220599999, links.Lookup(TeamsId)?.Version);
+    }
+
+    // 貼出去的「Edited in Teams」夾著 Teams id 與版本，重啟後才認得出貼過了
+    [Fact]
+    public async Task Edit_note_carries_the_version_it_shows()
+    {
+        var (worker, slack, links, _) = Worker();
+        links.Remember(TeamsId, "C1", Ts, "", null, chat: Chat, byBot: false);
+
+        await worker.RelayWithRetryAsync(Echo() with { Content = "<p>fixed</p>", Version = 1793220599999, Edited = true }, Routes, null, Ct);
+
+        var payload = Assert.Single(slack.Requests, r => r.Method == "chat.postMessage").Body.GetProperty("metadata");
+        Assert.Equal("teams_edit_note", payload.GetProperty("event_type").GetString());
+        Assert.Equal((TeamsId, 1793220599999L),
+            (payload.GetProperty("event_payload").GetProperty("teams_id").GetString(), payload.GetProperty("event_payload").GetProperty("version").GetInt64()));
+    }
+
+    // thread 裡發的推回來，換表情失敗（例如那則剛被刪掉）：表情只是顯示，Teams 上已經有這句，頂層照樣要貼
+    [Fact]
+    public async Task Thread_send_is_posted_even_when_its_status_emoji_fails()
+    {
+        var (worker, slack, _, sends) = Worker();
+        sends.Register(ClientMessageId, "C1", Ts, inThread: true);
+        slack.RespondToBody = (method, _) => method == "reactions.add" ? """{"ok":false,"error":"message_not_found"}""" : null;
+
+        await worker.RelayWithRetryAsync(Echo(), Routes, null, Ct);
+
+        Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
     }
 
     private static MessageDto Echo() =>
