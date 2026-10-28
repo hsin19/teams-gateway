@@ -34,7 +34,7 @@ Claude Desktop / Cursor（MCP 設定檔）：
 
 | tool | 做什麼 |
 |---|---|
-| `list_chats` | 列對話，一行一個：`<thread id> \| <topic> \| last <時間>`，最近有動靜的在前，只列前 `limit` 個（1–200，預設 30），還有更舊的就在最後一行寫 `# more:`。`query` 篩群名 |
+| `list_chats` | 列對話，一行一個：`<thread id> \| <topic> \| last <時間>`，最近有動靜的在前，每次最多 `limit` 個（1–200，預設 30）；有下一頁時最後一行會給 `offset`，傳回 `offset` 參數繼續。`query` 篩群名 |
 | `read_messages` | 讀一段時間的訊息，log 格式（見下）。`since` / `until`（前閉後開）、`limit`（1–200，預設 50，留最新的） |
 | `get_attachments` | 開一則訊息的圖片與附件，訊息 id 取自 `[image #<id>]` / `[file: … #<id>]`。圖片（內嵌 + 附加）回 image content，一次最多 10 張；其他檔案的下載**還沒做**，只列檔名，只有檔案時回錯誤 |
 | `send_message` | 以 gateway 綁定的帳號發一則文字訊息，不可撤回 |

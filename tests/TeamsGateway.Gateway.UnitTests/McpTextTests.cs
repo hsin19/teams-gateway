@@ -149,7 +149,7 @@ public class McpTextTests
             McpText.Chats(chats, Taipei, limit: 30));
     }
 
-    // 帳號裡多的是好幾年沒動的對話：只留最近有動靜的 limit 個，標頭寫總數、最後一行提示還有更舊的
+    // 帳號裡多的是好幾年沒動的對話：只留最近有動靜的 limit 個，標頭寫總數、最後一行帶下一頁 offset
     [Fact]
     public void Chats_keep_only_the_most_recent_up_to_limit()
     {
@@ -165,8 +165,27 @@ public class McpTextTests
             "# 2 of 4 chats | times in UTC+08:00\n"
             + "19:family@thread.v2 | Family | last 2026-01-02 07:30:00\n"
             + "19:classmates@thread.v2 | Class Reunion | last 2026-01-01 07:30:00\n"
-            + "# more: 2 older chats not shown; raise limit or filter with query\n",
+            + "# more: offset=2 (2 chats not shown)\n",
             McpText.Chats(chats, Taipei, limit: 2));
+    }
+
+    // 用上一頁的 offset 可繼續列出較舊對話，包括沒有 topic 的對話
+    [Fact]
+    public void Chats_offset_pages_include_older_chats_without_topics()
+    {
+        ConversationDto[] chats =
+        [
+            new("19:family@thread.v2", "Family", "Chat", At),
+            new("19:classmates@thread.v2", "Class Reunion", "Chat", At.AddDays(-1)),
+            new("19:old@thread.skype", "Old chat", "Chat", At.AddYears(-8)),
+            new("8:live:someone", null, null, null),
+        ];
+
+        Assert.Equal(
+            "# 2 of 4 chats | times in UTC+08:00\n"
+            + "19:old@thread.skype | Old chat | last 2018-01-02 07:30:00\n"
+            + "8:live:someone | (no topic) | last -\n",
+            McpText.Chats(chats, Taipei, limit: 2, offset: 2));
     }
 
     // 時區：offset 幾種寫法都收；查不到的回 McpException（訊息才會傳到 agent）

@@ -38,9 +38,11 @@ internal static partial class McpText
     }
 
     /// <summary>最近有動靜的在前，只留前 <paramref name="limit"/> 個：帳號裡大半是好幾年沒動的對話，全列會吃掉幾萬 token。</summary>
-    public static string Chats(IReadOnlyList<ConversationDto> chats, TimeZoneInfo zone, int limit)
+    public static string Chats(IReadOnlyList<ConversationDto> chats, TimeZoneInfo zone, int limit, int offset = 0)
     {
-        var shown = chats.OrderByDescending(c => c.LastMessageTime ?? DateTimeOffset.MinValue).Take(limit).ToList();
+        offset = Math.Max(0, offset);
+        var sorted = chats.OrderByDescending(c => c.LastMessageTime ?? DateTimeOffset.MinValue).ToList();
+        var shown = sorted.Skip(offset).Take(limit).ToList();
         var count = shown.Count == chats.Count ? $"{chats.Count}" : $"{shown.Count} of {chats.Count}";
         var text = new StringBuilder();
         text.Append(CultureInfo.InvariantCulture, $"# {count} chats | times in {ZoneLabel(zone)}\n");
@@ -50,8 +52,9 @@ internal static partial class McpText
             var last = c.LastMessageTime is { } t ? Format(t, zone, TimeFormat) : "-";
             text.Append(CultureInfo.InvariantCulture, $"{c.Id} | {topic} | last {last}\n");
         }
-        if (shown.Count < chats.Count)
-            text.Append(CultureInfo.InvariantCulture, $"# more: {chats.Count - shown.Count} older chats not shown; raise limit or filter with query\n");
+        var nextOffset = offset + shown.Count;
+        if (nextOffset < sorted.Count)
+            text.Append(CultureInfo.InvariantCulture, $"# more: offset={nextOffset} ({sorted.Count - nextOffset} chats not shown)\n");
         return text.ToString();
     }
 
