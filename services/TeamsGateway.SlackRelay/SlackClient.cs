@@ -21,21 +21,21 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     private static readonly TimeSpan[] FileNotReadyDelays = [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4)];
 
     // version：目前顯示的是 Teams 哪一版（毫秒時間戳，原文 = 訊息 id、編輯後 = 編輯時間），重啟回補後留證才標得出時間
-    private static SlackMetadata? Meta(string? teamsId, long? version) =>
-        teamsId is null ? null : new SlackMetadata(MetaEventType, new SlackRelayPayload(teamsId, version));
+    private static SlackMetadata? Meta(string? teamsId, long? version, string? chat) =>
+        teamsId is null ? null : new SlackMetadata(MetaEventType, new SlackRelayPayload(teamsId, version, Chat: chat));
 
-    /// <summary>發訊息（<paramref name="teamsId"/> / <paramref name="version"/> 夾進 metadata、<paramref name="images"/> 是已上傳的 Slack file id）；回傳貼成的 ts，失敗 null。</summary>
-    public async Task<string?> PostMessageAsync(string channel, string text, string? teamsId, long? version, IReadOnlyList<string> images, CancellationToken ct)
+    /// <summary>發訊息（<paramref name="teamsId"/> / <paramref name="version"/> / <paramref name="chat"/> 夾進 metadata、<paramref name="images"/> 是已上傳的 Slack file id）；回傳貼成的 ts，失敗 null。</summary>
+    public async Task<string?> PostMessageAsync(string channel, string text, string? teamsId, long? version, IReadOnlyList<string> images, CancellationToken ct, string? chat = null)
     {
         var result = await SendAsync("chat.postMessage", channel, text, images, clearBlocks: false,
-            (t, blocks) => new SlackMessageRequest(channel, t, blocks, Metadata: Meta(teamsId, version)), ct);
+            (t, blocks) => new SlackMessageRequest(channel, t, blocks, Metadata: Meta(teamsId, version, chat)), ct);
         return result?.Ts;
     }
 
     /// <summary>原地更新一則訊息（編輯用；Slack 自帶 "edited"）。metadata 要一起帶，不然更新後會掉。回傳有沒有更新成。</summary>
-    public async Task<bool> UpdateMessageAsync(string channel, string ts, string text, string teamsId, long? version, IReadOnlyList<string> images, CancellationToken ct) =>
+    public async Task<bool> UpdateMessageAsync(string channel, string ts, string text, string teamsId, long? version, IReadOnlyList<string> images, CancellationToken ct, string? chat = null) =>
         await SendAsync("chat.update", channel, text, images, clearBlocks: true,
-            (t, blocks) => new SlackMessageRequest(channel, t, blocks, Ts: ts, Metadata: Meta(teamsId, version)), ct) is not null;
+            (t, blocks) => new SlackMessageRequest(channel, t, blocks, Ts: ts, Metadata: Meta(teamsId, version, chat)), ct) is not null;
 
     /// <summary>在某則訊息的 thread 底下回一則（舊版留證用）。</summary>
     public async Task PostReplyAsync(string channel, string threadTs, string text, IReadOnlyList<string> images, CancellationToken ct) =>
@@ -155,7 +155,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
 
     private static RelayedMessage? AsRelayed(HistoryMessage m) =>
         m.Metadata?.EventType == MetaEventType && m.Metadata.EventPayload?.TeamsId is { } tid && m.Ts is { } ts
-            ? new RelayedMessage(tid, ts, m.Text ?? "", m.Metadata.EventPayload.Version)
+            ? new RelayedMessage(tid, ts, m.Text ?? "", m.Metadata.EventPayload.Version, m.Metadata.EventPayload.Chat)
             : null;
 
     /// <summary>某則訊息 thread 裡已經貼過的表情留言的事件序號（<see cref="PostReactionNoteAsync"/> 夾的 metadata）；讀不到就是空的。</summary>
@@ -244,7 +244,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         }
     }
 
-    public readonly record struct RelayedMessage(string TeamsId, string Ts, string Text, long? Version);
+    public readonly record struct RelayedMessage(string TeamsId, string Ts, string Text, long? Version, string? Chat = null);
 }
 
 /// <summary>Slack 回了暫時性的錯誤（限流、Slack 自己出錯），重試會好。<see cref="RetryAfter"/> 是 Slack 要我們等多久（有給的話）。</summary>

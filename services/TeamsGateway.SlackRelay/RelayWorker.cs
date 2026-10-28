@@ -180,8 +180,8 @@ public sealed class RelayWorker(
                 ? new SlackContent("_(message deleted)_", []) // 誰說的、原本寫什麼，在上面那則 thread 留證裡
                 : await FormatAsync(message, prior.Channel, ct);
             // 更新被拒（SlackClient 已記 error）時 Slack 上還是舊版：對照表也留舊版，不然之後會以為已經更新過
-            if (await slack.UpdateMessageAsync(prior.Channel, prior.Ts, updated.Text, message.Id, version, updated.Images, ct))
-                links.Remember(message.Id, prior.Channel, prior.Ts, updated.Text, version, updated.Images);
+            if (await slack.UpdateMessageAsync(prior.Channel, prior.Ts, updated.Text, message.Id, version, updated.Images, ct, message.ConversationId))
+                links.Remember(message.Id, prior.Channel, prior.Ts, updated.Text, version, updated.Images, message.ConversationId);
             return;
         }
 
@@ -189,9 +189,9 @@ public sealed class RelayWorker(
             return; // 新訊息但無文字也無附件（純系統事件），不轉
 
         var content = await FormatAsync(message, channel, ct);
-        var ts = await slack.PostMessageAsync(channel, content.Text, message.Id, version, content.Images, ct);
+        var ts = await slack.PostMessageAsync(channel, content.Text, message.Id, version, content.Images, ct, message.ConversationId);
         if (ts is not null)
-            links.Remember(message.Id, channel, ts, content.Text, version, content.Images); // 記住對應，給之後的回覆 / 編輯用
+            links.Remember(message.Id, channel, ts, content.Text, version, content.Images, message.ConversationId); // 記住對應，給之後的回覆 / 編輯用
     }
 
     /// <summary>
@@ -231,10 +231,10 @@ public sealed class RelayWorker(
                 await slack.JoinChannelAsync(channel, ct); // 要是成員才讀得到歷史
                 var recent = await slack.ReadRelayedAsync(channel, oldest, ct);
                 foreach (var m in recent)
-                    links.Remember(m.TeamsId, channel, m.Ts, m.Text, m.Version);
+                    links.Remember(m.TeamsId, channel, m.Ts, m.Text, m.Version, chat: m.Chat);
                 // 近期沒轉過東西：往更早找最新一則當續接點，不然重啟後從「現在」開始，停機期間 gateway 發出的事件就漏了
                 if (recent.Count == 0 && await slack.ReadNewestRelayedAsync(channel, ct) is { } newest)
-                    links.Remember(newest.TeamsId, channel, newest.Ts, newest.Text, newest.Version);
+                    links.Remember(newest.TeamsId, channel, newest.Ts, newest.Text, newest.Version, chat: newest.Chat);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

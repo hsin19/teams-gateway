@@ -17,9 +17,10 @@ public sealed class MessageLinks
     private readonly ConcurrentDictionary<string, SlackRef> _byTeamsId = new();
     private int _sincePrune;
 
-    public void Remember(string teamsMessageId, string channel, string ts, string text, long? version, IReadOnlyList<string>? images = null)
+    public void Remember(string teamsMessageId, string channel, string ts, string text, long? version, IReadOnlyList<string>? images = null,
+        string? chat = null, bool byBot = true)
     {
-        _byTeamsId[teamsMessageId] = new SlackRef(channel, ts, text, version, images ?? []);
+        _byTeamsId[teamsMessageId] = new SlackRef(channel, ts, text, version, images ?? [], chat, byBot);
         if (Interlocked.Increment(ref _sincePrune) >= PruneEvery)
         {
             Interlocked.Exchange(ref _sincePrune, 0);
@@ -63,6 +64,9 @@ public sealed class MessageLinks
     /// <summary>
     /// <paramref name="Version"/>：目前顯示的是 Teams 哪一版（毫秒時間戳；這功能上線前轉的訊息回補回來是 null）。
     /// <paramref name="Images"/>：這則訊息 image block 引用的 Slack file id（重啟回補的只有文字，這裡會是空的）。
+    /// <paramref name="Chat"/>：Teams 訊息所在的對話（metadata 還沒帶這個欄位時轉的訊息是 null）。
+    /// <paramref name="ByBot"/>：false = 對到的是人在 Slack 頂層發、送到 Teams 的那則（ADR 0012），bot 改不了它。
     /// </summary>
-    public readonly record struct SlackRef(string Channel, string Ts, string Text, long? Version, IReadOnlyList<string> Images);
+    public readonly record struct SlackRef(string Channel, string Ts, string Text, long? Version, IReadOnlyList<string> Images,
+        string? Chat = null, bool ByBot = true);
 }

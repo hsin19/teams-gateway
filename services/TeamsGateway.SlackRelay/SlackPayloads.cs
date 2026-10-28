@@ -31,7 +31,8 @@ internal sealed record SlackFileRef(string Id);
 /// </summary>
 internal sealed record SlackMetadata(string? EventType, SlackRelayPayload? EventPayload);
 
-internal sealed record SlackRelayPayload(string? TeamsId, long? Version, long? Seq = null);
+/// <summary><c>Chat</c>：那則 Teams 訊息所在的對話 id，從 Slack 回覆時要靠它知道送去哪（一個頻道可能對到多個對話）。</summary>
+internal sealed record SlackRelayPayload(string? TeamsId, long? Version, long? Seq = null, string? Chat = null);
 
 internal sealed record JoinRequest(string Channel);
 
