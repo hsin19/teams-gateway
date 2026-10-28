@@ -71,6 +71,10 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
         return _pending[clientMessageId] = new PendingSend(channel, ts, inThread, DateTimeOffset.UtcNow);
     }
 
+    /// <summary>記憶體裡登記過的那則（不問 Slack）；沒有回 null。</summary>
+    public PendingSend? Pending(string? clientMessageId) =>
+        clientMessageId is not null && _pending.TryGetValue(clientMessageId, out var send) ? send : null;
+
     /// <summary>
     /// Teams 推回來的這則是不是從 Slack 發的。先查記憶體；查不到（relay 重啟過）就把 clientMessageId 換回 ts，
     /// 看 <paramref name="channel"/> 裡那則上有沒有 bot 的狀態表情（重啟時可能還停在 ⏳；⚠️ 的其實送到了）。不是就回 null。
@@ -93,7 +97,7 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
 
     /// <summary>那則上有沒有 bot 按的狀態表情：⏳、已送出，要的話加上 ⚠️。</summary>
     internal bool HasStatus(HistoryMessage message, string botUserId, bool includeFailed) =>
-        IsSent(message, botUserId) || IsSending(message, botUserId) || (includeFailed && ByBot(message, botUserId, FailedEmoji));
+        IsSent(message, botUserId) || IsSending(message, botUserId) || (includeFailed && IsFailed(message, botUserId));
 
     /// <summary>bot 按了已送出表情（設定的與預設的都算，改過設定後之前發的照樣認得）。</summary>
     internal bool IsSent(HistoryMessage message, string botUserId) =>
@@ -106,6 +110,9 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
 
     /// <summary>還停在 ⏳：正在送，或上次送到一半 relay 重啟 / Slack 出錯，不知道送了沒。</summary>
     internal static bool IsSending(HistoryMessage message, string botUserId) => ByBot(message, botUserId, SendingEmoji);
+
+    /// <summary>上次標了 ⚠️：當時確定沒送，或結果不明時對話裡還查不到（之後才出現也可能）。</summary>
+    internal static bool IsFailed(HistoryMessage message, string botUserId) => ByBot(message, botUserId, FailedEmoji);
 
     private static bool ByBot(HistoryMessage message, string botUserId, string emoji) =>
         message.Reactions?.Any(r => r.Name == emoji && r.Users?.Contains(botUserId) == true) == true;
@@ -123,7 +130,7 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
         await send.CompletionGate.WaitAsync(ct);
         try
         {
-            if (send.Confirmed)
+            if (send.Confirmed || send.Delivered)
                 return false;
             await ReactStatusAsync(send.Channel, send.Ts, FailedEmoji, add: true, ct);
             await ReactStatusAsync(send.Channel, send.Ts, SendingEmoji, add: false, ct);
@@ -142,6 +149,8 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
     /// </summary>
     public async Task ConfirmAsync(PendingSend send, string? teamsId, string? chat, CancellationToken ct)
     {
+        // 先記住「送到了」：後面換表情失敗時，發話那邊的查詢就算查不到也不會把它標成失敗、說可以重送
+        send.MarkDelivered();
         // 對應表先記、不管確認過沒：先確認的那邊（API 回應）可能沒帶 Teams id，推回來那次才補得上。
         // 版本記 null：之後有沒有被改看 Edited / Deleted 標記，不靠「版本 = id」這個假設
         if (!send.InThread && teamsId is not null && links.Lookup(teamsId) is null)
@@ -190,10 +199,14 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
     }
 }
 
-/// <summary>一則從 Slack 發出的訊息：在哪個頻道、哪一則、是不是 thread 裡的回覆。<c>Confirmed</c> = 已經換成已送出表情。</summary>
+/// <summary>
+/// 一則從 Slack 發出的訊息：在哪個頻道、哪一則、是不是 thread 裡的回覆。
+/// <c>Delivered</c> = Teams 收下了；<c>Confirmed</c> = 而且已經換成已送出表情。
+/// </summary>
 public sealed record PendingSend(string Channel, string Ts, bool InThread, DateTimeOffset RegisteredAt)
 {
     private int _confirmed;
+    private int _delivered;
 
     // 送到了（推回來或 API 回應）與送失敗（API 失敗、查不到）兩邊可能同時結束：同一則一次只讓一邊換狀態，
     // 後到的看到已確認就收手，不會把送到的那則標成失敗
@@ -201,5 +214,10 @@ public sealed record PendingSend(string Channel, string Ts, bool InThread, DateT
 
     public bool Confirmed => Volatile.Read(ref _confirmed) != 0;
 
+    /// <summary>已經知道 Teams 收下了（API 回應或推回來），表情不一定換好了。</summary>
+    public bool Delivered => Volatile.Read(ref _delivered) != 0;
+
     internal void SetConfirmed() => Volatile.Write(ref _confirmed, 1);
+
+    internal void MarkDelivered() => Volatile.Write(ref _delivered, 1);
 }

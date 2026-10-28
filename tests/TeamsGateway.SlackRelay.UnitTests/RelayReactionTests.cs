@@ -60,7 +60,6 @@ public class RelayReactionTests
         Assert.DoesNotContain(slack.Requests, r => r.Method.StartsWith("reactions.", StringComparison.Ordinal));
     }
 
-    // 在原訊息按表情失敗只記 warning：thread 留言照貼，不重試整筆
     // 一般 bot 轉的訊息：已送出表情設成 +1 時，Teams 的 like 照樣鏡像成 👍
     [Fact]
     public async Task Status_emoji_is_still_mirrored_on_a_relayed_message()
@@ -95,6 +94,7 @@ public class RelayReactionTests
         Assert.Equal("heart", slack.Requests.Single(r => r.Method == "reactions.add").Body.GetProperty("name").GetString());
     }
 
+    // 在原訊息按表情失敗只記 warning：thread 留言照貼，不重試整筆
     [Fact]
     public async Task Failed_reaction_mirror_is_best_effort()
     {

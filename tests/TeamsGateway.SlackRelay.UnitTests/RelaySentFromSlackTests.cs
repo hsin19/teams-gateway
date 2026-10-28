@@ -168,6 +168,63 @@ public class RelaySentFromSlackTests
         Assert.Equal(1793220599999, links.Lookup(TeamsId)?.Version);
     }
 
+    // thread 裡貼過的是舊一版、或是別則的留言：這次的編輯沒貼過，照貼
+    [Theory]
+    [InlineData("1793220563903", 1793220580000)]
+    [InlineData("1793220000000", 1793220599999)]
+    public async Task Newer_or_other_edit_is_still_posted_after_a_restart(string notedId, long notedVersion)
+    {
+        var (worker, slack, links, _) = Worker();
+        links.Remember(TeamsId, "C1", Ts, "", null, chat: Chat, byBot: false);
+        slack.Responses["conversations.replies"] = $$$$"""
+            {"ok":true,"messages":[{"ts":"1729834600.000100","bot_id":"B1","text":"_Edited in Teams_",
+              "metadata":{"event_type":"teams_edit_note","event_payload":{"teams_id":"{{{{notedId}}}}","version":{{{{notedVersion}}}}}}}]}
+            """;
+
+        await worker.RelayWithRetryAsync(Echo() with { Content = "<p>fixed</p>", Version = 1793220599999, Edited = true }, Routes, null, Ct);
+
+        Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
+        Assert.Equal(1793220599999, links.Lookup(TeamsId)?.Version);
+    }
+
+    // 頂層發的那則：API 回應時記了對應、換表情卻失敗；推回來時對應已經在，還是要再試一次換表情，不然一直停在 ⏳
+    [Fact]
+    public async Task Echo_retries_a_failed_status_swap_for_a_top_level_send()
+    {
+        var (worker, slack, links, sends) = Worker();
+        var send = sends.Register(ClientMessageId, "C1", Ts, inThread: false);
+        slack.RespondToBody = (method, _) => method == "reactions.add" ? """{"ok":false,"error":"internal_error"}""" : null;
+        await Assert.ThrowsAsync<SlackTransientException>(() => sends.ConfirmAsync(send, TeamsId, Chat, Ct));
+        Assert.NotNull(links.Lookup(TeamsId));
+        slack.RespondToBody = null;
+
+        await worker.RelayWithRetryAsync(Echo(), Routes, null, Ct);
+
+        Assert.True(send.Confirmed);
+        Assert.DoesNotContain(slack.Requests, r => r.Method == "chat.postMessage");
+    }
+
+    // thread 裡發的推回來時被限流：整筆等一下重來（還沒貼），不能吞掉
+    [Fact]
+    public async Task Rate_limited_status_swap_retries_the_whole_thread_echo()
+    {
+        var (worker, slack, _, sends) = Worker(rateLimitFallback: TimeSpan.Zero);
+        var send = sends.Register(ClientMessageId, "C1", Ts, inThread: true);
+        var limited = true;
+        slack.RespondToBody = (method, _) =>
+        {
+            if (method != "reactions.add" || !limited)
+                return null;
+            limited = false;
+            return """{"ok":false,"error":"ratelimited"}""";
+        };
+
+        await worker.RelayWithRetryAsync(Echo(), Routes, null, Ct);
+
+        Assert.True(send.Confirmed);
+        Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
+    }
+
     // 貼出去的「Edited in Teams」夾著 Teams id 與版本，重啟後才認得出貼過了
     [Fact]
     public async Task Edit_note_carries_the_version_it_shows()
@@ -200,7 +257,7 @@ public class RelaySentFromSlackTests
         new(TeamsId, Chat, "8:me", "Me", "RichText/Html", "<p>hello</p>", 1, DateTimeOffset.FromUnixTimeSeconds(1729834567 + 30), long.Parse(TeamsId),
             ClientMessageId: ClientMessageId);
 
-    private static (RelayWorker Worker, RecordingSlack Slack, MessageLinks Links, SendTracker Sends) Worker()
+    private static (RelayWorker Worker, RecordingSlack Slack, MessageLinks Links, SendTracker Sends) Worker(TimeSpan? rateLimitFallback = null)
     {
         var slack = new RecordingSlack();
         var links = new MessageLinks();
@@ -213,7 +270,7 @@ public class RelaySentFromSlackTests
             links,
             sends,
             Options.Create(options),
-            NullLogger<RelayWorker>.Instance);
+            NullLogger<RelayWorker>.Instance) { RateLimitFallback = rateLimitFallback ?? TimeSpan.FromSeconds(30) };
         return (worker, slack, links, sends);
     }
 }

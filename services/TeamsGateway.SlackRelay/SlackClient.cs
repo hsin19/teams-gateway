@@ -100,7 +100,8 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     /// <summary>
     /// bot 在某則訊息按 / 收回一個原生表情（需要 <c>reactions:write</c>）。已經按過 / 本來就沒按當成成功；
     /// 回傳 false = Slack 不認得這個表情名稱（<c>invalid_name</c>）。其他失敗都丟例外（限流、Slack 自己出錯是
-    /// <see cref="SlackTransientException"/>）：發話的狀態表情是防重送的依據，不能默默失敗；只是鏡像 Teams 表情的呼叫端自己吞掉。
+    /// <see cref="SlackTransientException"/>）：發話的狀態表情是防重送的依據，不能默默失敗。
+    /// 只是顯示的呼叫端自己吞掉：鏡像 Teams 表情、自訂的已送出顯示表情。
     /// </summary>
     public async Task<bool> ReactAsync(string channel, string ts, string name, bool add, CancellationToken ct)
     {
@@ -170,7 +171,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     /// <summary>
     /// 讀頻道裡的一則訊息，thread 裡的回覆要給 <paramref name="threadTs"/>（history 讀不到 thread 裡的）。
     /// 一定核對 ts：那則被刪掉時 Slack 會回範圍內的別則（replies 也一定先回上層那則），不核對就會讀到別人的話。
-    /// 那則不在回 null。
+    /// 那則不在（或 thread 不在）回 null；其他讀不到的情況丟例外，不能讓「Slack 一時出錯」看起來像「那則被刪了」。
     /// </summary>
     internal async Task<HistoryMessage?> GetMessageAsync(string channel, string ts, string? threadTs, CancellationToken ct)
     {
@@ -178,7 +179,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         var (method, query) = threadTs is null || threadTs == ts
             ? ("conversations.history", range)
             : ("conversations.replies", $"ts={Uri.EscapeDataString(threadTs)}&{range}");
-        await foreach (var m in ReadPagesAsync(method, channel, query, ct, pages: 1))
+        await foreach (var m in ReadPagesAsync(method, channel, query, ct, pages: 1, throwOnError: true))
             if (m.Ts == ts)
                 return m;
         return null;
@@ -302,7 +303,8 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     }
 
     /// <summary><c>conversations.history</c> / <c>conversations.replies</c> 共用的翻頁（帶 metadata）。失敗記 warning，停在已讀到的地方。</summary>
-    private async IAsyncEnumerable<HistoryMessage> ReadPagesAsync(string method, string channel, string query, [EnumeratorCancellation] CancellationToken ct, int pages = 20)
+    private async IAsyncEnumerable<HistoryMessage> ReadPagesAsync(
+        string method, string channel, string query, [EnumeratorCancellation] CancellationToken ct, int pages = 20, bool throwOnError = false)
     {
         string? cursor = null;
         for (var page = 0; page < pages; page++) // 上限保護
@@ -313,7 +315,13 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
             var body = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.HistoryResponse, ct);
             if (body is not { Ok: true })
             {
-                logger.LogWarning("Slack {Method} 失敗（channel={Channel}）：{Error}", method, channel, body?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture));
+                var error = body?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture);
+                logger.LogWarning("Slack {Method} failed (channel={Channel}): {Error}", method, channel, error);
+                // throwOnError：呼叫端要分得出「沒有」與「讀不到」
+                if (throwOnError && error is not ("thread_not_found" or "message_not_found"))
+                    throw TransientErrors.Contains(error)
+                        ? new SlackTransientException(method, error, resp.Headers.RetryAfter?.Delta)
+                        : new InvalidOperationException($"Slack {method} failed: {error}");
                 yield break;
             }
             foreach (var m in body.Messages ?? [])

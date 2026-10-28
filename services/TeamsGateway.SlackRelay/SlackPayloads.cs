@@ -41,7 +41,8 @@ internal sealed record SlackFileRef(string Id);
 
 /// <summary>
 /// 訊息 metadata：轉過去的訊息（<c>teams_relay</c>）夾著 Teams id / 版本，重啟時從 Slack 歷史讀回來重建對應；
-/// 表情留言（<c>teams_reaction</c>）夾著 gateway 的事件序號，重送時認得出貼過了。
+/// 表情留言（<c>teams_reaction</c>）夾著 gateway 的事件序號，重送時認得出貼過了；
+/// 人從 Slack 發的那則在 Teams 上被改時貼的「Edited / Deleted in Teams」（<c>teams_edit_note</c>）夾著 Teams id / 版本，重啟後不重貼。
 /// </summary>
 internal sealed record SlackMetadata(string? EventType, SlackRelayPayload? EventPayload);
 

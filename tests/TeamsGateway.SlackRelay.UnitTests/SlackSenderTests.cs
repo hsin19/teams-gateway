@@ -205,9 +205,9 @@ public class SlackSenderTests
         Assert.NotNull(s.Links.Lookup(TeamsId));
     }
 
-    // 沒給結果、對話裡也沒有：可以放心重試
+    // 沒給結果、對話裡也還沒有：給 Retry，Retry 會先再查一次
     [Fact]
-    public async Task Unanswered_send_missing_from_the_chat_offers_a_safe_retry()
+    public async Task Unanswered_send_missing_from_the_chat_offers_a_checked_retry()
     {
         var s = Create();
         s.Gateway.Responses[$"POST /v1/chats/{Chat}/messages"] = (HttpStatusCode.BadGateway, "");
@@ -216,7 +216,7 @@ public class SlackSenderTests
         await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
 
         Assert.Equal(["hourglass_flowing_sand", "warning"], Reactions(s, "reactions.add"));
-        Assert.Contains("retrying is safe", Responses(s)[^1].GetProperty("blocks")[0].GetProperty("text").GetProperty("text").GetString());
+        Assert.Contains("Retry checks the chat again", Responses(s)[^1].GetProperty("blocks")[0].GetProperty("text").GetProperty("text").GetString());
     }
 
     // 查詢失敗時保留 ⏳；Retry 先重新查對話，不可直接再 POST
@@ -287,6 +287,86 @@ public class SlackSenderTests
         Assert.NotNull(s.Links.Lookup(TeamsId));
     }
 
+    // 上次結果不明、當時查不到而標了 ⚠️；按 Retry 時那則已經出現在對話裡：補成已送出，不再送（Teams 不去重）
+    [Fact]
+    public async Task Retry_after_a_warning_finds_a_late_send_instead_of_sending_again()
+    {
+        var s = Create(message: Message(reactions: """[{"name":"warning","users":["UBOT"],"count":1}]"""));
+        s.Gateway.Responses[$"GET /v1/chats/{Chat}/messages"] = (HttpStatusCode.OK, $$"""
+            {"messages":[{"id":"{{TeamsId}}","conversationId":"{{Chat}}","clientMessageId":"{{ClientMessageId}}","sequenceId":1,"time":"2026-10-29T00:00:00Z"}]}
+            """);
+
+        await s.Sender.OnActionAsync(Click("retry", $"C1|{Ts}|"), Ct);
+
+        Assert.DoesNotContain(s.Gateway.Requests, r => r.Method == "POST");
+        Assert.Contains("outbox_tray", Reactions(s, "reactions.add"));
+        Assert.Contains("already sent", Responses(s)[^1].GetProperty("text").GetString());
+    }
+
+    // 讀 Slack 一時失敗不是「那則被刪了」：什麼都不送，給 Retry
+    [Fact]
+    public async Task Slack_read_failure_offers_a_retry_instead_of_saying_the_message_is_gone()
+    {
+        var s = Create();
+        var read = s.Slack.Respond!;
+        s.Slack.Respond = uri => uri.AbsolutePath.EndsWith("conversations.history", StringComparison.Ordinal) && uri.Query.Contains($"oldest={Ts}", StringComparison.Ordinal)
+            ? """{"ok":false,"error":"internal_error"}"""
+            : read(uri);
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
+
+        Assert.DoesNotContain(s.Gateway.Requests, r => r.Method == "POST");
+        var last = Responses(s)[^1];
+        Assert.Contains("Reading the message from Slack failed", last.GetProperty("blocks")[0].GetProperty("text").GetProperty("text").GetString());
+        Assert.Equal("retry", last.GetProperty("blocks")[1].GetProperty("elements")[0].GetProperty("action_id").GetString());
+    }
+
+    // 送出中的過場訊息附 Check again：relay 送到一半重啟時，使用者還有路可走（按了會先查再送）
+    [Fact]
+    public async Task Sending_notice_offers_a_check_again_button()
+    {
+        var s = Create();
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
+
+        var sending = Responses(s).Single(r => r.TryGetProperty("text", out var text) && text.GetString() == "Sending to Teams…");
+        var button = sending.GetProperty("blocks")[1].GetProperty("elements")[0];
+        Assert.Equal(("retry", "Check again"), (button.GetProperty("action_id").GetString(), button.GetProperty("text").GetProperty("text").GetString()));
+    }
+
+    // thread 裡發的：推回來（送到了）但換表情失敗，發話那邊的查詢又查不到：不能標失敗、說可以重送
+    [Fact]
+    public async Task Delivered_thread_send_is_not_marked_failed_when_its_emoji_failed()
+    {
+        var s = Create();
+        var verificationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseVerification = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        s.Gateway.RespondAsync = async (request, ct) =>
+        {
+            if (!request.RequestUri!.AbsolutePath.EndsWith("/messages", StringComparison.Ordinal))
+                return null;
+            if (request.Method == HttpMethod.Post)
+                return (HttpStatusCode.BadGateway, "");
+            verificationStarted.TrySetResult();
+            await releaseVerification.Task.WaitAsync(ct);
+            return (HttpStatusCode.OK, """{"messages":[]}""");
+        };
+        s.Slack.RespondToBody = (method, body) =>
+            method == "reactions.add" && body.GetProperty("name").GetString() == "outbox_tray" ? """{"ok":false,"error":"internal_error"}""" : null;
+
+        var sending = s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|{ThreadTs}"), Ct);
+        await verificationStarted.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        await s.Worker.RelayWithRetryAsync(
+            new MessageDto(TeamsId, Chat, "8:me", "Me", "RichText/Html", "<p>hello</p>", 1,
+                DateTimeOffset.FromUnixTimeSeconds(1729834597), long.Parse(TeamsId), ClientMessageId: ClientMessageId),
+            new Dictionary<string, string> { [Chat] = "C1" }, null, Ct);
+        releaseVerification.SetResult();
+        await sending.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+
+        Assert.DoesNotContain("warning", Reactions(s, "reactions.add"));
+        Assert.Contains("Sent to Teams", Responses(s)[^1].GetProperty("text").GetString());
+    }
+
     // 推回那邊正在換成已送出表情（拿著鎖）時，發話那邊的空查詢進到標失敗：要等它做完、看到已確認就收手
     [Fact]
     public async Task Failure_marking_waits_for_an_in_flight_confirmation()
@@ -316,16 +396,17 @@ public class SlackSenderTests
         };
 
         var sending = s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|"), Ct);
-        await verificationStarted.Task.WaitAsync(Ct);
+        await verificationStarted.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
         var echo = s.Worker.RelayWithRetryAsync(
             new MessageDto(TeamsId, Chat, "8:me", "Me", "RichText/Html", "<p>hello</p>", 1,
                 DateTimeOffset.FromUnixTimeSeconds(1729834597), long.Parse(TeamsId), ClientMessageId: ClientMessageId),
             new Dictionary<string, string> { [Chat] = "C1" }, null, Ct);
-        await confirming.Task.WaitAsync(Ct);
+        await confirming.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
         releaseVerification.SetResult();
-        await Task.Delay(200, Ct); // 讓發話那邊走到標失敗、卡在鎖上
+        // 讓發話那邊走到標失敗、卡在鎖上。來不及走到也不會誤判失敗，只是這次沒測到競態（拿掉鎖的 mutation 實測抓得到）
+        await Task.Delay(200, Ct);
         releaseConfirm.SetResult();
-        await Task.WhenAll(sending, echo);
+        await Task.WhenAll(sending, echo).WaitAsync(TimeSpan.FromSeconds(10), Ct);
 
         Assert.DoesNotContain("warning", Reactions(s, "reactions.add"));
         Assert.True(Responses(s)[^1].GetProperty("delete_original").GetBoolean());

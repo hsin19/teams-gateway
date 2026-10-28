@@ -185,7 +185,13 @@ public sealed class RelayWorker(
         if (links.Lookup(message.Id) is { } prior)
         {
             if (!IsNewer(message, prior.Version))
-                return; // 重送（斷線補收等），Slack 上已經是這一版：不要再留證一次
+            {
+                // 重送（斷線補收等），Slack 上已經是這一版：不要再留證一次。
+                // 頂層發的那則在 API 回應時就記了對應，推回來會走到這裡；那時換表情要是失敗了，趁這次再試（還記得的話）
+                if (!prior.ByBot && sends.Pending(message.ClientMessageId) is { Confirmed: false } unconfirmed)
+                    await sends.ConfirmAsync(unconfirmed, message.Id, message.ConversationId, ct);
+                return;
+            }
             if (!prior.ByBot)
             {
                 await RelayHumanSendEditAsync(message, prior, version, ct);
@@ -218,7 +224,8 @@ public sealed class RelayWorker(
             }
             catch (Exception ex) when (ex is not SlackTransientException { RateLimited: true } && !ct.IsCancellationRequested)
             {
-                // 狀態表情只是顯示；Teams 上已經有這句，頂層一定要貼，不然只看頂層就缺一句。被限流就整筆等一下重來（還沒貼）
+                // 送到的事已經記在記憶體（發話那邊不會再把它標成失敗），表情沒換成的話之後按 Send 也會先查到它；
+                // Teams 上已經有這句，頂層一定要貼，不然只看頂層就缺一句。被限流就整筆等一下重來（還沒貼）
                 logger.LogWarning(ex, "Marking Slack message {Channel}/{Ts} as sent failed; posting the Teams echo anyway", sent.Channel, sent.Ts);
             }
         }

@@ -43,6 +43,27 @@ public class GatewaySendClientTests
         Assert.Single(gateway.Requests);
     }
 
+    // Teams 的時鐘可能比 Slack 慢：比 Slack 訊息早、但還在時鐘誤差內的不能當停止點，送出的那則可能在下一頁
+    [Theory]
+    [InlineData(1729834567000 - 4 * 60 * 1000)]   // 誤差範圍內
+    [InlineData(1729834567000 - 5 * 60 * 1000)]   // 剛好在停止點上：不算比它早
+    public async Task Find_sent_keeps_paging_within_the_clock_skew_margin(long version)
+    {
+        var gateway = new PagedGateway(Page([Message("m1", version)], "c1"), Page([Message("teams-id", version, ClientMessageId)]));
+
+        Assert.Equal("teams-id", await Client(gateway).FindSentAsync("chat", ClientMessageId, Ct));
+        Assert.Equal(2, gateway.Requests.Count);
+    }
+
+    // 版本不明（0）的訊息不能當停止點：當成很舊會提早停，說「確定沒有」
+    [Fact]
+    public async Task Find_sent_ignores_messages_without_a_version_for_the_cutoff()
+    {
+        var gateway = new PagedGateway(Page([Message("m1", 0)], "c1"), Page([Message("teams-id", Recent, ClientMessageId)]));
+
+        Assert.Equal("teams-id", await Client(gateway).FindSentAsync("chat", ClientMessageId, Ct));
+    }
+
     // 空頁就是對話開頭（跟 gateway 自己翻頁的規則一樣），就算還帶著游標
     [Fact]
     public async Task Find_sent_stops_on_an_empty_page()

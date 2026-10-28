@@ -64,8 +64,9 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
 - **推回可能比 API 回應早到**（推播約 0.4 秒就到）：POST **之前**就在記憶體登記 `clientMessageId` →（頻道、`ts`、頂層還是 thread），推回時才查得到。
 - **失敗與重試**：
   - gateway 回 4xx（請求有問題、對話不存在）：確定沒送。確認那則改成錯誤原因加 **Retry** 鈕，按了拿掉 ⚠️ 照 Send 的流程重來。
-  - 逾時、5xx、連不上：不知道送了沒。Teams **不會**用 `clientmessageid` 去重（同一個 id 送兩次就是兩則，兩則都會推回來），直接重送可能變兩則。所以過幾秒經 gateway 找那個對話裡有沒有這個 `clientMessageId`：照 `nextCursor` 往前翻，翻到比那則 Slack 訊息還舊的就停（送出不可能比它早；看 `version` 不看 `composetime`，chatsvc 的排序沒驗證過），最多 40 頁。找到就當成功（換成已送出），確定沒有才按 ⚠️ 給 Retry。查不完（gateway 出錯、游標重複、翻到上限）時結果仍不明：留著 ⏳ 與登記、不按 ⚠️，確認那則改成「Send outcome unknown」加 **Retry** / **Cancel**；按 Retry 照〈防重送〉先再查一次。
-  - 確認不見了（ephemeral 不保存）：重新 @bot 一次。那是新的一則（`ts` 不同），跟原本那則無關。
+  - 逾時、5xx、連不上：不知道送了沒。Teams **不會**用 `clientmessageid` 去重（同一個 id 送兩次就是兩則，兩則都會推回來），直接重送可能變兩則。所以過幾秒經 gateway 找那個對話裡有沒有這個 `clientMessageId`：照 `nextCursor` 往前翻，翻到比那則 Slack 訊息還舊的就停（送出不可能比它早；看 `version` 不看 `composetime`，chatsvc 的排序沒驗證過），最多 40 頁。找到就當成功（換成已送出），確定沒有才按 ⚠️ 給 Retry。查不完（gateway 出錯、游標重複、翻到上限）時結果仍不明：留著 ⏳ 與登記、不按 ⚠️，確認那則改成「Send outcome unknown」加 **Retry** / **Dismiss**；按 Retry 照〈防重送〉先再查一次。
+  - 確認不見了（ephemeral 不保存）：重新 @bot 一次。那是新的一則（`ts` 不同），跟原本那則無關。（所以不經過〈防重送〉的查詢：原本那則還停在 bot 的 ⏳ 時結果不明，先到 Teams 確認或等 📤，再 @bot。）
+  - 送出中確認那則是「Sending to Teams…」加 **Check again**：relay 送到一半重啟、或最後的結果沒回到確認那則時，按它會照〈防重送〉先查再決定；送出中按了被鎖擋掉，什麼都不做。
 - 「已送出」一律按 📤（`outbox_tray`）當固定標記，防重送與重啟後的辨認都靠它：只認可以改的名稱的話，改過設定後之前發的那幾則就認不得了。`Relay:Slack:SentEmoji` 可以另外設一個顯示用的表情（預設也是 `outbox_tray`，這時只有一個）；想用自訂表情（例如用 relay 的 icon 做 `:teams-relay:`）要手動上傳一次再改設定，bot 在 📤 之外再按上它。它只是顯示：Slack 回 `invalid_name`（打錯或還沒上傳）就只留 📤、記 warning、之後不再試，其他失敗也只記 warning。
 - **只認 bot 自己按的表情**：人手動按 📤 沒有意義。反過來，Teams 上有人按了跟狀態同名的表情（例如 `SentEmoji` 設成 `+1` 時的讚），不鏡像到人發的那則，只在 thread 留言：不然收回時會連 bot 的狀態一起拿掉。
 
@@ -73,9 +74,9 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
 
 - relay 發話時用那則 Slack 訊息的 `ts` 去掉小數點當 `clientMessageId`（`1729834567.123456` → `1729834567123456`，16 碼；Teams 原樣保存，推播、讀回來都一樣）。推回來的訊息帶著它，就知道是哪一則 Slack 訊息發的。換回 `ts` 用字串處理，在倒數第 6 碼前插回小數點，不經過浮點數。
 - Teams 自己的 client 產生的 id 是 13 碼（毫秒時間戳）到 19 碼（亂數），16 碼也有，長度分不開。所以要 16 碼、全是數字，而且換回的 `ts` 落在訊息時間之前一段時間內（例如 24 小時，確認到送出的間隔），才當成可能是 Slack 發的；亂數幾乎不會落進這個範圍，也就不會為了它多打 Slack API。最後還要那則 Slack 訊息上有 bot 的狀態表情才算數。
-- **防重送**：兩次 Send（連點、Socket Mode 重送事件）是同一則訊息。以頻道 + `ts` 在記憶體裡上鎖（relay 只跑一份），再看那則上 bot 按的表情：有已送出就不送；還停在 ⏳（沒人在送，表示上次送到一半 relay 重啟、Slack 出錯，或結果不明）就先照〈失敗與重試〉找一次，找到就換成已送出、不送，確定沒有才送，查不完就再回「Send outcome unknown」、留著 Retry。只靠查表情擋不住幾乎同時的兩次點擊，Teams 也不會替我們去重。發話與推回兩邊同時結束時（推回來的比查詢先到），同一則一次只讓一邊換狀態，已經確認送到的不會再被標成失敗。
+- **防重送**：兩次 Send（連點、Socket Mode 重送事件）是同一則訊息。以頻道 + `ts` 在記憶體裡上鎖（relay 只跑一份），再看那則上 bot 按的表情：有已送出就不送；還停在 ⏳（沒人在送，表示上次送到一半 relay 重啟、Slack 出錯，或結果不明）或帶著 ⚠️（當時查不到，但可能之後才出現）就先照〈失敗與重試〉找一次，找到就換成已送出、不送，確定沒有才送，查不完就再回「Send outcome unknown」、留著 Retry。只靠查表情擋不住幾乎同時的兩次點擊，Teams 也不會替我們去重。發話與推回兩邊同時結束時（推回來的比查詢先到），同一則一次只讓一邊換狀態，已經確認送到的不會再被標成失敗。
 - **推回來的處理**：先查記憶體裡剛送出的；查不到（relay 重啟過）就照上一條把 id 換回 `ts`，用 `reactions.get` 看那個頻道的那則訊息上有沒有 bot 按的 ⏳ / 已送出 / ⚠️。重啟時可能還停在 ⏳；有 ⚠️ 的表示其實送到了。有就照上表處理（頂層的不貼），狀態換成已送出；`reactions.get` 回的訊息帶 `thread_ts`，分得出是頂層還是 thread。沒有就當一般的 Teams 訊息。
-- **對應表**：頂層發的那則沒有 bot 的 metadata 可以夾 Teams id。API 回 201 時就記進 `MessageLinks`（Teams id → 那則 Slack 訊息），推回來時沒在記憶體裡（重啟過）再補記。之後 Teams 那邊引用回覆它、按表情，都接得回這則。thread 裡發的推回來時是 bot 貼的，照原本的 metadata 機制。
+- **對應表**：頂層發的那則沒有 bot 的 metadata 可以夾 Teams id。API 回 201 時就記進 `MessageLinks`（Teams id → 那則 Slack 訊息），推回來時沒在記憶體裡（重啟過、或 API 回應沒帶 Teams id）再補記。之後 Teams 那邊引用回覆它、按表情，都接得回這則。thread 裡發的推回來時是 bot 貼的，照原本的 metadata 機制。
 - **重啟回補**（`WarmupLinksAsync`）這一版不補人發的那幾則：續接點只看帶 metadata 的 bot 訊息，頻道最後一則是自己發的時候，續接點會退到更早的那則 bot 訊息。退了也不會出錯：之後的事件會再推一次，自己發的那則照上一條查到狀態表情，不貼、順便補回對應。代價是重啟後、那則還沒再推回來之前，Teams 上引用它或按表情接不回 Slack（見〈之後〉）。
 
 ### Slack 連線
@@ -121,7 +122,7 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
 ## 代價與注意
 
 - 發話用的是 gateway 綁的那個 Teams 帳號。白名單管的是「誰能用這個帳號說話」，不要隨便加人。
-- ephemeral 不保存：重新整理、換裝置就不見。不見就是沒送，要送再 @bot 一次；不會在不知情的情況下送出。
+- ephemeral 不保存：重新整理、換裝置就不見。不見就是沒送，要送再 @bot 一次；不會在不知情的情況下送出。（只限還沒按 Send 的確認。按了之後不見——重新整理、換裝置，或在結果那則按 Dismiss——不代表沒送：那則還帶著 bot 的 ⏳ 就是結果不明，先到 Teams 看或等 📤，再決定要不要重新 @bot。）
 - 送出後在 Slack 編輯、刪除，Teams 不會跟著變，relay 也看不到（沒訂 `message.channels`），不會提醒。
 - 反過來，在 Teams 那邊編輯、刪除從頂層發的那則：bot 不能改人發的訊息（`chat.update` 回 `cant_update_message`），所以不走 Phase 1 的原地更新，改在那則的 thread 貼「_Edited in Teams_」加新版（刪除是「_Deleted in Teams_」），Slack 上的原文不動。對應表記著那則不是 bot 的（`MessageLinks` 的 `ByBot`），才分得出要走哪條。thread 裡發的推回來時是 bot 貼的，照 Phase 1 原地更新。「Edited / Deleted in Teams」那則夾著 Teams id 與版本（metadata），對應表沒記版本時（剛送出、重啟後從表情補回來）先讀那則 thread：重啟後 gateway 重送之前的編輯，貼過的版本不再貼。
 - 這一版不送附件、圖片。Slack 的格式大多轉得過去，Teams 沒有對應的（例如 `@usergroup`）照字面送。

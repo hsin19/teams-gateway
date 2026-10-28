@@ -142,6 +142,28 @@ public class SendTrackerTests
         Assert.DoesNotContain(slack.Requests, r => r.Method == "reactions.remove");
     }
 
+    // 停止點是 Slack ts 的秒數減掉 5 分鐘的時鐘誤差；看不懂的 id 沒有停止點
+    [Fact]
+    public void Earliest_send_is_the_slack_second_minus_the_clock_skew()
+    {
+        Assert.Equal(SentAt - TimeSpan.FromMinutes(5), SendTracker.EarliestSend(ClientMessageId));
+        Assert.Null(SendTracker.EarliestSend("not-a-slack-ts"));
+    }
+
+    // 推回來看到了（送到了）但換表情失敗：發話那邊之後的「標失敗」不能把它標成失敗
+    [Fact]
+    public async Task A_delivered_send_is_not_marked_failed_even_if_its_emoji_failed()
+    {
+        var (tracker, slack, _) = Tracker();
+        var send = tracker.Register(ClientMessageId, "C1", Ts, inThread: true);
+        slack.RespondToBody = (method, _) => method == "reactions.add" ? """{"ok":false,"error":"internal_error"}""" : null;
+        await Assert.ThrowsAsync<SlackTransientException>(() => tracker.ConfirmAsync(send, null, null, TestContext.Current.CancellationToken));
+        slack.RespondToBody = null;
+
+        Assert.False(await tracker.TryMarkFailedAsync(send, ClientMessageId, TestContext.Current.CancellationToken));
+        Assert.DoesNotContain(slack.Requests, r => r.Method == "reactions.add" && r.Body.GetProperty("name").GetString() == "warning");
+    }
+
     // 推回那邊已經確認送到：發話那邊之後的「標失敗」什麼都不做（不碰表情、不拿掉登記）
     [Fact]
     public async Task Marking_a_confirmed_send_as_failed_does_nothing()

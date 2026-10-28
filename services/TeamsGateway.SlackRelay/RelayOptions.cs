@@ -43,7 +43,8 @@ public sealed class RelayOptions
         public List<string> Senders { get; set; } = [];
 
         /// <summary>
-        /// 送到 Teams 後 bot 在那則按的表情（不含冒號）。自訂表情要先手動上傳；Slack 不認得這個名稱時退回 <c>outbox_tray</c>。
+        /// 送到 Teams 後 bot 在那則另外按的顯示用表情（不含冒號）。不管設什麼，固定的 <c>outbox_tray</c> 都會按上（防重送靠它）；
+        /// 自訂表情要先手動上傳，Slack 不認得這個名稱時只留 <c>outbox_tray</c>。
         /// </summary>
         public string SentEmoji { get; set; } = SendTracker.DefaultSentEmoji;
     }

@@ -69,14 +69,25 @@ public sealed class SlackSender(
             await slack.PostEphemeralAsync(channel, user, NotASender, null, threadTs, ct);
             return;
         }
-        var target = await ResolveTargetAsync(channel, threadTs, ct);
+        SendTarget target;
+        HistoryMessage? message;
+        try
+        {
+            target = await ResolveTargetAsync(channel, threadTs, ct);
+            message = await slack.GetMessageAsync(channel, ts, threadTs, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Preparing the confirmation for {Channel}/{Ts} failed", channel, ts);
+            await slack.PostEphemeralAsync(channel, user, $"Couldn't read this from Slack ({ex.Message}). @mention again to retry.", null, threadTs, ct);
+            return;
+        }
         if (target.Error is { } error)
         {
             await slack.PostEphemeralAsync(channel, user, error, null, threadTs, ct);
             return;
         }
 
-        var message = await slack.GetMessageAsync(channel, ts, threadTs, ct);
         var lines = new List<string>
         {
             $"*Send to Teams* → {Escape(await ChatLabelAsync(target.Chat!, ct))}{(target.ReplyToId is null ? "" : " (as a reply to this thread's Teams message)")}",
@@ -119,7 +130,16 @@ public sealed class SlackSender(
             var bot = await tracker.BotUserIdAsync(ct) ?? throw new InvalidOperationException("Slack auth.test failed; can't tell which reactions are the bot's");
 
             // 按 Send 時才讀內容：確認前改過的錯字照改過的送。核對作者：只能送自己寫的
-            var message = await slack.GetMessageAsync(r.Channel, r.Ts, r.ThreadTs, ct);
+            HistoryMessage? message;
+            try
+            {
+                message = await slack.GetMessageAsync(r.Channel, r.Ts, r.ThreadTs, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                await RespondReadFailedAsync(responseUrl, r, ex, ct);
+                return;
+            }
             if (message is null || message.User != user)
             {
                 await Respond(responseUrl, "That message is gone (deleted?), so nothing was sent.", ct);
@@ -135,7 +155,16 @@ public sealed class SlackSender(
                 await Respond(responseUrl, "The message no longer starts with the @mention, so it wasn't sent.", ct);
                 return;
             }
-            var target = await ResolveTargetAsync(r.Channel, r.ThreadTs, ct);
+            SendTarget target;
+            try
+            {
+                target = await ResolveTargetAsync(r.Channel, r.ThreadTs, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                await RespondReadFailedAsync(responseUrl, r, ex, ct);
+                return;
+            }
             if (target.Error is { } error)
             {
                 await Respond(responseUrl, error, ct);
@@ -149,9 +178,10 @@ public sealed class SlackSender(
             }
 
             var clientMessageId = SendTracker.ClientMessageId(r.Ts);
-            if (SendTracker.IsSending(message, bot))
+            if (SendTracker.IsSending(message, bot) || SendTracker.IsFailed(message, bot))
             {
-                // 停在 ⏳ 卻沒人在送（這裡已經上了鎖）：上次送到一半 relay 重啟或 Slack 出錯，不知道送了沒，先到對話裡找
+                // 上次的嘗試沒有結論就先到對話裡找（這裡已經上了鎖，沒人在送）：停在 ⏳ 是送到一半 relay 重啟或 Slack 出錯；
+                // ⚠️ 是當時查不到，但訊息可能之後才出現在對話裡。Teams 不去重，直接重送可能變兩則
                 string? earlier;
                 try
                 {
@@ -159,7 +189,7 @@ public sealed class SlackSender(
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
                 {
-                    // 查不了還是不知道：留著 Retry，之後再查一次（換一則重新 @bot 會是新的 ts，等於跳過這個檢查）
+                    // 查不了還是不知道：留著 Retry 之後再查（換一則重新 @bot 會是新的 ts，等於跳過這個檢查）
                     await RespondUnknownAsync(responseUrl, r, ex.Message, ct);
                     return;
                 }
@@ -184,7 +214,7 @@ public sealed class SlackSender(
                 await RespondWithRetryAsync(responseUrl, r, "Not sent to Teams", $"Couldn't mark the message as sending ({ex.Message}), so nothing was sent.", ct);
                 return;
             }
-            await Respond(responseUrl, "Sending to Teams…", ct);
+            await RespondSendingAsync(responseUrl, r, ct);
 
             var outcome = await gateway.SendAsync(target.Chat!, new SendMessageRequest(Html: html, ClientMessageId: clientMessageId, ReplyToId: target.ReplyToId), ct);
             string? verifyError = null;
@@ -203,7 +233,7 @@ public sealed class SlackSender(
                 }
             }
 
-            if (outcome.Status == SendStatus.Sent || pending.Confirmed)
+            if (outcome.Status == SendStatus.Sent || pending.Delivered)
             {
                 await ConfirmAndRespondAsync(pending, outcome.MessageId, target.Chat, responseUrl, r, ct);
                 return;
@@ -229,13 +259,13 @@ public sealed class SlackSender(
             }
             if (!failed)
             {
-                // 標失敗前推回來的那邊已經確認送到了
-                await slack.RespondAsync(responseUrl, new ResponseUrlRequest(DeleteOriginal: true), ct);
+                // 標失敗前已經推回來了：送到了。那邊換表情要是失敗過，這裡再試一次
+                await ConfirmAndRespondAsync(pending, null, target.Chat, responseUrl, r, ct);
                 return;
             }
             var why = outcome.Status == SendStatus.Rejected
                 ? $"The gateway refused it ({outcome.Error})."
-                : $"Teams didn't answer ({outcome.Error}), and the message isn't in the chat, so retrying is safe.";
+                : $"Teams didn't answer ({outcome.Error}), and the message isn't in the chat yet. Retry checks the chat again before sending.";
             logger.LogWarning("Sending Slack message {Channel}/{Ts} to Teams failed: {Why}", r.Channel, r.Ts, why);
             await RespondWithRetryAsync(responseUrl, r, "Not sent to Teams", why, ct);
         }
@@ -247,7 +277,8 @@ public sealed class SlackSender(
 
     /// <summary>
     /// Teams 收下了：換成已送出表情，確認那則收掉（給了 <paramref name="done"/> 就改成這句）。換表情失敗也要回話：
-    /// 訊息已經在 Teams 上，不能給 Retry（Teams 不去重），推回來時還會再換一次。
+    /// 訊息已經在 Teams 上，不能給 Retry（Teams 不去重）。relay 沒重啟的話，推回來時會再試一次換表情；
+    /// 一直沒換成的那則停在 ⏳，之後有人按 Send 也會先查到它已經送過。
     /// </summary>
     private async Task ConfirmAndRespondAsync(
         PendingSend send, string? teamsId, string? chat, string responseUrl, MessageRef r, CancellationToken ct, string? done = null)
@@ -268,6 +299,33 @@ public sealed class SlackSender(
             await Respond(responseUrl, done, ct);
     }
 
+    /// <summary>
+    /// 送出中的過場訊息，附一個 Check again：relay 送到一半重啟、或最後的結果沒回到這裡時，使用者還有路可走
+    /// （那時沒人在送，按了會先到對話裡找再決定）。送出中按了會被鎖擋掉，什麼都不做。過場而已，回不了也照送。
+    /// </summary>
+    private async Task RespondSendingAsync(string responseUrl, MessageRef r, CancellationToken ct)
+    {
+        try
+        {
+            await slack.RespondAsync(responseUrl, new ResponseUrlRequest(
+                Text: "Sending to Teams…",
+                Blocks: [SlackBlock.Section("Sending to Teams… If this doesn't go away, press *Check again*: it looks for the message in Teams before sending anything."),
+                         SlackBlock.Actions(SlackButton.Of("Check again", RetryAction, Ref(r.Channel, r.Ts, r.ThreadTs)))],
+                ReplaceOriginal: true), ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Showing the sending notice for {Channel}/{Ts} failed", r.Channel, r.Ts);
+        }
+    }
+
+    /// <summary>讀 Slack 失敗（不是那則不見了）：沒送新的東西，給 Retry 再讀一次。</summary>
+    private Task RespondReadFailedAsync(string responseUrl, MessageRef r, Exception ex, CancellationToken ct)
+    {
+        logger.LogWarning(ex, "Reading Slack message {Channel}/{Ts} for sending failed", r.Channel, r.Ts);
+        return RespondWithRetryAsync(responseUrl, r, "Not sent to Teams", $"Reading the message from Slack failed ({ex.Message}), so nothing new was sent.", ct);
+    }
+
     private Task RespondUnknownAsync(string responseUrl, MessageRef r, string error, CancellationToken ct)
     {
         var why = $"Teams may have received this message, but checking the chat failed ({error}). Retry will check again before sending.";
@@ -281,7 +339,7 @@ public sealed class SlackSender(
         return slack.RespondAsync(responseUrl, new ResponseUrlRequest(
             Text: title,
             Blocks: [SlackBlock.Section($":warning: {title}. {Escape(why)}"),
-                     SlackBlock.Actions(SlackButton.Of("Retry", RetryAction, value, "primary"), SlackButton.Of("Cancel", CancelAction, value))],
+                     SlackBlock.Actions(SlackButton.Of("Retry", RetryAction, value, "primary"), SlackButton.Of("Dismiss", CancelAction, value))],
             ReplaceOriginal: true), ct);
     }
 
