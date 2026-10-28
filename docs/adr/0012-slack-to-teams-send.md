@@ -76,7 +76,7 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
 - **防重送**：兩次 Send（連點、Socket Mode 重送事件）是同一則訊息。以頻道 + `ts` 在記憶體裡上鎖（relay 只跑一份），再看那則有沒有 bot 按的 ⏳ / 已送出表情，有就不送。只靠查表情擋不住幾乎同時的兩次點擊，Teams 也不會替我們去重。
 - **推回來的處理**：先查記憶體裡剛送出的；查不到（relay 重啟過）就照上一條把 id 換回 `ts`，用 `reactions.get` 看那個頻道的那則訊息上有沒有 bot 按的 ⏳ / 已送出 / ⚠️。重啟時可能還停在 ⏳；有 ⚠️ 的表示其實送到了。有就照上表處理（頂層的不貼），狀態換成已送出；`reactions.get` 回的訊息帶 `thread_ts`，分得出是頂層還是 thread。沒有就當一般的 Teams 訊息。
 - **對應表**：頂層發的那則沒有 bot 的 metadata 可以夾 Teams id。API 回 201 時就記進 `MessageLinks`（Teams id → 那則 Slack 訊息），推回來時沒在記憶體裡（重啟過）再補記。之後 Teams 那邊引用回覆它、按表情，都接得回這則。thread 裡發的推回來時是 bot 貼的，照原本的 metadata 機制。
-- **重啟回補**（`WarmupLinksAsync`，在開始收事件之前）：讀頻道歷史時，除了帶 metadata 的 bot 訊息，帶 bot 已送出表情的人發訊息也算（history 本來就附 reactions），拿 gateway 近期訊息的 `clientMessageId` 比對補回對應。頂層發話只會出現在只對到一個對話的頻道，要讀哪個對話是確定的。這些訊息也算進續接點（`NewestTeamsId`、往更早找最新一則的 `ReadNewestRelayedAsync`），不然頻道最後一則是自己發的時候，續接點會退到更早。就算退了也不會出錯：那則會再推一次，照上一條查到已送出表情，不貼、順便補回對應。所以這一項可以晚一步做。
+- **重啟回補**（`WarmupLinksAsync`）這一版不補人發的那幾則：續接點只看帶 metadata 的 bot 訊息，頻道最後一則是自己發的時候，續接點會退到更早的那則 bot 訊息。退了也不會出錯：之後的事件會再推一次，自己發的那則照上一條查到狀態表情，不貼、順便補回對應。代價是重啟後、那則還沒再推回來之前，Teams 上引用它或按表情接不回 Slack（見〈之後〉）。
 
 ### Slack 連線
 
@@ -101,6 +101,7 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
   - 要先做 spike 確認 Teams 上改、刪的 API，gateway 再加對應的端點。
   - 要偵測 Slack 上的編輯、刪除，relay 得改訂 `message.channels`（`app_mention` 收不到刪除，編輯也不保證會再送），只理會帶 bot 已送出表情的那幾則。這會改掉上面「只訂 `app_mention`」的決定，到時在那句後面用括號補充。
 - 📤 批准別人擬的草稿：同樣要訂 `message.channels`，等真的需要再說。
+- 重啟回補人發的那幾則：讀頻道歷史時，帶 bot 已送出表情的人發訊息也算（history 本來就附 reactions），拿 gateway 近期訊息的 `clientMessageId` 比對補回對應，也算進續接點。頂層發話只會出現在只對到一個對話的頻道，要讀哪個對話是確定的。
 
 ## 背景
 
@@ -114,6 +115,7 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
 - 推回來的分兩種處理：thread 裡的話不搬到頂層，只看頂層就拼不出 Teams 上的對話；頂層的話再貼一次，同一句會連著出現兩次。
 - 狀態用表情不用留言：留言會讓每則發話底下都開一個 thread。表情掛不了 metadata，所以用 `clientMessageId` = Slack `ts` 讓兩邊不用另外存對照，跟 Phase 1「狀態都放在 Slack 上」一致。
 - 自訂表情不能由 bot 自動加：只有 Enterprise Grid 的 `admin.emoji.add` 能加，一般 workspace 的 bot token 沒有這個權限。
+- Teams 上改到頂層發的那則時不假設「沒人會直接用 Teams 改」：帳號怎麼用不是 relay 能保證的，貼進 thread 不管哪種情況都成立。
 - 發話的細節先 spike 過（`spike/send_variants.py`，結論在 `spike/FINDINGS.md`）：201 回應帶新訊息的 Teams id、16 碼的 `clientmessageid` 原樣保存、同一個 id 不去重、`RichText/Html` 的格式與表格畫得出來、引用回覆要 blockquote 與 `qtdMsgs` 都有。原本打算等推回來才標已送出，再加 2 分鐘逾時與「未確認」狀態；API 直接回 id 之後就不需要了。引用回覆與格式也因此從〈之後〉提前到這一版。
 
 ## 代價與注意
@@ -121,7 +123,7 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
 - 發話用的是 gateway 綁的那個 Teams 帳號。白名單管的是「誰能用這個帳號說話」，不要隨便加人。
 - ephemeral 不保存：重新整理、換裝置就不見。不見就是沒送，要送再 @bot 一次；不會在不知情的情況下送出。
 - 送出後在 Slack 編輯、刪除，Teams 不會跟著變，relay 也看不到（沒訂 `message.channels`），不會提醒。
-- 反過來，在 Teams 那邊編輯、刪除從頂層發的那則，不特別處理：gateway 綁的是專用帳號，不會有人直接用 Teams 改它的訊息。真的發生時，照 Phase 1 的流程在 thread 留舊版後 `chat.update`，但 bot 不能改人發的訊息（`cant_update_message`），會記 error，Slack 上留著原內容。
+- 反過來，在 Teams 那邊編輯、刪除從頂層發的那則：bot 不能改人發的訊息（`chat.update` 回 `cant_update_message`），所以不走 Phase 1 的原地更新，改在那則的 thread 貼「_Edited in Teams_」加新版（刪除是「_Deleted in Teams_」），Slack 上的原文不動。對應表記著那則不是 bot 的（`MessageLinks` 的 `ByBot`），才分得出要走哪條。thread 裡發的推回來時是 bot 貼的，照 Phase 1 原地更新。
 - 這一版不送附件、圖片。Slack 的格式大多轉得過去，Teams 沒有對應的（例如 `@usergroup`）照字面送。
 - 結果不明時，「讀一次 gateway 有沒有這個 `clientMessageId`」是唯一擋重送的地方：Teams 不去重。讀的時候訊息剛好還沒出現，會誤判成沒送，按 Retry 就多一則。
 - `clientMessageId` 換回 `ts` 後查不到東西時，當一般的 Teams 訊息處理。誤判要 Teams 自己的 client 產生的 16 碼亂數剛好落在時間範圍內、又剛好對到那個頻道某則帶 bot 狀態表情的訊息，不另外防。

@@ -5,7 +5,7 @@
 分兩階段：
 
 - **Phase 1（已做）Teams → Slack**：當 `GET /v1/events`（SSE）的訂閱者，把 Teams 訊息貼進對應的 Slack 頻道。斷線用 `Last-Event-ID`（事件序號）續接；relay 自己重啟時序號沒了，改從 Slack 上最後一則轉過去的 Teams 訊息之後續接（`afterMessage`；近 24 小時沒轉過東西就往更早的歷史找），停機期間的不會漏，重送的照版本去重。限制：Slack 上一則都沒轉過（例如剛清空），或那則訊息的事件已超過 gateway 的保留天數（預設 7 天），就只能從現在開始。60 秒沒收到任何資料（gateway 每 20 秒有心跳）就當連線半死、重連。
-- **Phase 2（設計中）Slack → Teams**：訊息開頭 @bot → 只有本人看得到的確認 → 按 Send 才經 `POST /v1/chats/{id}/messages` 發出，狀態用表情標在那則上。Socket Mode 收事件。設計見 [ADR 0012](../../docs/adr/0012-slack-to-teams-send.md)。
+- **Phase 2（已做）Slack → Teams**：訊息開頭 @bot → 只有本人看得到的確認 → 按 Send 才經 `POST /v1/chats/{id}/messages` 發出，狀態用表情標在那則上。Socket Mode 收事件，沒設 `Relay:Slack:AppToken` 就不開。用法見下面〈從 Slack 發到 Teams〉，設計見 [ADR 0012](../../docs/adr/0012-slack-to-teams-send.md)。
 
 ## Slack app
 
@@ -16,6 +16,25 @@ bot 的 app 定義在 [`slack-app-manifest.yaml`](slack-app-manifest.yaml)。到
 訊息裡的內嵌圖片：relay 經 gateway 的 `/v1/media` 抓下來，上傳成 Slack 檔案（不分享到頻道），再用 image block 貼在同一則訊息裡；抓不到或上傳失敗時文字照送，末尾註記幾張圖未能轉送。
 
 送不出去時：Slack 一時不通（連不上、`internal_error` 之類 Slack 自己的錯誤）每則重試兩次，還是不行就放棄那則、記 error；被限流（`ratelimited`，每頻道約每秒一則，睡眠醒來補一批時容易撞到）不算次數，照 `Retry-After` 等到送得出去為止，後面的事件跟著排隊。頻道不存在、沒權限這類重試也沒用的錯誤直接記 error 放棄。編輯時原地更新被拒，對照表留著舊版，不會當成已經更新過。
+
+## 從 Slack 發到 Teams
+
+頻道平常是討論用的，預設什麼都不送；只有明確要求、按過確認的那則才送。
+
+- **怎麼發**：訊息**開頭** @bot（例如 `@teams-relay 好，明天見`）。relay 回一則只有你看得到的確認：送去哪個 Teams 對話、內容預覽、提醒（例如附件不會送），按 **Send** 才送、**Cancel** 收掉。@bot 在句子中間（在討論 bot 本身）不理。
+- **送去哪**：在轉過來的 Teams 訊息的 thread 裡發，送到那則所在的對話、當成那則的**引用回覆**。在頂層（或上層是頻道裡的討論）發，這個頻道在 Routes 裡只對到一個對話才送；`DefaultChannel`、或一個頻道對到多個對話時頂層不能發，請改在那則 Teams 訊息的 thread 裡發。
+- **內容**：按 Send 時才重讀那則訊息，所以確認前改錯字會送改過的版本。Slack 的格式（粗體、斜體、刪除線、code、連結、條列、引用、程式碼區塊、emoji）照樣轉成 Teams 的 HTML，@人 換成名字。附件、圖片這一版不送。
+- **誰能發**：`Relay:Slack:Senders` 裡的 Slack user id，而且只能送自己寫的那則。發話用的是 gateway 綁的 Teams 帳號，不要隨便加人。
+- **狀態**：bot 在那則按 ⏳（送出中）→ Teams 收下後換成已送出表情（`Relay:Slack:SentEmoji`，預設 📤）。失敗時按 ⚠️，確認那則改成原因加 **Retry**。gateway 沒給明確結果時，relay 會先到對話裡找那則有沒有送到，找不到才給 Retry（Teams 不會替同一則去重，直接重送可能變兩則）。確認那則不見了（ephemeral 不保存）就重新 @bot 一次。
+- **Teams 推回來時**：頂層發的那則就代表 Teams 上的這句，不再貼；thread 裡發的由 bot 照一般訊息貼到頂層（Teams 個人版沒有 thread，頂層才拼得出 Teams 上的對話），因為是引用回覆，會畫成「*名字* replied to <連結>」。之後 Teams 上有人引用、按表情，都接得回 Slack 上那則。
+- **Teams 上改了頂層發的那則**：bot 改不了人發的訊息，在那則的 thread 貼「_Edited in Teams_」加新版（刪除是「_Deleted in Teams_」），Slack 上的原文不動。反過來，在 Slack 上編輯、刪除已送出的那則，Teams 不會跟著變。
+
+開啟步驟：
+
+1. 用更新過的 [`slack-app-manifest.yaml`](slack-app-manifest.yaml) 更新 app（多了 Socket Mode、interactivity、`app_mention` 事件與 `app_mentions:read`、`reactions:read`、`users:read`），然後重新 Install。
+2. Basic Information → App-Level Tokens 建一個有 `connections:write` 的 token（`xapp-…`），設成 `Relay__Slack__AppToken`。
+3. 把能發話的人的 Slack user id 設進 `Relay__Slack__Senders__0`、`__1`…
+4. 想用自訂的已送出表情（例如用 relay 的 icon 做 `:teams-relay:`），先在 Slack 手動上傳，再設 `Relay__Slack__SentEmoji=teams-relay`；Slack 不認得這個名稱時會退回 📤 並記 warning。
 
 ## 設定
 
@@ -30,6 +49,9 @@ appsettings 放完整 default，secret 走 env（雙底線覆蓋）或 user-secr
 | `Relay:Slack:DefaultChannel` | `Relay__Slack__DefaultChannel` | 沒對應到 Routes 的對話落這個頻道（頻道 id）；不設 = 不轉 |
 | `Relay:Slack:Routes` | — | `Teams 對話 → Slack 頻道` 路由（list） |
 | `Relay:Links:RetentionHours` | `Relay__Links__RetentionHours` | 啟動時從 Slack 歷史回補多久內的訊息對應（預設 24），給回覆連結 / 原地編輯用；重啟的續接點不受這個限制 |
+| `Relay:Slack:AppToken` | `Relay__Slack__AppToken` | Socket Mode 的 app-level token（`xapp-…`，`connections:write`）。設了才開「從 Slack 發到 Teams」 |
+| `Relay:Slack:Senders` | `Relay__Slack__Senders__<i>` | 能從 Slack 發到 Teams 的 Slack user id（list）；空的 = 誰都不能發 |
+| `Relay:Slack:SentEmoji` | `Relay__Slack__SentEmoji` | 送到 Teams 後 bot 按的表情名稱（不含冒號，預設 `outbox_tray`） |
 
 **頻道策略**：有 `Routes` 就只訂閱表內那些 Teams 對話、各自轉到對應頻道；要「全部進一個頻道」就只設 `DefaultChannel`、不填 Routes。
 
@@ -51,7 +73,7 @@ Routes 刻意用 **list** 而非 dict：Teams 對話 id 含 `:`，當 config dic
 
 ## 跑
 
-開發用 AppHost 跟 gateway 一起起（`aspire start` / `aspire run`，見根目錄 README）。`Relay__Gateway__BaseUrl` 由 AppHost 指到 gateway 的 endpoint，其餘（`Relay__Gateway__ApiKey`、`Relay__Slack__BotToken`、`Relay__Slack__DefaultChannel`、Routes）從 `tools/TeamsGateway.AppHost/appsettings.Local.json` 同名的 key 原樣帶進來；Routes 攤平成 `Relay__Slack__Routes__<i>__Chat` / `Relay__Slack__Routes__<i>__Channel`。relay 等 gateway 的 `/health` 過了才起。
+開發用 AppHost 跟 gateway 一起起（`aspire start` / `aspire run`，見根目錄 README）。`Relay__Gateway__BaseUrl` 由 AppHost 指到 gateway 的 endpoint，其餘（`Relay__Gateway__ApiKey`、`Relay__Slack__BotToken`、`Relay__Slack__DefaultChannel`、Routes、`Relay__Slack__AppToken`、Senders、`Relay__Slack__SentEmoji`）從 `tools/TeamsGateway.AppHost/appsettings.Local.json` 同名的 key 原樣帶進來；Routes 攤平成 `Relay__Slack__Routes__<i>__Chat` / `Relay__Slack__Routes__<i>__Channel`，Senders 攤平成 `Relay__Slack__Senders__<i>`。relay 等 gateway 的 `/health` 過了才起。
 
 本機只轉進 Slack 測試頻道，正式環境不綁測試頻道（`docs/adr/0007`）。relay 目錄下的 `appsettings.Local.json` 是部署那台用的，本機不要放：它最後載入，會蓋掉 AppHost 帶進來的 env。
 
@@ -75,12 +97,12 @@ relay 是 worker，開 HTTP（container 裡是 8080）只為了這兩個端點�
 
 | 端點 | Healthy 的條件 | 用途 |
 |---|---|---|
-| `/health` | 設定齊全（有 BotToken 和頻道），**而且**連著 gateway 的事件串流 | 確認 relay 真的在轉送 |
+| `/health` | 設定齊全（有 BotToken 和頻道），**而且**連著 gateway 的事件串流；開了發話（有 AppToken）時 Socket Mode 也要連著 | 確認 relay 真的在轉送、發話 |
 | `/alive` | process 有回應 | 只確認活著（release 的 smoke check 用，那裡沒有 gateway） |
 
 - 剛啟動（從 Slack 回補對應時還沒連上）、gateway 重啟或斷線重連的空檔，`/health` 都是 Unhealthy，回應只有 `Healthy` / `Unhealthy`，原因記在 log。所以探測的那端要容忍短暫失敗，連續失敗一段時間才算出事。
 - 連線半死（gateway 睡眠、NAT 砍掉）時，最多 60 秒沒收到心跳就會斷線重連，`/health` 也跟著變成 Unhealthy，不會一直回 Healthy。
-- 不看 Slack：Slack 一時不通由單則重試處理，不代表 relay 壞了。
+- 不看 Slack Web API：Slack 一時不通由單則重試處理，不代表 relay 壞了。Socket Mode 不一樣：斷了就收不到發話，所以算進去（Slack 定期要求換連線，換的那一下會短暫 Unhealthy）。
 - 不看 gateway 的 Teams 登入狀態：那是 gateway 的事，由 `AuthMonitor` 在 Slack 發告警。
 
 log 等級同 gateway：`Microsoft.*` / `System.*` / `Polly` 只記 warning 以上。沒設 BotToken 或任何頻道時，worker 會記一筆 error 然後不啟動（不會空轉）。
