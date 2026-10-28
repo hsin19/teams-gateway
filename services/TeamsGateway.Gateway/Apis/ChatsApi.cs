@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using TeamsGateway.Gateway.Auth;
 using TeamsGateway.Contracts;
 using TeamsGateway.Gateway.Data;
+using TeamsGateway.Gateway.Mcp;
 using TeamsGateway.Gateway.Teams;
 
 namespace TeamsGateway.Gateway.Apis;
@@ -46,15 +47,34 @@ public static class ChatsApi
         .WithTags("Chats");
 
         v1.MapPost("/chats/{id}/messages", async Task<Results<Ok<SendMessageResult>, BadRequest<ApiError>>> (
-            string id, SendMessageRequest body, ChatsvcClient chatsvc, IOptions<GatewayOptions> options, CancellationToken ct) =>
+            string id, SendMessageRequest body, ChatsvcClient chatsvc, IDbContextFactory<GatewayDbContext> factory,
+            IOptions<GatewayOptions> options, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(body.Text))
-                return TypedResults.BadRequest(new ApiError("text 必填"));
-            var result = await chatsvc.SendMessageAsync(id, body.Text, options.Value.DisplayName, ct);
-            return TypedResults.Ok(result);
+            var html = !string.IsNullOrWhiteSpace(body.Html);
+            if (html == !string.IsNullOrWhiteSpace(body.Text))
+                return TypedResults.BadRequest(new ApiError("Give either text or html"));
+            if (body.ClientMessageId is { } clientMessageId && !IsDigits(clientMessageId))
+                return TypedResults.BadRequest(new ApiError("clientMessageId must be 1-19 digits"));
+
+            QuotedMessage? quote = null;
+            if (body.ReplyToId is { } replyToId)
+            {
+                await using var db = await factory.CreateDbContextAsync(ct);
+                var quoted = IsDigits(replyToId) ? await db.MessageEvents.FindAsync([replyToId], ct) : null;
+                if (quoted is not { SenderMri: { } senderMri } || quoted.ConversationId != id)
+                    return TypedResults.BadRequest(new ApiError("replyToId must be a message in this chat that the gateway has received"));
+                quote = new QuotedMessage(quoted.Id, senderMri, quoted.SenderName, QuotePreview(quoted));
+            }
+
+            var message = new OutgoingMessage(html ? body.Html! : body.Text!, html, body.ClientMessageId, quote);
+            return TypedResults.Ok(await chatsvc.SendMessageAsync(id, message, options.Value.DisplayName, ct));
         })
-        .WithSummary("發訊息到某對話")
-        .WithDescription("以綁定帳號身分發一則文字訊息。")
+        .WithSummary("Send a message to a chat")
+        .WithDescription(
+            "Sends as the bound account. Give `text` (plain) or `html` (sent as RichText/Html; escape it yourself). "
+            + "`clientMessageId` (digits, optional) comes back on the message's events, so you can recognise your own sends; "
+            + "`replyToId` sends a quote reply to a message the gateway has received in this chat. "
+            + "Returns the `clientMessageId` and Teams' `messageId` for the new message.")
         .WithTags("Chats");
 
         // 編輯歷史：目前版本 + 被取代的舊版本（只有訂閱對話、入庫後的訊息才有）
@@ -98,5 +118,19 @@ public static class ChatsApi
         .WithTags("Media");
 
         return v1;
+    }
+
+    private const int QuotePreviewChars = 120;
+
+    /// <summary>Teams 訊息 id 與 clientmessageid 都是數字字串（最長 19 碼，放得進 long）。</summary>
+    internal static bool IsDigits(string s) => s.Length is > 0 and <= 19 && s.All(char.IsAsciiDigit);
+
+    /// <summary>引用裡的預覽：跟 MCP 讀到的一樣是純文字，太長截斷。</summary>
+    private static string QuotePreview(MessageEvent quoted)
+    {
+        var text = McpText.Body(new MessageDto(
+            quoted.Id, quoted.ConversationId, quoted.SenderMri, quoted.SenderName, quoted.MessageType, quoted.Content,
+            quoted.SequenceId, quoted.ComposeTime));
+        return text.Length > QuotePreviewChars ? $"{text[..QuotePreviewChars]}…" : text;
     }
 }
