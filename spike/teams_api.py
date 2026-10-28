@@ -1,4 +1,4 @@
-"""Spike 共用：chatsvc（teams.live.com 個人版）REST 呼叫。token 先借用 teams skill 快取的 skypetoken。"""
+"""Spike 共用：chatsvc（teams.live.com 個人版）REST 呼叫。token 借用 teams skill 快取的 skypetoken，沒有就用 http_refresh.py 換的。"""
 
 import base64
 import json
@@ -9,10 +9,14 @@ import requests
 
 BASE = "https://teams.live.com/api/chatsvc/consumer/v1/users/ME"
 VIEW = "msnp24Equivalent|supportsMessageProperties|supportsExtendedHistory"
+LOCAL = Path(__file__).resolve().parent / ".local"
 
 
 def skypetoken() -> str:
-    return json.loads((Path.home() / ".claude/teams/session.json").read_text())["token"]
+    for path in (Path.home() / ".claude/teams/session.json", LOCAL / "http_skypetoken.json"):
+        if path.exists():
+            return json.loads(path.read_text())["token"]
+    raise SystemExit("沒有 skypetoken：先跑 uv run http_refresh.py")
 
 
 def claims(token: str) -> dict:
@@ -44,4 +48,4 @@ def hours_left(token: str) -> float:
     return round((claims(token)["exp"] - time.time()) / 3600, 1)
 
 # spike 自己建的測試群組 id 等，存在本機（gitignored）
-LOCAL_STATE = Path(__file__).resolve().parent / ".local" / "state.json"
+LOCAL_STATE = LOCAL / "state.json"
