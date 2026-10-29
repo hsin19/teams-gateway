@@ -14,6 +14,7 @@ public sealed class RelayWorker(
     GatewayMediaClient media,
     MessageLinks links,
     SendTracker sends,
+    SlackBotIdentity bot,
     IOptions<RelayOptions> options,
     ILogger<RelayWorker> logger) : BackgroundService
 {
@@ -256,7 +257,7 @@ public sealed class RelayWorker(
     {
         var chat = prior.Chat ?? message.ConversationId;
         if (prior.Version is null && version is { } incoming
-            && await slack.ReadEditNoteVersionAsync(prior.Channel, prior.Ts, message.Id, ct) is { } noted && noted >= incoming)
+            && await slack.ReadEditNoteVersionAsync(prior.Channel, prior.Ts, message.Id, (await bot.RequireAsync(ct)).BotId, ct) is { } noted && noted >= incoming)
         {
             links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, noted, prior.Images, chat, byBot: false);
             return;
@@ -297,16 +298,17 @@ public sealed class RelayWorker(
             return;
 
         var oldest = DateTimeOffset.UtcNow.AddHours(-retentionHours).ToUnixTimeSeconds();
+        var botId = await BotIdForWarmupAsync(ct);
         foreach (var channel in channels)
         {
             try
             {
                 await slack.JoinChannelAsync(channel, ct); // 要是成員才讀得到歷史
-                var recent = await slack.ReadRelayedAsync(channel, oldest, ct);
+                var recent = await slack.ReadRelayedAsync(channel, oldest, botId, ct);
                 foreach (var m in recent)
                     links.Remember(m.TeamsId, channel, m.Ts, m.Text, m.Version, chat: m.Chat);
                 // 近期沒轉過東西：往更早找最新一則當續接點，不然重啟後從「現在」開始，停機期間 gateway 發出的事件就漏了
-                if (recent.Count == 0 && await slack.ReadNewestRelayedAsync(channel, ct) is { } newest)
+                if (recent.Count == 0 && await slack.ReadNewestRelayedAsync(channel, botId, ct) is { } newest)
                     links.Remember(newest.TeamsId, channel, newest.Ts, newest.Text, newest.Version, chat: newest.Chat);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -315,6 +317,23 @@ public sealed class RelayWorker(
             }
         }
         logger.LogInformation("從 Slack 回補 {Count} 筆訊息對應（近 {Hours}h）", links.Count, retentionHours);
+    }
+
+    /// <summary>回補前要先知道自己是哪個 bot：一時查不到就退避重試，不能不分是誰貼的就讀（會把別的 bot 轉的當成自己的、續接點跑掉）。</summary>
+    private async Task<string?> BotIdForWarmupAsync(CancellationToken ct)
+    {
+        for (var delay = RetryDelays.FirstOrDefault(TimeSpan.FromSeconds(1)); ; delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, RateLimitFallback.Ticks)))
+        {
+            try
+            {
+                return (await bot.RequireAsync(ct)).BotId;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "Slack auth.test failed; retrying in {Delay} before warmup", delay);
+                await Task.Delay(delay, ct);
+            }
+        }
     }
 
     private static string Header(MessageDto message) => $"{Name(message)}:";
@@ -346,7 +365,7 @@ public sealed class RelayWorker(
             return notes;
         if (_reactionNotes.Count >= MaxReactionThreads)
             _reactionNotes.Clear();
-        notes = [.. await slack.ReadReactionSeqsAsync(channel, ts, ct)];
+        notes = [.. await slack.ReadReactionSeqsAsync(channel, ts, (await bot.RequireAsync(ct)).BotId, ct)];
         _reactionNotes[key] = notes;
         return notes;
     }

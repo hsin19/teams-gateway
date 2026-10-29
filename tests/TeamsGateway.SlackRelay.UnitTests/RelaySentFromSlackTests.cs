@@ -240,6 +240,23 @@ public class RelaySentFromSlackTests
         Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
     }
 
+    // thread 裡那則「Edited in Teams」是別的 bot 貼的（共用頻道時）：不算貼過，照貼
+    [Fact]
+    public async Task Edit_note_from_another_bot_does_not_count()
+    {
+        var (worker, slack, links, _) = Worker();
+        slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT","bot_id":"BME"}""";
+        links.Remember(TeamsId, "C1", Ts, "", null, chat: Chat, byBot: false);
+        slack.Responses["conversations.replies"] = """
+            {"ok":true,"messages":[{"ts":"1729834600.000100","bot_id":"BOTHER","text":"_Edited in Teams_",
+              "metadata":{"event_type":"teams_edit_note","event_payload":{"teams_id":"1793220563903","version":1793220599999}}}]}
+            """;
+
+        await worker.RelayWithRetryAsync(Echo() with { Content = "<p>fixed</p>", Version = 1793220599999, Edited = true }, Routes, null, Ct);
+
+        Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
+    }
+
     // 貼出去的「Edited in Teams」夾著 Teams id 與版本，重啟後才認得出貼過了
     [Fact]
     public async Task Edit_note_carries_the_version_it_shows()
@@ -284,6 +301,7 @@ public class RelaySentFromSlackTests
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,
             sends,
+            RelayFakes.Bot(slack),
             Options.Create(options),
             NullLogger<RelayWorker>.Instance) { RateLimitFallback = rateLimitFallback ?? TimeSpan.FromSeconds(30) };
         return (worker, slack, links, sends);

@@ -10,7 +10,7 @@ namespace TeamsGateway.SlackRelay;
 /// （推播可能比 API 回應早到）；那則上的狀態表情（⏳ 送出中 / 已送出 / ⚠️ 失敗）也在這裡換。
 /// 發話（<see cref="SlackSender"/>）與轉送（<see cref="RelayWorker"/>）兩條路同時用，狀態都要能並行存取。
 /// </summary>
-public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<RelayOptions> options, ILogger<SendTracker> logger)
+public sealed class SendTracker(SlackClient slack, SlackBotIdentity bot, MessageLinks links, IOptions<RelayOptions> options, ILogger<SendTracker> logger)
 {
     public const string DefaultSentEmoji = "outbox_tray";
     internal const string SendingEmoji = "hourglass_flowing_sand";
@@ -26,14 +26,13 @@ public sealed class SendTracker(SlackClient slack, MessageLinks links, IOptions<
     private static readonly TimeSpan PendingTtl = TimeSpan.FromHours(1);
 
     private readonly ConcurrentDictionary<string, PendingSend> _pending = new();
-    private string? _botUserId;
     private bool _customSentEmojiUnknown;
 
     /// <summary>有沒有開發話（設了 <c>Relay:Slack:AppToken</c>）。沒開時推回來的不必去 Slack 查表情。</summary>
     public bool Enabled => !string.IsNullOrWhiteSpace(options.Value.Slack.AppToken);
 
-    /// <summary>bot 自己的 user id；第一次用到才查，查不到下次再查。</summary>
-    public async Task<string?> BotUserIdAsync(CancellationToken ct) => _botUserId ??= await slack.GetBotUserIdAsync(ct);
+    /// <summary>bot 自己的 user id；查不到回 null（見 <see cref="SlackBotIdentity"/>）。</summary>
+    public async Task<string?> BotUserIdAsync(CancellationToken ct) => (await bot.GetAsync(ct))?.UserId;
 
     /// <summary>Slack ts → clientMessageId：去掉小數點（<c>1729834567.123456</c> → <c>1729834567123456</c>）。</summary>
     public static string ClientMessageId(string ts) => ts.Replace(".", "", StringComparison.Ordinal);

@@ -92,7 +92,7 @@ internal sealed record ChannelInfoResponse(bool Ok, SlackChannel? Channel, strin
 internal sealed record SlackChannel(string? Id, string? Name);
 
 /// <summary><c>auth.test</c>：bot 自己的 user id。</summary>
-internal sealed record AuthTestResponse(bool Ok, string? UserId, string? Error);
+internal sealed record AuthTestResponse(bool Ok, string? UserId, string? BotId, string? Error);
 
 /// <summary><c>chat.postEphemeral</c>：只有 <c>User</c> 看得到。</summary>
 internal sealed record EphemeralRequest(string Channel, string User, string Text, IReadOnlyList<SlackBlock>? Blocks = null, string? ThreadTs = null);
