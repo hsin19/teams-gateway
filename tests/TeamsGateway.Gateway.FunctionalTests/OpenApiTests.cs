@@ -15,6 +15,8 @@ public sealed class OpenApiTests(GatewayAppFixture fx) : IClassFixture<GatewayAp
     [InlineData("/v1/chats", "get", "200")]
     [InlineData("/v1/chats/{id}/messages", "get", "200")]
     [InlineData("/v1/chats/{id}/messages", "get", "400")]
+    [InlineData("/v1/chats/{id}/messages/{messageId}", "put", "409")]
+    [InlineData("/v1/chats/{id}/messages/{messageId}", "delete", "404")]
     [InlineData("/v1/messages/{messageId}/revisions", "get", "200")]
     [InlineData("/v1/webhooks", "post", "200")]
     [InlineData("/admin/api-keys", "post", "200")]
