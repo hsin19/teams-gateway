@@ -35,13 +35,23 @@ internal sealed record RegistrationTransports(TrouterTransport[] Trouter);
 
 internal sealed record TrouterTransport(string Context, string Path, int Ttl);
 
-/// <summary>chatsvc 發一則文字訊息。</summary>
+/// <summary>chatsvc 發一則訊息（<c>Text</c> 或 <c>RichText/Html</c>）。沒有引用時不帶 <c>properties</c>。</summary>
 internal sealed record ChatsvcSendRequest(
     string Content,
     [property: JsonPropertyName("messagetype")] string MessageType,
     [property: JsonPropertyName("contenttype")] string ContentType,
     [property: JsonPropertyName("clientmessageid")] string ClientMessageId,
-    [property: JsonPropertyName("imdisplayname")] string ImDisplayName);
+    [property: JsonPropertyName("imdisplayname")] string ImDisplayName,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ChatsvcSendProperties? Properties = null);
+
+/// <summary>
+/// 引用回覆：<c>qtdMsgs</c> 是字串化的 <see cref="QuotedMessageRef"/> 陣列。內容裡的 Reply blockquote 也要有，
+/// 只有一邊 Teams 不當成回覆（spike/FINDINGS.md「發話」）。
+/// </summary>
+internal sealed record ChatsvcSendProperties(string QtdMsgs);
+
+/// <summary><c>MessageId</c> 跟讀回來的訊息 id 一樣是字串（spike 驗證過這個形式；伺服器存回來時會變成數字）。</summary>
+internal sealed record QuotedMessageRef(string MessageId, string Sender, long Time);
 
 /// <summary><c>mt/beta/users/fetchShortProfile</c> 的回應（只取用得到的欄位）。</summary>
 internal sealed record ShortProfiles(IReadOnlyList<ShortProfile>? Value);
@@ -56,6 +66,7 @@ internal sealed record ShortProfile(string? Mri, string? DisplayName);
 [JsonSerializable(typeof(TrouterPushAck))]
 [JsonSerializable(typeof(RegistrationRequest))]
 [JsonSerializable(typeof(ChatsvcSendRequest))]
+[JsonSerializable(typeof(QuotedMessageRef[]))]
 [JsonSerializable(typeof(List<LoginCookie>))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(ShortProfiles))]

@@ -89,10 +89,44 @@ public class TeamsPayloadTests
             imdisplayname = "teams-gateway",
         }).ReadAsStringAsync(ct);
 
-        var current = await JsonContent.Create(ChatsvcClient.SendBody("hi <b>", "1234567890123456789", "teams-gateway"), TeamsJsonContext.Default.ChatsvcSendRequest)
+        var current = await JsonContent.Create(ChatsvcClient.SendBody(new OutgoingMessage("hi <b>"), "1234567890123456789", "teams-gateway"), TeamsJsonContext.Default.ChatsvcSendRequest)
             .ReadAsStringAsync(ct);
 
         Assert.Equal(previous, current);
+    }
+
+    [Fact]
+    public async Task Chatsvc_send_body_for_html()
+    {
+        // HTML 改送 RichText/Html，其他欄位不變、沒有引用就不帶 properties
+        var ct = TestContext.Current.CancellationToken;
+        var body = await JsonContent.Create(ChatsvcClient.SendBody(new OutgoingMessage("<p><b>hi</b></p>", Html: true, ClientMessageId: "1729834567123456"), "1729834567123456", "teams-gateway"),
+            TeamsJsonContext.Default.ChatsvcSendRequest).ReadAsStringAsync(ct);
+
+        var json = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("<p><b>hi</b></p>", json.GetProperty("content").GetString());
+        Assert.Equal("RichText/Html", json.GetProperty("messagetype").GetString());
+        Assert.Equal("1729834567123456", json.GetProperty("clientmessageid").GetString());
+        Assert.False(json.TryGetProperty("properties", out _));
+    }
+
+    [Fact]
+    public void Chatsvc_send_body_for_quote_reply()
+    {
+        // 引用回覆：內容前面加 Reply blockquote，properties.qtdMsgs 是字串化的陣列（spike 驗證過兩個都要有）；純文字轉成跳脫過的段落
+        var quote = new QuotedMessage("1793220565129", "8:live:alice", "Alice <A>", "earlier & older");
+
+        var body = ChatsvcClient.SendBody(new OutgoingMessage("sure <ok>\nsee you"), "1729834567123456", "teams-gateway");
+        var reply = ChatsvcClient.SendBody(new OutgoingMessage("sure <ok>\nsee you", Quote: quote), "1729834567123456", "teams-gateway");
+
+        Assert.Equal("Text", body.MessageType);
+        Assert.Equal("RichText/Html", reply.MessageType);
+        Assert.Equal(
+            """<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1793220565129">"""
+            + """<strong itemprop="mri" itemid="8:live:alice">Alice &lt;A&gt;</strong><span itemprop="time" itemid="1793220565129"></span>"""
+            + """<p itemprop="preview">earlier &amp; older</p></blockquote><p>sure &lt;ok&gt;<br>see you</p>""",
+            reply.Content);
+        Assert.Equal("""[{"messageId":"1793220565129","sender":"8:live:alice","time":1793220565129}]""", reply.Properties!.QtdMsgs);
     }
 
     [Fact]

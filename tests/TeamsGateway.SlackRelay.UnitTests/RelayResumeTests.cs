@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TeamsGateway.Contracts;
 using TeamsGateway.SlackRelay;
 
 namespace TeamsGateway.SlackRelay.UnitTests;
@@ -53,6 +54,36 @@ public class RelayResumeTests
         Assert.Null(links.NewestTeamsId());
     }
 
+    // 從 Slack 回覆時要知道送去哪個對話：一個頻道可能對到多個對話，所以對話 id 跟 Teams id 一起夾在 metadata 裡
+    [Fact]
+    public async Task Relayed_message_metadata_carries_the_chat()
+    {
+        var (worker, _, slack) = Worker();
+        var message = new MessageDto("1792640000000", "19:x@thread.v2", "8:bob", "Bob", "Text", "hi", 1, DateTimeOffset.UtcNow, 1792640000000);
+
+        await worker.RelayWithRetryAsync(message, Routes, null, TestContext.Current.CancellationToken);
+
+        var post = Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
+        Assert.Equal("19:x@thread.v2", post.Body.GetProperty("metadata").GetProperty("event_payload").GetProperty("chat").GetString());
+    }
+
+    // 重啟回補時連對話一起記回來；這個欄位上線前轉的訊息沒有，是 null
+    [Fact]
+    public async Task Warmup_remembers_the_chat_from_metadata()
+    {
+        var (worker, links, slack) = Worker();
+        slack.Responses["conversations.history"] = """
+            {"ok":true,"messages":[
+              {"ts":"1792000000.000200","text":"*Bob*:\nnew","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T2","version":2,"chat":"19:x@thread.v2"}}},
+              {"ts":"1792000000.000100","text":"*Bob*:\nold","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T1","version":1}}}]}
+            """;
+
+        await worker.WarmupLinksAsync(Routes, null, 24, TestContext.Current.CancellationToken);
+
+        Assert.Equal("19:x@thread.v2", links.Lookup("T2")?.Chat);
+        Assert.Null(links.Lookup("T1")?.Chat);
+    }
+
     private static Dictionary<string, string> Routes => new() { ["19:x@thread.v2"] = "C1" };
 
     private static (RelayWorker Worker, MessageLinks Links, RecordingSlack Slack) Worker()
@@ -64,6 +95,7 @@ public class RelayResumeTests
             new SlackClient(new HttpClient(slack) { BaseAddress = new Uri("https://slack.com/api/") }, NullLogger<SlackClient>.Instance),
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,
+            RelayFakes.Sends(slack, links),
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance);
         return (worker, links, slack);

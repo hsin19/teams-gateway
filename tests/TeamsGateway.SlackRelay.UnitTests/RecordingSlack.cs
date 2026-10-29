@@ -20,14 +20,23 @@ internal sealed class RecordingSlack : HttpMessageHandler
     /// <summary>依完整網址決定回應（同一個 method、參數不同時用）；回 null 就照 <see cref="Responses"/> / 預設。</summary>
     public Func<Uri, string?>? Respond { get; set; }
 
+    /// <summary>依 method 與 JSON body 決定回應（例如某個表情名稱回 invalid_name）；回 null 就照 <see cref="Respond"/> 以下的規則。</summary>
+    public Func<string, JsonElement, string?>? RespondToBody { get; set; }
+
+    /// <summary>回應前先等它（記下請求之後）：讓兩條同時跑的路停在指定的那一步。</summary>
+    public Func<string, JsonElement, CancellationToken, Task>? BeforeRespondAsync { get; set; }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var method = request.RequestUri!.Segments[^1];
         var body = request.Content is null
             ? default
             : JsonDocument.Parse(await request.Content.ReadAsStringAsync(cancellationToken)).RootElement.Clone();
-        Requests.Add((method, body));
-        var response = Respond?.Invoke(request.RequestUri) ?? (Responses.TryGetValue(method, out var canned) ? canned
+        lock (Requests)
+            Requests.Add((method, body));
+        if (BeforeRespondAsync is { } hook)
+            await hook(method, body, cancellationToken);
+        var response = RespondToBody?.Invoke(method, body) ?? Respond?.Invoke(request.RequestUri) ?? (Responses.TryGetValue(method, out var canned) ? canned
             : method == "chat.getPermalink"
             ? $$"""{"ok":true,"permalink":"{{Permalink(System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["message_ts"]!)}}"}"""
             : """{"ok":true,"ts":"111.333"}""");

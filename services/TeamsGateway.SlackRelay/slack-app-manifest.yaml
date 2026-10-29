@@ -8,7 +8,11 @@
 # files:write：Teams 訊息的內嵌圖片上傳成 Slack 檔案（不分享到頻道），再用 image block 貼在訊息裡。
 # reactions:write：Teams 有人按表情時，bot 在轉過去的訊息上按同一個 Slack 表情（誰按的寫在 thread 裡）。
 # channels:read：啟動時查頻道名稱，把路由印成「Teams 群名 → #頻道名」方便核對（設定只放 id）。private 頻道要再加 groups:read。
-# Phase 2（Slack→Teams）再加 socket_mode_enabled、app token、interactivity、app_mention 事件與對應 scope，見 docs/adr/0012。
+# Phase 2（Slack→Teams，docs/adr/0012）：Socket Mode 收 app_mention 與按鈕事件，不用對外開 HTTP。
+#   Basic Information → App-Level Tokens 建一個有 connections:write 的 token（xapp-…），設成 Relay__Slack__AppToken；沒設就只轉送。
+# app_mentions:read：收「開頭 @bot」的訊息（不訂 message.channels，relay 讀不到頻道裡其他討論）。
+# reactions:read：relay 重啟後，從那則訊息上 bot 按的狀態表情認出 Teams 推回來的是自己發的。
+# users:read：送到 Teams 前把 @人 換成名字。
 display_information:
   name: Teams Relay
   description: Mirror personal Teams messages into Slack
@@ -26,7 +30,15 @@ oauth_config:
       - channels:read
       - files:write
       - reactions:write
+      - app_mentions:read
+      - reactions:read
+      - users:read
 settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+  interactivity:
+    is_enabled: true
   org_deploy_enabled: false
-  socket_mode_enabled: false
+  socket_mode_enabled: true
   token_rotation_enabled: false

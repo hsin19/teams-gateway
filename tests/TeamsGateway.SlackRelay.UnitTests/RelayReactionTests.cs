@@ -48,6 +48,65 @@ public class RelayReactionTests
         Assert.Equal("heart", slack.Requests.Single(r => r.Method == "reactions.remove").Body.GetProperty("name").GetString());
     }
 
+    // 頂層發到 Teams 的那則上有 bot 的狀態表情：Teams 的同名表情收回時不能把它拿掉
+    [Fact]
+    public async Task Human_send_status_reaction_is_not_removed_by_mirroring()
+    {
+        var (worker, slack) = Worker(sentEmoji: "+1", byBot: false);
+
+        await worker.RelayReactionAsync(Reaction("like", added: false, count: 0), Seq, TestContext.Current.CancellationToken);
+
+        Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
+        Assert.DoesNotContain(slack.Requests, r => r.Method.StartsWith("reactions.", StringComparison.Ordinal));
+    }
+
+    // 一般 bot 轉的訊息：已送出表情設成 +1 時，Teams 的 like 照樣鏡像成 👍
+    [Fact]
+    public async Task Status_emoji_is_still_mirrored_on_a_relayed_message()
+    {
+        var (worker, slack) = Worker(sentEmoji: "+1", byBot: true);
+
+        await worker.RelayReactionAsync(Reaction("like", added: true, count: 1), Seq, TestContext.Current.CancellationToken);
+
+        Assert.Equal("+1", slack.Requests.Single(r => r.Method == "reactions.add").Body.GetProperty("name").GetString());
+    }
+
+    // 人從 Slack 發的那則：Teams 按了跟狀態同名的表情也不鏡像（只留言），收回時才不會連 bot 的一起拿掉
+    [Fact]
+    public async Task Status_emoji_added_in_teams_is_not_mirrored_on_a_human_send()
+    {
+        var (worker, slack) = Worker(sentEmoji: "+1", byBot: false);
+
+        await worker.RelayReactionAsync(Reaction("like", added: true, count: 1), Seq, TestContext.Current.CancellationToken);
+
+        Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
+        Assert.DoesNotContain(slack.Requests, r => r.Method.StartsWith("reactions.", StringComparison.Ordinal));
+    }
+
+    // 人從 Slack 發的那則：跟狀態無關的表情照樣鏡像
+    [Fact]
+    public async Task Other_emoji_is_mirrored_on_a_human_send()
+    {
+        var (worker, slack) = Worker(sentEmoji: "+1", byBot: false);
+
+        await worker.RelayReactionAsync(Reaction("heart", added: true, count: 1), Seq, TestContext.Current.CancellationToken);
+
+        Assert.Equal("heart", slack.Requests.Single(r => r.Method == "reactions.add").Body.GetProperty("name").GetString());
+    }
+
+    // 在原訊息按表情失敗只記 warning：thread 留言照貼，不重試整筆
+    [Fact]
+    public async Task Failed_reaction_mirror_is_best_effort()
+    {
+        var (worker, slack) = Worker();
+        slack.RespondToBody = (method, _) =>
+            method == "reactions.add" ? """{"ok":false,"error":"internal_error"}""" : null;
+
+        await worker.RelayReactionAsync(Reaction("heart", added: true, count: 1), Seq, TestContext.Current.CancellationToken);
+
+        Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
+    }
+
     // 對不到 Slack 表情：留言照留（顯示原始代碼），不按原生表情
     [Fact]
     public async Task Unknown_emoji_is_noted_without_mirror()
@@ -128,17 +187,19 @@ public class RelayReactionTests
         return slack;
     }
 
-    private static (RelayWorker Worker, RecordingSlack Slack) Worker()
+    private static (RelayWorker Worker, RecordingSlack Slack) Worker(string sentEmoji = "outbox_tray", bool byBot = true)
     {
         var slack = new RecordingSlack();
         var links = new MessageLinks();
-        links.Remember(MessageId, "C1", "111.222", "*Bob*:\nhello", long.Parse(MessageId));
+        links.Remember(MessageId, "C1", "111.222", "*Bob*:\nhello", long.Parse(MessageId), byBot: byBot);
+        var options = new RelayOptions { Slack = { SentEmoji = sentEmoji } };
         var worker = new RelayWorker(
             new SseEventSource(new GatewayEventStream(new HttpClient(), NullLogger<GatewayEventStream>.Instance), new MessageLinks(), NullLogger<SseEventSource>.Instance),
             new SlackClient(new HttpClient(slack) { BaseAddress = new Uri("https://slack.com/api/") }, NullLogger<SlackClient>.Instance),
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,
-            Options.Create(new RelayOptions()),
+            RelayFakes.Sends(slack, links, options),
+            Options.Create(options),
             NullLogger<RelayWorker>.Instance);
         return (worker, slack);
     }

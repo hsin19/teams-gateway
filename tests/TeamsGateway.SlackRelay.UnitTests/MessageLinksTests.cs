@@ -37,6 +37,18 @@ public class MessageLinksTests
         Assert.Equal("b", links.NewestTeamsId());
     }
 
+    // 人從 Slack 發的那則（ADR 0012）不當續接點：剛啟動就按 Send 時它最新，從它之後續接會跳過停機期間 Teams 上的訊息
+    [Fact]
+    public void NewestTeamsId_ignores_sends_from_slack()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var links = new MessageLinks();
+        links.Remember("relayed", "C1", Ts(now.AddHours(-2)), "x", 1);
+        links.Remember("sent", "C1", Ts(now), "", null, byBot: false);
+
+        Assert.Equal("relayed", links.NewestTeamsId());
+    }
+
     // 常駐很久也不會一直長：記到一定量會自動清舊的
     [Fact]
     public void Remember_prunes_periodically()

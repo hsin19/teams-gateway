@@ -18,6 +18,7 @@
 | 換 skypetoken | 拿登入 cookie 做靜默授權（純 HTTP） | `http_refresh.py` |
 | 讀對話 / 訊息 | chatsvc REST | `chats.py`、`members.py` |
 | 發話、建群組 | chatsvc REST | `send.py` |
+| 發 HTML、引用回覆、自訂 `clientmessageid` | chatsvc REST | `send_variants.py` |
 | 即時事件 | Trouter WebSocket + registrar | `trouter_client.py` |
 
 ## Token（純 HTTP，`http_refresh.py`）
@@ -62,6 +63,19 @@
   → 201，新 thread id 在 `Location` header。
 - 發訊息：`POST .../users/ME/conversations/{id}/messages`，body `{"content","messagetype":"Text","contenttype":"text","clientmessageid","imdisplayname"}` → 201。
   teams skill 現在發話走瀏覽器 DOM，改走 REST 就不需要 Chromium。
+- 發話的回應（2026-10-29，`send_variants.py`，下同）：body `{"OriginalArrivalTime":<id>}`，`Location` 結尾是 `/messages/<id>`。
+  這個 id 就是新訊息的 Teams id，跟推播、讀回來的一樣。
+- `clientmessageid` 是 client 給的數字字串：16 碼（Slack `ts` 去掉小數點）原樣保存，推播與讀回來都一樣。
+  Teams 自己的 client 產生的是 13 碼（毫秒時間戳）到 19 碼（亂數），長度分不出是誰發的。
+  **同一個 id 送兩次就是兩則**：各有自己的 id、各推一次，伺服器不去重。網頁版只畫一則，其他 client 與讀 API 的程式會看到兩則。
+- `RichText/Html`：`b`、`i`、`s`、`code`、`a`、`br`、`ul` / `ol`、`blockquote`、`pre`、`table` 都畫得出來；存下來的 HTML 只多了 `\r\n` 與 `<tbody>`。
+- 引用回覆（`messagetype: RichText/Html`）：內容前面加
+  `<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="<被引用 id>"><strong itemprop="mri" itemid="<作者 MRI>">名字</strong><span itemprop="time" itemid="<被引用 id>"></span><p itemprop="preview">預覽</p></blockquote>`，
+  `properties.qtdMsgs` 放 JSON 字串 `[{"messageId":"<id>","sender":"<作者 MRI>","time":<id>}]`（`messageId` 用讀回來的字串，伺服器存回來時變成數字）。
+  - 兩個都有：`qtdMsgs` 回來多了 `validationResult: "Valid"`、`properties` 多 `hasValidMsgReferences`；伺服器照原訊息重寫 blockquote，
+    作者名變成 `Display Name`、預覽換成原文（Teams 引用裡的作者名不可靠就是這樣來的）。畫成正常的回覆。
+  - 只有 blockquote：照原樣存，畫得出引用，但旁邊多一個 ⓘ（看起來是驗證不到原訊息）。
+  - 只有 `qtdMsgs`：一樣 `Valid`，但伺服器不補 blockquote，畫成普通訊息。
 - 測試用群組 `teams-gateway test`（只有自己）的 id 存在 `spike/.local/state.json`；`48:notes` 在個人版不存在（404）。
 
 ## 即時事件（Trouter 推播，不需要瀏覽器）

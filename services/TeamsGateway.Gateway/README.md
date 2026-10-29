@@ -115,7 +115,7 @@ API 文件在 `/scalar`（OpenAPI 文件 `/openapi/v1.json`），根目錄 `/` �
 |---|---|
 | `GET /v1/chats` | 列對話 |
 | `GET /v1/chats/{id}/messages?limit=&cursor=` | 讀訊息（`cursor` 用上一頁回的 `nextCursor` 往更舊翻） |
-| `POST /v1/chats/{id}/messages` `{"text":"..."}` | 發話 |
+| `POST /v1/chats/{id}/messages` `{"text":"..."}` 或 `{"html":"..."}` | 發話：`html` 以 `RichText/Html` 送（呼叫端自己跳脫）。選填 `clientMessageId`（數字；這則的事件會帶著它，用來認出自己發的）、`replyToId`（送成那則的引用回覆，要是 gateway 收過、同一個對話的訊息）。回 `clientMessageId` 與 Teams 給新訊息的 `messageId` |
 | `GET /v1/messages/{id}/revisions` | 一則訊息的編輯歷史：`current`（目前版本）+ `revisions`（被取代的舊版本，由舊到新，含 `content` / `superseded_at`） |
 | `GET /v1/media?url=<圖片網址>` | 代抓訊息內嵌圖片（`<img src>` 指向 `*.asm.skype.com`，要 Teams 登入才拿得到）；只接受這個網域 |
 | `GET /v1/events?chats=<id>,<id>` | **SSE** 即時事件串流（像 Slack Socket Mode）；`chats` 省略 = 全部。事件兩種：`event: message`（新訊息 / 編輯 / 刪除，`MessageDto`）、`event: reaction`（有人按 / 收回表情，`ReactionDto`：誰、哪個表情、還剩幾個人）。`data` 是 DTO 的欄位再加 `schemaVersion`（目前 1）與 `raw`（Teams 原始訊息 JSON），照 DTO 解析的可以忽略它們。SSE `id` 是事件序號（不是訊息 id，編輯會沿用訊息 id）；重連帶 `Last-Event-ID`（上次收到的 `id`）會先補回斷線期間發過的事件（保留 `Gateway:EventRetentionDays`，預設 7 天）；訂閱者重啟、沒留序號時可帶 `afterMessage=<Teams 訊息 id>`（最後處理的那則），從它第一次發出之後補（之後的編輯也會重送，照 `version` 去重）。閒置時每 `Gateway:SseHeartbeatSeconds`（預設 20）秒送 `: ping` 心跳，訂閱者可據此判斷連線半死；API key 被撤銷時會斷線 |

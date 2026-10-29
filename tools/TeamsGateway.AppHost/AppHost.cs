@@ -26,13 +26,16 @@ if (string.Equals(builder.Configuration["Gateway__Database__Provider"], "Postgre
     gateway.WithReference(database, connectionName: "gateway").WaitFor(database);
 }
 
-// Routes 是 list，攤平成 Relay__Slack__Routes__<i>__Chat / __<i>__Channel
+// Routes 是 list，攤平成 Relay__Slack__Routes__<i>__Chat / __<i>__Channel；Senders 也是 list（Relay__Slack__Senders__<i>）
 builder.AddProject<Projects.TeamsGateway_SlackRelay>("slack-relay")
     .WithEnvironment("Relay__Gateway__BaseUrl", gateway.GetEndpoint("http"))
     .WithLocalEnv("Relay__Gateway__ApiKey")
     .WithLocalEnv("Relay__Slack__BotToken")
     .WithLocalEnv("Relay__Slack__DefaultChannel")
     .WithLocalEnvPrefix("Relay__Slack__Routes__")
+    .WithLocalEnv("Relay__Slack__AppToken")
+    .WithLocalEnvPrefix("Relay__Slack__Senders__")
+    .WithLocalEnv("Relay__Slack__SentEmoji")
     .WithHttpHealthCheck("/health", endpointName: "http")
     .WaitFor(gateway);
 

@@ -7,6 +7,26 @@ namespace TeamsGateway.Gateway.UnitTests;
 public class ChatsvcClientTests
 {
     [Fact]
+    public void ParseMessage_reads_client_message_id()
+    {
+        // 發話時給的 clientmessageid 原樣帶出來，訂閱者靠它認出自己發的那則
+        var resource = JsonDocument.Parse("""{"id": "1793220563903", "clientmessageid": "1729834567123456", "messagetype": "Text"}""").RootElement;
+
+        Assert.Equal("1729834567123456", ChatsvcClient.ParseMessage(resource, "19:abc@thread.v2")!.ClientMessageId);
+    }
+
+    [Theory]
+    [InlineData("""{"OriginalArrivalTime":1793220563903}""", null, "1793220563903")]
+    [InlineData("", "https://teams.live.com/api/chatsvc/consumer/v1/users/ME/conversations/19:a@thread.v2/messages/1793220563903", "1793220563903")]
+    [InlineData("{}", null, null)]
+    [InlineData("", "https://teams.live.com/api/chatsvc/consumer/v1/users/ME/conversations/19:a@thread.v2/messages", null)]
+    public void SentMessageId_reads_arrival_time_or_location(string body, string? location, string? expected)
+    {
+        // 201 的 body 是 OriginalArrivalTime（= 新訊息的 Teams id），Location 結尾也是它
+        Assert.Equal(expected, ChatsvcClient.SentMessageId(body, location is null ? null : new Uri(location)));
+    }
+
+    [Fact]
     public void ParseMessage_reads_push_resource()
     {
         // Trouter 推播的 resource：sequenceId 是數字、from 是 URL、時間帶 offset

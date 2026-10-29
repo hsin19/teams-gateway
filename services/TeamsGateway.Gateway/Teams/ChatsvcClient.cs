@@ -201,22 +201,66 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         return (items, next);
     }
 
-    public async Task<SendMessageResult> SendMessageAsync(string threadId, string text, string displayName, CancellationToken ct = default)
+    public Task<SendMessageResult> SendMessageAsync(string threadId, string text, string displayName, CancellationToken ct = default) =>
+        SendMessageAsync(threadId, new OutgoingMessage(text), displayName, ct);
+
+    public async Task<SendMessageResult> SendMessageAsync(string threadId, OutgoingMessage message, string displayName, CancellationToken ct = default)
     {
-        // 亂數而不是時間戳：同一毫秒的兩個發話不能撞號（Teams 用它認同一則訊息）
-        var clientMessageId = Random.Shared.NextInt64(1_000_000_000_000_000_000, long.MaxValue).ToString(CultureInfo.InvariantCulture);
-        var body = SendBody(text, clientMessageId, displayName);
+        // 亂數而不是時間戳：同一毫秒的兩個發話不能撞號（網頁版把同一個 id 的訊息畫成一則）
+        var clientMessageId = message.ClientMessageId
+                              ?? Random.Shared.NextInt64(1_000_000_000_000_000_000, long.MaxValue).ToString(CultureInfo.InvariantCulture);
+        var body = SendBody(message, clientMessageId, displayName);
         using var resp = await SendAsync(
             () => new HttpRequestMessage(HttpMethod.Post, $"conversations/{Uri.EscapeDataString(threadId)}/messages")
             {
                 Content = JsonContent.Create(body, TeamsJsonContext.Default.ChatsvcSendRequest),
             },
             ct);
-        return new SendMessageResult(clientMessageId);
+        return new SendMessageResult(clientMessageId, SentMessageId(await resp.Content.ReadAsStringAsync(ct), resp.Headers.Location));
     }
 
-    internal static ChatsvcSendRequest SendBody(string text, string clientMessageId, string displayName) =>
-        new(text, MessageType: "Text", ContentType: "text", clientMessageId, displayName);
+    internal static ChatsvcSendRequest SendBody(OutgoingMessage message, string clientMessageId, string displayName)
+    {
+        if (message.Quote is not { } quote)
+            return new(message.Content, message.Html ? "RichText/Html" : "Text", "text", clientMessageId, displayName);
+
+        // 引用只能放在 HTML 裡，純文字先轉成段落
+        var html = message.Html ? message.Content : TextToHtml(message.Content);
+        var id = long.Parse(quote.Id, NumberStyles.None, CultureInfo.InvariantCulture);
+        var refs = JsonSerializer.Serialize([new QuotedMessageRef(quote.Id, quote.SenderMri, id)], TeamsJsonContext.Default.QuotedMessageRefArray);
+        return new(QuoteBlock(quote) + html, "RichText/Html", "text", clientMessageId, displayName, new ChatsvcSendProperties(refs));
+    }
+
+    /// <summary>Teams 的 Reply blockquote。伺服器會照 <c>qtdMsgs</c> 重寫作者與預覽，這裡給的只在它沒重寫時用得到。</summary>
+    internal static string QuoteBlock(QuotedMessage quote) =>
+        $"<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"{quote.Id}\">"
+        + $"<strong itemprop=\"mri\" itemid=\"{HtmlEscape(quote.SenderMri)}\">{HtmlEscape(quote.SenderName ?? "")}</strong>"
+        + $"<span itemprop=\"time\" itemid=\"{quote.Id}\"></span>"
+        + $"<p itemprop=\"preview\">{HtmlEscape(quote.Preview)}</p></blockquote>";
+
+    internal static string TextToHtml(string text) => $"<p>{HtmlEscape(text).ReplaceLineEndings("<br>")}</p>";
+
+    // 不用 WebUtility.HtmlEncode：它會把 emoji（與 U+00A0–U+00FF）轉成數字 entity
+    private static string HtmlEscape(string s) =>
+        s.Replace("&", "&amp;", StringComparison.Ordinal).Replace("<", "&lt;", StringComparison.Ordinal)
+            .Replace(">", "&gt;", StringComparison.Ordinal).Replace("\"", "&quot;", StringComparison.Ordinal);
+
+    /// <summary>新訊息的 Teams id：201 的 body 是 <c>{"OriginalArrivalTime": id}</c>，<c>Location</c> 結尾也是它。都沒有就 null。</summary>
+    internal static string? SentMessageId(string body, Uri? location)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (GetInt64(doc.RootElement, "OriginalArrivalTime") is > 0 and var id)
+                return id.ToString(CultureInfo.InvariantCulture);
+        }
+        catch (JsonException)
+        {
+            // 沒有 body 或不是 JSON：看 Location
+        }
+        var last = location?.OriginalString.TrimEnd('/').Split('/')[^1];
+        return last is { Length: > 0 } && last.All(char.IsAsciiDigit) ? last : null;
+    }
 
     /// <summary>
     /// static 版的訊息解析，給 Trouter 推播事件共用。編輯看 properties.edittime、刪除看 properties.deletetime
@@ -243,7 +287,8 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
             version == 0 && long.TryParse(id, out var v) ? v : version,
             edited,
             deleted,
-            ParseAttachments(props));
+            ParseAttachments(props),
+            GetString(m, "clientmessageid"));
     }
 
     /// <summary>從存下來的原始 JSON 取附件（DB 只存了內容欄位，附件留在 RawJson 裡）。</summary>
@@ -398,3 +443,9 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
     private static DateTimeOffset? ParseTime(string? s) =>
         DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var t) ? t : null;
 }
+
+/// <summary>要發的一則訊息。<paramref name="Html"/> 為 true 時 <paramref name="Content"/> 是 HTML（送 <c>RichText/Html</c>）；<paramref name="ClientMessageId"/> 是 null 就產生亂數。</summary>
+public sealed record OutgoingMessage(string Content, bool Html = false, string? ClientMessageId = null, QuotedMessage? Quote = null);
+
+/// <summary>引用回覆的對象：Teams 訊息 id（數字）、作者 MRI 與名字、純文字預覽。</summary>
+public sealed record QuotedMessage(string Id, string SenderMri, string? SenderName, string Preview);

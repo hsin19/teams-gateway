@@ -6,6 +6,7 @@ public sealed record ConversationDto(string Id, string? Topic, string? ThreadTyp
 /// <summary>
 /// 對外的一則訊息。<c>Version</c> 在訊息有任何變動時遞增（新訊息 = Id，有人按表情也會）；內容有沒有改看 <c>Edited</c> / <c>Deleted</c>。
 /// <c>Attachments</c> 是用「附加檔案」傳的檔（不在 <c>Content</c> 裡；只附檔時 <c>Content</c> 是空的）。
+/// <c>ClientMessageId</c> 是發送端給的 id（Teams 原樣保存）：經 gateway 發的就是 <see cref="SendMessageResult.ClientMessageId"/>，用來認出自己發的那則。
 /// </summary>
 public sealed record MessageDto(
     string Id,
@@ -19,7 +20,8 @@ public sealed record MessageDto(
     long Version = 0,
     bool Edited = false,
     bool Deleted = false,
-    IReadOnlyList<AttachmentDto>? Attachments = null);
+    IReadOnlyList<AttachmentDto>? Attachments = null,
+    string? ClientMessageId = null);
 
 /// <summary>
 /// 訊息附件（個人版 Teams 存在發送者的 OneDrive）。<c>PreviewUrl</c> 是 Teams 產的預覽圖（圖片才有），
@@ -30,7 +32,12 @@ public sealed record AttachmentDto(string Name, string? Type, string? PreviewUrl
 /// <summary>一頁訊息；<see cref="NextCursor"/> 傳回下一次查詢的游標（往更舊的方向）。</summary>
 public sealed record MessagePage(IReadOnlyList<MessageDto> Messages, string? NextCursor);
 
-public sealed record SendMessageRequest(string Text);
+/// <summary>
+/// 發一則訊息。<c>Text</c> 與 <c>Html</c> 二選一：<c>Html</c> 以 <c>RichText/Html</c> 送出，內容由呼叫端負責跳脫。
+/// <c>ClientMessageId</c> 省略時由 gateway 產生；給的話只能是數字，推回來的訊息會帶著它（見 <see cref="MessageDto.ClientMessageId"/>）。
+/// <c>ReplyToId</c> 送成那則的引用回覆，那則要是 gateway 收過、同一個對話的訊息。
+/// </summary>
+public sealed record SendMessageRequest(string? Text = null, string? Html = null, string? ClientMessageId = null, string? ReplyToId = null);
 
 /// <summary>SSE 的 <c>event</c> 名稱，也是 webhook 的 <c>X-TeamsGateway-Event</c> header 值。</summary>
 public static class EventKinds
@@ -94,4 +101,5 @@ public sealed record AuthStatusDto(
     string? LastError,
     DateTimeOffset? TokenExpiresAt);
 
-public sealed record SendMessageResult(string ClientMessageId);
+/// <summary>發話結果。<c>MessageId</c> 是 Teams 給新訊息的 id（推播、讀回來的都是這個），Teams 沒回時是 null。</summary>
+public sealed record SendMessageResult(string ClientMessageId, string? MessageId = null);
