@@ -77,9 +77,9 @@ public sealed class SlackSender(
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            // 讀不到 thread 上層那則就不知道送去哪，不能退回頻道的規則亂猜
+            // 讀不到 thread 上層那則（或查不到它在 Teams 上是哪則）就不知道送去哪，不能退回頻道的規則亂猜
             logger.LogWarning(ex, "Resolving the Teams chat for {Channel}/{Ts} failed", channel, ts);
-            await slack.PostEphemeralAsync(channel, user, $"Couldn't read the thread from Slack ({ex.Message}). @mention again to retry.", null, threadTs, ct);
+            await slack.PostEphemeralAsync(channel, user, $"Couldn't work out where to send this ({ex.Message}). @mention again to retry.", null, threadTs, ct);
             return;
         }
         if (target.Error is { } error)
@@ -173,7 +173,8 @@ public sealed class SlackSender(
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                await RespondReadFailedAsync(responseUrl, r, ex, ct);
+                logger.LogWarning(ex, "Resolving the Teams chat for {Channel}/{Ts} failed", r.Channel, r.Ts);
+                await RespondWithRetryAsync(responseUrl, r, "Not sent to Teams", $"Couldn't work out where to send it ({ex.Message}), so nothing was sent.", ct);
                 return;
             }
             if (target.Error is { } error)
@@ -356,13 +357,13 @@ public sealed class SlackSender(
 
     /// <summary>
     /// 送去哪個對話。thread 裡：上層是自己的 bot 轉過來的 Teams 訊息，就送到它所在的對話、當成它的引用回覆；
-    /// 上層是別的 app 轉的就不送。其他（頂層、上層是頻道裡的討論）：頻道只對到一個對話才送。
+    /// 上層是別的 app 轉的就不送；上層是從 Slack 發過去的那則，也是引用回覆它。其他（頂層、上層是頻道裡的討論）：頻道只對到一個對話才送。
     /// </summary>
     internal async Task<SendTarget> ResolveTargetAsync(string channel, string? threadTs, CancellationToken ct)
     {
         var routed = ChatsFor(channel);
-        if (threadTs is not null
-            && await slack.GetMessageAsync(channel, threadTs, null, ct) is { Metadata: { EventType: SlackClient.MetaEventType, EventPayload.TeamsId: { } teamsId } meta } parent)
+        var parent = threadTs is null ? null : await slack.GetMessageAsync(channel, threadTs, null, ct);
+        if (parent is { Metadata: { EventType: SlackClient.MetaEventType, EventPayload.TeamsId: { } teamsId } meta })
         {
             // 別的 app（例如本機開發用的 bot）轉的：它的 metadata 不採信，也不能退回頻道的規則亂猜，使用者在 thread 裡就是要回那一則
             if (!SlackClient.IsFrom(parent, (await bot.RequireAsync(ct)).BotId))
@@ -372,6 +373,15 @@ public sealed class SlackSender(
             return chat is null
                 ? SendTarget.Fail("This Teams message was relayed before replies were supported, so its chat is unknown. Reply in Teams directly.")
                 : new SendTarget(chat, teamsId, null);
+        }
+        // 上層是從 Slack 發過去的（bot 按了已送出表情）：它在 Teams 上就是一則訊息，回它就是引用它。
+        // 頂層發話只會出現在只對到一個對話的頻道；Teams id 用它的 clientMessageId 到對話裡找，relay 重啟過也找得到
+        if (parent is { BotId: null, Ts: { } parentTs } && routed is [var sentTo]
+            && tracker.IsSent(parent, (await bot.RequireAsync(ct)).UserId))
+        {
+            return await gateway.FindSentAsync(sentTo, SendTracker.ClientMessageId(parentTs), ct) is { } sentId
+                ? new SendTarget(sentTo, sentId, null)
+                : SendTarget.Fail("Couldn't find this thread's message in Teams (deleted there?), so it can't be quoted. Reply in Teams directly.");
         }
         return routed switch
         {

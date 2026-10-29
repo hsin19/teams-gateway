@@ -30,7 +30,7 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
   - 所以確認前改錯字會送改過的版本；relay 不用記待確認的東西，中間重啟按鈕照樣有效。
 - **誰能發**：`Relay:Slack:Senders`（Slack user id 白名單）。觸發與按 Send 都檢查：是白名單裡的人、而且是那則訊息的作者。不符的回 ephemeral 說明，不送。
 - **目標對話**：
-  - thread 裡：上層是轉過來的 Teams 訊息，就送到那則所在的對話，**送成 Teams 的引用回覆**（見〈內容〉）；上層是頻道裡的討論，同頂層的規則，送一則普通訊息。
+  - thread 裡：上層是轉過來的 Teams 訊息，就送到那則所在的對話，**送成 Teams 的引用回覆**（見〈內容〉）；上層是頻道裡的討論，同頂層的規則，送一則普通訊息。（上層是從 Slack 發過去、bot 按了已送出表情的那則，不算頻道裡的討論：它在 Teams 上就是一則訊息，一樣送成它的引用回覆。頂層發話只會出現在只對到一個對話的頻道，對話是確定的；它沒有 metadata 可以夾 Teams id，所以用它的 `clientMessageId` 到對話裡找，relay 重啟過也找得到。找不到（例如在 Teams 刪了）就回 ephemeral 說明，不改送普通訊息。）
   - 上層在哪個對話，從 bot 訊息的 metadata 讀：`teams_relay` 的 payload 加上對話 id，轉送與原地更新都帶。光有 Teams 訊息 id 不夠：`DefaultChannel` 與一個頻道對到多個對話時，正是要改在 thread 裡發的情況，頻道反推不出對話。這一項先在 Phase 1 出版，等發話上線時近期的訊息都已經帶著；沒帶的舊訊息，頻道只對到一個對話就用它，不然回 ephemeral 說找不到對話。（只認自己的 bot 貼的：比對 `auth.test` 回的 bot id 與訊息上的 `bot_id`。讀歷史帶了 `include_all_metadata`，同一個頻道裡別的 app（例如本機開發用的另一個 bot）夾的同格式 metadata 不過濾的話也會被當成自己的；上層是別的 app 轉的就不送，也不退回頻道的規則。只有 Slack 沒給 bot id 時才不過濾，`auth.test` 一時失敗會重試、不會因此改成不過濾。）
   - 頂層：這個頻道在 Routes 裡**只對到一個**對話才送。`DefaultChannel`、或一個頻道對到多個對話時，頂層不能發（不知道要送哪），回 ephemeral 請改在那則 Teams 訊息的 thread 裡發。
 - **內容**：送 `RichText/Html`，從訊息的 `rich_text` blocks 轉（沒有 blocks 才退回 `text`）。
