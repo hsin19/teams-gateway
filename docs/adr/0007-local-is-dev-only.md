@@ -4,7 +4,7 @@
 
 - 本機沒有「正式環境」，只有開發：`aspire run` 一次起 gateway + slack-relay + dashboard，要用才開、改完重啟。不再用 launchd 常駐。
 - 正式環境之後另找一台機器跑 container（`docker-compose.yml`、`DEPLOY.md`），上線時在那台重新 bootstrap、Slack 頻道重新整理，不沿用本機的資料。（後來 compose 與部署說明移到部署端，repo 只由 CI 出 image，見根目錄 README〈部署〉。）
-- Slack 頻道分開：本機只轉進 Slack 測試頻道，正式環境不綁測試頻道。正式環境上線前，本機暫時沿用現有的 4 條 Routes（其中測試用的 Teams 對話 → Slack 測試頻道）；上線後本機的 Routes 全部改指測試頻道，其他正式頻道只由正式環境發。
+- Slack 頻道分開：本機只轉進 Slack 測試頻道，正式環境不綁測試頻道。（ADR 0012 之後：relay 讀頻道裡的 metadata 只認自己的 bot 貼的，本機改用另一個 Slack app 的話，正式環境也可以把測試用的 Teams 對話轉進同一個測試頻道，兩邊互不干擾。本機要開發話功能時一定要用另一個 app：同一個 app 的 Socket Mode 連線會互搶事件。）正式環境上線前，本機暫時沿用現有的 4 條 Routes（其中測試用的 Teams 對話 → Slack 測試頻道）；上線後本機的 Routes 全部改指測試頻道，其他正式頻道只由正式環境發。
 - 取代 ADR 0004。
 
 ## 背景

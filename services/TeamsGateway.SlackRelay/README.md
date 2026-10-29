@@ -75,7 +75,7 @@ Routes 刻意用 **list** 而非 dict：Teams 對話 id 含 `:`，當 config dic
 
 開發用 AppHost 跟 gateway 一起起（`aspire start` / `aspire run`，見根目錄 README）。`Relay__Gateway__BaseUrl` 由 AppHost 指到 gateway 的 endpoint，其餘（`Relay__Gateway__ApiKey`、`Relay__Slack__BotToken`、`Relay__Slack__DefaultChannel`、Routes、`Relay__Slack__AppToken`、Senders、`Relay__Slack__SentEmoji`）從 `tools/TeamsGateway.AppHost/appsettings.Local.json` 同名的 key 原樣帶進來；Routes 攤平成 `Relay__Slack__Routes__<i>__Chat` / `Relay__Slack__Routes__<i>__Channel`，Senders 攤平成 `Relay__Slack__Senders__<i>`。relay 等 gateway 的 `/health` 過了才起。
 
-本機只轉進 Slack 測試頻道，正式環境不綁測試頻道（`docs/adr/0007`）。relay 目錄下的 `appsettings.Local.json` 是部署那台用的，本機不要放：它最後載入，會蓋掉 AppHost 帶進來的 env。
+本機只轉進 Slack 測試頻道（`docs/adr/0007`）。本機用另一個 Slack app（自己的 bot token；要測發話再加它的 app token）：同一個 app 開兩條 Socket Mode 連線會互搶事件。頻道可以跟正式環境共用，relay 讀 metadata 只認自己的 bot 貼的。relay 目錄下的 `appsettings.Local.json` 是部署那台用的，本機不要放：它最後載入，會蓋掉 AppHost 帶進來的 env。
 
 單獨跑（不經 AppHost）就自己給 env：
 

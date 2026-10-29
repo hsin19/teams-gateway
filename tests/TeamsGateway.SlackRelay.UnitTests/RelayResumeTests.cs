@@ -84,6 +84,24 @@ public class RelayResumeTests
         Assert.Null(links.Lookup("T1")?.Chat);
     }
 
+    // 同一個頻道裡別的 bot（例如本機開發用的另一個）也夾著 teams_relay metadata：只認自己 bot 貼的，續接點才不會跳到別人的進度
+    [Fact]
+    public async Task Warmup_ignores_relay_metadata_from_another_bot()
+    {
+        var (worker, links, slack) = Worker();
+        slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT","bot_id":"BME"}""";
+        slack.Responses["conversations.history"] = """
+            {"ok":true,"messages":[
+              {"ts":"1792000000.000300","bot_id":"BOTHER","text":"*Bob*:\nother","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T3","version":3}}},
+              {"ts":"1792000000.000100","bot_id":"BME","text":"*Bob*:\nmine","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T1","version":1}}}]}
+            """;
+
+        await worker.WarmupLinksAsync(Routes, null, 24, TestContext.Current.CancellationToken);
+
+        Assert.Null(links.Lookup("T3"));
+        Assert.Equal("T1", links.NewestTeamsId());
+    }
+
     private static Dictionary<string, string> Routes => new() { ["19:x@thread.v2"] = "C1" };
 
     private static (RelayWorker Worker, MessageLinks Links, RecordingSlack Slack) Worker()
@@ -96,6 +114,7 @@ public class RelayResumeTests
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,
             RelayFakes.Sends(slack, links),
+            RelayFakes.Bot(slack),
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance);
         return (worker, links, slack);

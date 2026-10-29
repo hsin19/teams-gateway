@@ -87,6 +87,7 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
 - Native AOT 用不了 Slack 的 SDK：Socket Mode 用 `ClientWebSocket` 自己接（收 envelope、回 ack、遇到 `disconnect` 重連），payload 走 `SlackJsonContext`。envelope 收到就先 ack（Slack 要 3 秒內），處理丟到背景；同一個事件重送的照 `event_id` 略過。
 - 發話跟 Phase 1 的轉送是兩條同時跑的路：發話的流程放在自己的類別，跟 `RelayWorker` 共用的狀態（剛送出的、`MessageLinks`）要能並行存取。`RelayWorker` 裡逐筆處理用的 `Dictionary` 不能直接拿來共用。
 - 開了發話時，`/health` 也看 Socket Mode 連著沒：relay 的工作包含發話，斷了要看得出來。
+- 一個 Slack app 只給一個 relay 開 Socket Mode：同一個 app 開了好幾條連線時，Slack 會把事件分給它們，@bot 與按鈕可能被另一個 relay 收走。本機開發用另一個 Slack app（自己的 bot token 與 app token）。頻道可以共用：讀頻道裡的 metadata（回補對應、表情留言與「Edited in Teams」的去重、thread 上層是不是轉過來的 Teams 訊息）只認自己的 bot 貼的（`auth.test` 回的 bot id 對訊息上的 `bot_id`）；讀歷史帶了 `include_all_metadata`，不過濾的話別的 app 夾的同格式 metadata 也會被當成自己的。
 
 ### 之後
 

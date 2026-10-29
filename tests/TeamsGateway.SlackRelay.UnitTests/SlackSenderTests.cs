@@ -137,6 +137,20 @@ public class SlackSenderTests
         Assert.Null(s.Links.Lookup(TeamsId)); // thread 裡發的推回來時由 bot 貼，照 metadata 對應
     }
 
+    // thread 上層是別的 bot 轉的 Teams 訊息（共用頻道時）：不當成自己的，照頻道的規則送普通訊息、不引用
+    [Fact]
+    public async Task Reply_under_another_bots_message_is_not_a_quote_reply()
+    {
+        var s = Create();
+        s.Slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT","bot_id":"BME"}""";
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|{ThreadTs}"), Ct);
+
+        var post = Assert.Single(s.Gateway.Requests, r => r.Method == "POST");
+        Assert.Equal($"/v1/chats/{Chat}/messages", post.Path);
+        Assert.Equal(JsonValueKind.Null, JsonDocument.Parse(post.Body).RootElement.GetProperty("replyToId").ValueKind);
+    }
+
     // 確認之後那則被刪了：Slack 會回別則，核對 ts 後不送
     [Fact]
     public async Task Deleted_message_is_not_sent()
@@ -570,6 +584,7 @@ public class SlackSenderTests
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,
             tracker,
+            RelayFakes.Bot(slack),
             Options.Create(options),
             NullLogger<RelayWorker>.Instance);
         var sender = new SlackSender(
@@ -577,6 +592,7 @@ public class SlackSenderTests
             new GatewaySendClient(RelayFakes.Gateway(gateway), NullLogger<GatewaySendClient>.Instance),
             new GatewayStatusClient(RelayFakes.Gateway(gateway), NullLogger<GatewayStatusClient>.Instance),
             tracker,
+            RelayFakes.Bot(slack),
             Options.Create(options),
             NullLogger<SlackSender>.Instance) { VerifyDelay = TimeSpan.Zero };
         return new Setup(sender, slack, gateway, links, worker);

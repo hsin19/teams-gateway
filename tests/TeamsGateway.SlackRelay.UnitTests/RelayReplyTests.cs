@@ -88,6 +88,7 @@ public class RelayReplyTests
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,
             RelayFakes.Sends(slack, links),
+            RelayFakes.Bot(slack),
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance);
         var routes = new Dictionary<string, string> { [Conv] = "C1" };

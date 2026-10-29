@@ -14,6 +14,7 @@ public sealed class RelayWorker(
     GatewayMediaClient media,
     MessageLinks links,
     SendTracker sends,
+    SlackBotIdentity bot,
     IOptions<RelayOptions> options,
     ILogger<RelayWorker> logger) : BackgroundService
 {
@@ -256,7 +257,7 @@ public sealed class RelayWorker(
     {
         var chat = prior.Chat ?? message.ConversationId;
         if (prior.Version is null && version is { } incoming
-            && await slack.ReadEditNoteVersionAsync(prior.Channel, prior.Ts, message.Id, ct) is { } noted && noted >= incoming)
+            && await slack.ReadEditNoteVersionAsync(prior.Channel, prior.Ts, message.Id, await bot.BotIdAsync(ct), ct) is { } noted && noted >= incoming)
         {
             links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, noted, prior.Images, chat, byBot: false);
             return;
@@ -297,16 +298,25 @@ public sealed class RelayWorker(
             return;
 
         var oldest = DateTimeOffset.UtcNow.AddHours(-retentionHours).ToUnixTimeSeconds();
+        string? botId = null;
+        try
+        {
+            botId = await bot.BotIdAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Slack auth.test failed; warmup reads relay metadata from every app in the channel");
+        }
         foreach (var channel in channels)
         {
             try
             {
                 await slack.JoinChannelAsync(channel, ct); // 要是成員才讀得到歷史
-                var recent = await slack.ReadRelayedAsync(channel, oldest, ct);
+                var recent = await slack.ReadRelayedAsync(channel, oldest, botId, ct);
                 foreach (var m in recent)
                     links.Remember(m.TeamsId, channel, m.Ts, m.Text, m.Version, chat: m.Chat);
                 // 近期沒轉過東西：往更早找最新一則當續接點，不然重啟後從「現在」開始，停機期間 gateway 發出的事件就漏了
-                if (recent.Count == 0 && await slack.ReadNewestRelayedAsync(channel, ct) is { } newest)
+                if (recent.Count == 0 && await slack.ReadNewestRelayedAsync(channel, botId, ct) is { } newest)
                     links.Remember(newest.TeamsId, channel, newest.Ts, newest.Text, newest.Version, chat: newest.Chat);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -346,7 +356,7 @@ public sealed class RelayWorker(
             return notes;
         if (_reactionNotes.Count >= MaxReactionThreads)
             _reactionNotes.Clear();
-        notes = [.. await slack.ReadReactionSeqsAsync(channel, ts, ct)];
+        notes = [.. await slack.ReadReactionSeqsAsync(channel, ts, await bot.BotIdAsync(ct), ct)];
         _reactionNotes[key] = notes;
         return notes;
     }

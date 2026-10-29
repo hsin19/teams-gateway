@@ -16,6 +16,7 @@ public sealed class SlackSender(
     GatewaySendClient gateway,
     GatewayStatusClient chats,
     SendTracker tracker,
+    SlackBotIdentity bot,
     IOptions<RelayOptions> options,
     ILogger<SlackSender> logger)
 {
@@ -354,14 +355,15 @@ public sealed class SlackSender(
     }
 
     /// <summary>
-    /// 送去哪個對話。thread 裡：上層是轉過來的 Teams 訊息，就送到它所在的對話、當成它的引用回覆；
-    /// 其他（頂層、上層是頻道裡的討論）：頻道只對到一個對話才送。
+    /// 送去哪個對話。thread 裡：上層是自己的 bot 轉過來的 Teams 訊息，就送到它所在的對話、當成它的引用回覆；
+    /// 其他（頂層、上層是頻道裡的討論、別的 bot 轉的）：頻道只對到一個對話才送。
     /// </summary>
     internal async Task<SendTarget> ResolveTargetAsync(string channel, string? threadTs, CancellationToken ct)
     {
         var routed = ChatsFor(channel);
         if (threadTs is not null
-            && await slack.GetMessageAsync(channel, threadTs, null, ct) is { Metadata: { EventType: SlackClient.MetaEventType, EventPayload.TeamsId: { } teamsId } meta })
+            && await slack.GetMessageAsync(channel, threadTs, null, ct) is { Metadata: { EventType: SlackClient.MetaEventType, EventPayload.TeamsId: { } teamsId } meta } parent
+            && SlackClient.IsFrom(parent, await bot.BotIdAsync(ct)))
         {
             // 對話 id 夾在 metadata 裡；這個欄位上線前轉的沒有，頻道只對到一個對話時用它
             var chat = meta.EventPayload.Chat ?? (routed is [var only] ? only : null);

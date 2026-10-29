@@ -124,13 +124,13 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
 
     // ---- Slack → Teams 發話（ADR 0012）用到的 ----
 
-    /// <summary>bot 自己的 user id（<c>auth.test</c>）：認 @bot、認 bot 按的表情用。查不到回 null。</summary>
-    public async Task<string?> GetBotUserIdAsync(CancellationToken ct)
+    /// <summary>bot 自己是誰（<c>auth.test</c>，見 <see cref="SlackBotIdentity"/>）。查不到回 null。</summary>
+    public async Task<BotIdentity?> GetBotIdentityAsync(CancellationToken ct)
     {
         using var resp = await http.PostAsync("auth.test", null, ct);
         var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.AuthTestResponse, ct);
         if (result is { Ok: true, UserId: { } id })
-            return id;
+            return new BotIdentity(id, result.BotId);
         logger.LogWarning("Slack auth.test failed: {Error}", result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture));
         return null;
     }
@@ -248,36 +248,42 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
             logger.LogWarning("Slack conversations.join 失敗（channel={Channel}）：{Error}", channel, result?.Error ?? ((int)resp.StatusCode).ToString());
     }
 
+    /// <summary>
+    /// 這則是不是 <paramref name="botId"/> 貼的。下面讀 metadata 的都只認自己的 bot：讀歷史帶了 <c>include_all_metadata</c>，
+    /// 同一個頻道裡別的 app（例如本機開發用的另一個 bot）夾的同格式 metadata 也會讀到。<paramref name="botId"/> 是 null（查不到自己是誰）就不分。
+    /// </summary>
+    internal static bool IsFrom(HistoryMessage m, string? botId) => botId is null || m.BotId == botId;
+
     /// <summary>讀頻道歷史，撈出我們轉過（帶 metadata）的訊息：(Teams id, ts, 當前文字, 版本)。往回翻到 <paramref name="oldestUnixSeconds"/>。</summary>
-    public async Task<IReadOnlyList<RelayedMessage>> ReadRelayedAsync(string channel, long oldestUnixSeconds, CancellationToken ct)
+    public async Task<IReadOnlyList<RelayedMessage>> ReadRelayedAsync(string channel, long oldestUnixSeconds, string? botId, CancellationToken ct)
     {
         var found = new List<RelayedMessage>();
         await foreach (var m in ReadPagesAsync("conversations.history", channel, $"oldest={oldestUnixSeconds}", ct))
-            if (AsRelayed(m) is { } relayed)
+            if (AsRelayed(m, botId) is { } relayed)
                 found.Add(relayed);
         return found;
     }
 
     /// <summary>頻道裡最新一則我們轉過的訊息，不限時間往回找（最多 20 頁）；一則都沒有回 null。</summary>
-    public async Task<RelayedMessage?> ReadNewestRelayedAsync(string channel, CancellationToken ct)
+    public async Task<RelayedMessage?> ReadNewestRelayedAsync(string channel, string? botId, CancellationToken ct)
     {
         await foreach (var m in ReadPagesAsync("conversations.history", channel, "", ct))
-            if (AsRelayed(m) is { } relayed)
+            if (AsRelayed(m, botId) is { } relayed)
                 return relayed;
         return null;
     }
 
-    private static RelayedMessage? AsRelayed(HistoryMessage m) =>
-        m.Metadata?.EventType == MetaEventType && m.Metadata.EventPayload?.TeamsId is { } tid && m.Ts is { } ts
+    private static RelayedMessage? AsRelayed(HistoryMessage m, string? botId) =>
+        IsFrom(m, botId) && m.Metadata?.EventType == MetaEventType && m.Metadata.EventPayload?.TeamsId is { } tid && m.Ts is { } ts
             ? new RelayedMessage(tid, ts, m.Text ?? "", m.Metadata.EventPayload.Version, m.Metadata.EventPayload.Chat)
             : null;
 
     /// <summary>某則訊息 thread 裡已經貼過的表情留言的事件序號（<see cref="PostReactionNoteAsync"/> 夾的 metadata）；讀不到就是空的。</summary>
-    public async Task<IReadOnlyCollection<long>> ReadReactionSeqsAsync(string channel, string threadTs, CancellationToken ct)
+    public async Task<IReadOnlyCollection<long>> ReadReactionSeqsAsync(string channel, string threadTs, string? botId, CancellationToken ct)
     {
         var seqs = new HashSet<long>();
         await foreach (var m in ReadPagesAsync("conversations.replies", channel, $"ts={Uri.EscapeDataString(threadTs)}", ct))
-            if (m.Metadata?.EventType == ReactionEventType && m.Metadata.EventPayload?.Seq is { } seq)
+            if (IsFrom(m, botId) && m.Metadata?.EventType == ReactionEventType && m.Metadata.EventPayload?.Seq is { } seq)
                 seqs.Add(seq);
         return seqs;
     }
@@ -292,11 +298,11 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
                 Metadata: new SlackMetadata(EditNoteEventType, new SlackRelayPayload(teamsId, version))), ct) is not null;
 
     /// <summary>那則 thread 裡已經貼過的 Teams 新版裡最新的版本（<see cref="PostEditNoteAsync"/> 夾的）；沒貼過回 null。</summary>
-    public async Task<long?> ReadEditNoteVersionAsync(string channel, string threadTs, string teamsId, CancellationToken ct)
+    public async Task<long?> ReadEditNoteVersionAsync(string channel, string threadTs, string teamsId, string? botId, CancellationToken ct)
     {
         long? newest = null;
         await foreach (var m in ReadPagesAsync("conversations.replies", channel, $"ts={Uri.EscapeDataString(threadTs)}", ct))
-            if (m.Metadata is { EventType: EditNoteEventType, EventPayload: { Version: { } version } payload } && payload.TeamsId == teamsId
+            if (IsFrom(m, botId) && m.Metadata is { EventType: EditNoteEventType, EventPayload: { Version: { } version } payload } && payload.TeamsId == teamsId
                 && version > (newest ?? long.MinValue))
                 newest = version;
         return newest;

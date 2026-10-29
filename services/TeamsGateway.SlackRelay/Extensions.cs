@@ -47,6 +47,7 @@ public static class Extensions
         builder.Services.AddHttpClient<GatewaySendClient>(ConfigureGateway);
 
         builder.Services.AddSingleton<MessageLinks>();
+        builder.Services.AddSingleton<SlackBotIdentity>();
         builder.Services.AddSingleton<SendTracker>();
         builder.Services.AddHostedService<RelayWorker>();
 

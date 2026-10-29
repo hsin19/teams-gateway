@@ -60,6 +60,22 @@ public class RelayReactionTests
         Assert.DoesNotContain(slack.Requests, r => r.Method.StartsWith("reactions.", StringComparison.Ordinal));
     }
 
+    // thread 裡同一個序號的表情留言是別的 bot 貼的（共用頻道時）：不是我們貼的，照樣要貼
+    [Fact]
+    public async Task Reaction_notes_from_another_bot_do_not_count()
+    {
+        var (worker, slack) = Worker();
+        slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT","bot_id":"BME"}""";
+        slack.Responses["conversations.replies"] = """
+            {"ok":true,"messages":[{"ts":"111.222","text":"*Bob*:\nhello"},
+              {"ts":"111.300","bot_id":"BOTHER","text":"*Alice* reacted","metadata":{"event_type":"teams_reaction","event_payload":{"seq":42}}}]}
+            """;
+
+        await worker.RelayReactionAsync(Reaction("heart", added: true, count: 1), Seq, TestContext.Current.CancellationToken);
+
+        Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
+    }
+
     // 一般 bot 轉的訊息：已送出表情設成 +1 時，Teams 的 like 照樣鏡像成 👍
     [Fact]
     public async Task Status_emoji_is_still_mirrored_on_a_relayed_message()
@@ -199,6 +215,7 @@ public class RelayReactionTests
             new GatewayMediaClient(new HttpClient(), NullLogger<GatewayMediaClient>.Instance),
             links,
             RelayFakes.Sends(slack, links, options),
+            RelayFakes.Bot(slack),
             Options.Create(options),
             NullLogger<RelayWorker>.Instance);
         return (worker, slack);

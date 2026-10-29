@@ -109,6 +109,7 @@ public class RelayRetryTests
             new GatewayMediaClient(unused, NullLogger<GatewayMediaClient>.Instance),
             links,
             RelayFakes.Sends(slackHandler, links),
+            RelayFakes.Bot(slackHandler),
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance)
         {
