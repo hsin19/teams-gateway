@@ -24,7 +24,17 @@ GATEWAY_API_KEY=tgw_xxx dotnet test --project tests/TeamsGateway.Gateway.E2E/Tea
 - **發話的選填欄位**（ADR 0012）— 先發一則 `html` 加自訂 16 碼 `clientMessageId`，再用 `replyToId` 發一則引用它的回覆：回應的 `messageId` 就是推回來那則的 id，`clientMessageId` 原樣推回、讀回，HTML 標籤還在，引用回覆的 `qtdMsgs` 被 Teams 驗成 `Valid`（真的當成回覆）。每次多發兩則到自測群。
 - **改、刪自己發的**（ADR 0013）— 發一則再 `PUT` 改掉：推回來是同一個 id 的編輯、`clientMessageId` 還在；引用回覆改的時候再帶 `replyToId`，引用還在、仍是 `Valid`；兩則都 `DELETE`，推回來是刪除；刪掉的再改是 409、沒有的是 404。每次多發兩則到自測群，最後都刪掉。
 
-新功能的測試第一行呼叫 `SkipUnlessVersionAtLeastAsync("<版本>")`：目標 gateway 的 `/version` 比它舊就 skip，功能合併了、部署端還沒換版時每天的 canary 不會紅。本機沒帶版本（`1.0.0+…`）一律會跑；讀不到版本也照跑。出版的版本號比門檻小的話，記得把門檻改成實際出版的那一版。
+## 寫新的 E2E
+
+要不要跑寫在 attribute 上，看測試就知道：
+
+```csharp
+[LiveFact]                                  // 沒設 GATEWAY_API_KEY 就 skip
+[LiveFact, MinGatewayVersion("0.7.0")]      // 目標 gateway 的 /version 比 0.7.0 舊也 skip
+```
+
+- `[LiveFact]` 取代 `[Fact]`：打真的 gateway、會在 Teams 發訊息的都用它，一般 `dotnet test` 才不會誤打。
+- `[MinGatewayVersion("<版本>")]` 給新功能用：功能合併了、部署端還沒換版時，每天的 canary 不會因為舊版沒有這個功能而紅。本機沒帶版本（`1.0.0+…`）一律會跑；讀不到版本（連不上、看不懂）也照跑，讓真正的錯誤露出來。出版的版本號比門檻小的話，記得把門檻改成實際出版的那一版。
 
 形狀斷言共用 `packages/TeamsGateway.Contracts` 的 wire DTO：契約只有一份 source of truth，Teams 真的變了就一定被我們看到。
 

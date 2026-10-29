@@ -15,8 +15,6 @@ namespace TeamsGateway.Gateway.E2E;
 /// </summary>
 public sealed class SendApiTests(GatewayFixture fx) : IClassFixture<GatewayFixture>
 {
-    private const string NotConfigured = "GATEWAY_API_KEY is not set; skipping live E2E canary";
-
     // 推回來不一定是 Trouter 推的（輪詢也會補），這裡不驗推播，等久一點
     private static readonly TimeSpan PushTimeout = TimeSpan.FromSeconds(30);
 
@@ -25,10 +23,9 @@ public sealed class SendApiTests(GatewayFixture fx) : IClassFixture<GatewayFixtu
     /// 推回來時 clientMessageId 原樣、型別是 RichText/Html、格式標籤還在。
     /// 第二則用 replyToId 引用第一則：內容前面有 Reply blockquote，而且 Teams 把 qtdMsgs 驗成 Valid（真的當成回覆，不是只畫得出引用）。
     /// </summary>
-    [Fact]
+    [LiveFact]
     public async Task Html_send_and_quote_reply_round_trip()
     {
-        Assert.SkipUnless(fx.Configured, NotConfigured);
         var ct = TestContext.Current.CancellationToken;
         var marker = Guid.NewGuid().ToString("N");
         var clientMessageId = string.Create(CultureInfo.InvariantCulture,
@@ -71,11 +68,9 @@ public sealed class SendApiTests(GatewayFixture fx) : IClassFixture<GatewayFixtu
     /// 引用回覆改的時候再帶 replyToId，引用還在、仍是 Valid；DELETE 推回來是刪除；刪掉的再改 409、沒有的 404。
     /// 每次多發兩則到自測群，最後都刪掉。
     /// </summary>
-    [Fact]
+    [LiveFact, MinGatewayVersion("0.7.0")]
     public async Task Edit_and_delete_round_trip()
     {
-        Assert.SkipUnless(fx.Configured, NotConfigured);
-        await fx.SkipUnlessVersionAtLeastAsync("0.7.0");
         var ct = TestContext.Current.CancellationToken;
         var marker = Guid.NewGuid().ToString("N");
         var clientMessageId = string.Create(CultureInfo.InvariantCulture,
