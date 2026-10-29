@@ -124,15 +124,22 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
 
     // ---- Slack → Teams 發話（ADR 0012）用到的 ----
 
-    /// <summary>bot 自己是誰（<c>auth.test</c>，見 <see cref="SlackBotIdentity"/>）。查不到回 null。</summary>
-    public async Task<BotIdentity?> GetBotIdentityAsync(CancellationToken ct)
+    /// <summary>
+    /// bot 自己是誰（<c>auth.test</c>，見 <see cref="SlackBotIdentity"/>）。查不到丟例外。
+    /// 用 GET：唯讀，resilience 對 GET 才會自動重試一時的錯誤。
+    /// </summary>
+    public async Task<BotIdentity> GetBotIdentityAsync(CancellationToken ct)
     {
-        using var resp = await http.PostAsync("auth.test", null, ct);
+        using var resp = await http.GetAsync("auth.test", ct);
+        if (resp.StatusCode == HttpStatusCode.TooManyRequests)
+            throw new SlackTransientException("auth.test", "ratelimited", resp.Headers.RetryAfter?.Delta);
         var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.AuthTestResponse, ct);
         if (result is { Ok: true, UserId: { } id })
             return new BotIdentity(id, result.BotId);
-        logger.LogWarning("Slack auth.test failed: {Error}", result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture));
-        return null;
+        var error = result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture);
+        throw TransientErrors.Contains(error)
+            ? new SlackTransientException("auth.test", error, resp.Headers.RetryAfter?.Delta)
+            : new InvalidOperationException($"Slack auth.test failed: {error}");
     }
 
     /// <summary>只有 <paramref name="user"/> 看得到的訊息（<c>chat.postEphemeral</c>）；在 thread 裡要帶 <paramref name="threadTs"/>。</summary>

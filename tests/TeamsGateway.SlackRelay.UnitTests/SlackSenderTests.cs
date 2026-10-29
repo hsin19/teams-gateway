@@ -137,18 +137,31 @@ public class SlackSenderTests
         Assert.Null(s.Links.Lookup(TeamsId)); // thread 裡發的推回來時由 bot 貼，照 metadata 對應
     }
 
-    // thread 上層是別的 bot 轉的 Teams 訊息（共用頻道時）：不當成自己的，照頻道的規則送普通訊息、不引用
+    // thread 上層是別的 bot 轉的 Teams 訊息（共用頻道時）：它的 metadata 不採信，也不能改照頻道的規則送去別的對話，直接說明不送
     [Fact]
-    public async Task Reply_under_another_bots_message_is_not_a_quote_reply()
+    public async Task Reply_under_another_bots_message_is_refused()
     {
         var s = Create();
         s.Slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT","bot_id":"BME"}""";
 
         await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|{ThreadTs}"), Ct);
 
-        var post = Assert.Single(s.Gateway.Requests, r => r.Method == "POST");
-        Assert.Equal($"/v1/chats/{Chat}/messages", post.Path);
-        Assert.Equal(JsonValueKind.Null, JsonDocument.Parse(post.Body).RootElement.GetProperty("replyToId").ValueKind);
+        Assert.DoesNotContain(s.Gateway.Requests, r => r.Method == "POST");
+        Assert.Contains("another Slack app", Responses(s)[^1].GetProperty("text").GetString());
+    }
+
+    // @bot 時也一樣：確認那則直接說明，沒有 Send 按鈕
+    [Fact]
+    public async Task Mention_under_another_bots_message_gets_no_send_button()
+    {
+        var s = Create();
+        s.Slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT","bot_id":"BME"}""";
+
+        await s.Sender.OnMentionAsync(new SlackEvent("app_mention", "UME", "<@UBOT> hello", Ts, "C1", ThreadTs), Ct);
+
+        var ephemeral = Assert.Single(s.Slack.Requests, r => r.Method == "chat.postEphemeral").Body;
+        Assert.Contains("another Slack app", ephemeral.GetProperty("text").GetString());
+        Assert.False(ephemeral.TryGetProperty("blocks", out _));
     }
 
     // 確認之後那則被刪了：Slack 會回別則，核對 ts 後不送

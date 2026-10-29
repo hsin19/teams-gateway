@@ -5,7 +5,8 @@ using System.Text.Json;
 namespace TeamsGateway.SlackRelay.UnitTests;
 
 /// <summary>
-/// 假的 Slack Web API：記下每個呼叫（method + JSON body），一律回成功；chat.getPermalink 回由 ts 組成的 permalink。
+/// 假的 Slack Web API：記下每個呼叫（method + JSON body），一律回成功；auth.test 回 bot user <c>UBOT</c>（沒有 bot id = 不過濾 metadata），
+/// chat.getPermalink 回由 ts 組成的 permalink。
 /// 要特定回應（例如 conversations.replies 讀到的 thread）就放進 <see cref="Responses"/>。
 /// </summary>
 internal sealed class RecordingSlack : HttpMessageHandler
@@ -37,6 +38,8 @@ internal sealed class RecordingSlack : HttpMessageHandler
         if (BeforeRespondAsync is { } hook)
             await hook(method, body, cancellationToken);
         var response = RespondToBody?.Invoke(method, body) ?? Respond?.Invoke(request.RequestUri) ?? (Responses.TryGetValue(method, out var canned) ? canned
+            : method == "auth.test"
+            ? """{"ok":true,"user_id":"UBOT"}"""
             : method == "chat.getPermalink"
             ? $$"""{"ok":true,"permalink":"{{Permalink(System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["message_ts"]!)}}"}"""
             : """{"ok":true,"ts":"111.333"}""");

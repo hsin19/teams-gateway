@@ -11,7 +11,7 @@ internal static class RelayFakes
     public static SlackClient Slack(HttpMessageHandler handler) =>
         new(new HttpClient(handler) { BaseAddress = new Uri("https://slack.com/api/") }, NullLogger<SlackClient>.Instance);
 
-    public static SlackBotIdentity Bot(HttpMessageHandler slack) => new(Slack(slack));
+    public static SlackBotIdentity Bot(HttpMessageHandler slack) => new(Slack(slack), NullLogger<SlackBotIdentity>.Instance);
 
     public static SendTracker Sends(HttpMessageHandler slack, MessageLinks links, RelayOptions? options = null) =>
         new(Slack(slack), Bot(slack), links, Options.Create(options ?? new RelayOptions()), NullLogger<SendTracker>.Instance);

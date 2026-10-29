@@ -102,6 +102,26 @@ public class RelayResumeTests
         Assert.Equal("T1", links.NewestTeamsId());
     }
 
+    // 重啟時 auth.test 一時失敗：等查到自己是哪個 bot 才回補，不能先不過濾（會把別的 bot 轉的當成自己的、續接點跑掉）
+    [Fact]
+    public async Task Warmup_waits_for_the_bot_identity_instead_of_reading_unfiltered()
+    {
+        var (worker, links, slack) = Worker();
+        var failures = 1;
+        slack.RespondToBody = (method, _) => method == "auth.test" && failures-- > 0 ? """{"ok":false,"error":"internal_error"}""" : null;
+        slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT","bot_id":"BME"}""";
+        slack.Responses["conversations.history"] = """
+            {"ok":true,"messages":[
+              {"ts":"1792000000.000300","bot_id":"BOTHER","text":"*Bob*:\nother","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T3","version":3}}},
+              {"ts":"1792000000.000100","bot_id":"BME","text":"*Bob*:\nmine","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T1","version":1}}}]}
+            """;
+
+        await worker.WarmupLinksAsync(Routes, null, 24, TestContext.Current.CancellationToken).WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        Assert.Null(links.Lookup("T3"));
+        Assert.Equal("T1", links.NewestTeamsId());
+    }
+
     private static Dictionary<string, string> Routes => new() { ["19:x@thread.v2"] = "C1" };
 
     private static (RelayWorker Worker, MessageLinks Links, RecordingSlack Slack) Worker()
