@@ -137,6 +137,53 @@ public class SlackSenderTests
         Assert.Null(s.Links.Lookup(TeamsId)); // thread 裡發的推回來時由 bot 貼，照 metadata 對應
     }
 
+    // thread 上層是從 Slack 發過去的那則（bot 按了 📤）：它在 Teams 上就是一則訊息，回它要引用它，不是送一則普通訊息
+    [Fact]
+    public async Task Reply_under_a_message_sent_from_slack_quotes_it()
+    {
+        var s = Create();
+        UseSentParent(s);
+        s.Gateway.Responses[$"GET /v1/chats/{Chat}/messages"] = (HttpStatusCode.OK, $$"""
+            {"messages":[{"id":"1793200000000","conversationId":"{{Chat}}","clientMessageId":"{{SendTracker.ClientMessageId(ThreadTs)}}","sequenceId":1,"time":"2026-10-29T00:00:00Z"}]}
+            """);
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|{ThreadTs}"), Ct);
+
+        var post = Assert.Single(s.Gateway.Requests, r => r.Method == "POST");
+        Assert.Equal($"/v1/chats/{Chat}/messages", post.Path);
+        Assert.Equal("1793200000000", JsonDocument.Parse(post.Body).RootElement.GetProperty("replyToId").GetString());
+    }
+
+    // 上層那則在 Teams 上找不到（在那邊刪了）：不改送普通訊息，說明不送
+    [Fact]
+    public async Task Reply_under_a_sent_message_missing_from_teams_is_refused()
+    {
+        var s = Create();
+        UseSentParent(s);
+        s.Gateway.Responses[$"GET /v1/chats/{Chat}/messages"] = (HttpStatusCode.OK, """{"messages":[]}""");
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|{ThreadTs}"), Ct);
+
+        Assert.DoesNotContain(s.Gateway.Requests, r => r.Method == "POST");
+        Assert.Contains("Couldn't find this thread's message in Teams", Responses(s)[^1].GetProperty("text").GetString());
+    }
+
+    // 到 Teams 查上層那則一時失敗：不知道要引用哪則，不送，給 Retry
+    [Fact]
+    public async Task Lookup_failure_for_a_sent_parent_offers_a_retry()
+    {
+        var s = Create();
+        UseSentParent(s);
+        s.Gateway.Responses[$"GET /v1/chats/{Chat}/messages"] = (HttpStatusCode.InternalServerError, "{}");
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|{ThreadTs}"), Ct);
+
+        Assert.DoesNotContain(s.Gateway.Requests, r => r.Method == "POST");
+        var last = Responses(s)[^1];
+        Assert.Contains("Couldn't work out where to send it", last.GetProperty("blocks")[0].GetProperty("text").GetProperty("text").GetString());
+        Assert.Equal("retry", last.GetProperty("blocks")[1].GetProperty("elements")[0].GetProperty("action_id").GetString());
+    }
+
     // thread 上層是別的 bot 轉的 Teams 訊息（共用頻道時）：它的 metadata 不採信，也不能改照頻道的規則送去別的對話，直接說明不送
     [Fact]
     public async Task Reply_under_another_bots_message_is_refused()
@@ -545,6 +592,15 @@ public class SlackSenderTests
         {"ts":"{{ts}}","user":"UME","text":"<@UBOT> hello"{{(reactions is null ? "" : $",\"reactions\":{reactions}")}},
          "blocks":[{"type":"rich_text","elements":[{"type":"rich_text_section","elements":[{"type":"user","user_id":"UBOT"},{"type":"text","text":" hello"}]}]}]}
         """;
+
+    // thread 上層換成自己從 Slack 發過去的那則：人發的、bot 按了 📤，沒有 metadata
+    private static void UseSentParent(Setup s)
+    {
+        var read = s.Slack.Respond!;
+        s.Slack.Respond = uri => uri.AbsolutePath.EndsWith("conversations.history", StringComparison.Ordinal) && uri.Query.Contains($"oldest={ThreadTs}", StringComparison.Ordinal)
+            ? $$"""{"ok":true,"messages":[{"ts":"{{ThreadTs}}","user":"UME","text":"<@UBOT> earlier","reactions":[{"name":"outbox_tray","users":["UBOT"],"count":1}]}]}"""
+            : read(uri);
+    }
 
     private static string[] Reactions(Setup s, string method) =>
         s.Slack.Requests.Where(r => r.Method == method).Select(r => r.Body.GetProperty("name").GetString()!).ToArray();
