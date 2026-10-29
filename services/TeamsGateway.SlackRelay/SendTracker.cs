@@ -25,11 +25,10 @@ public sealed class SendTracker(SlackClient slack, SlackBotIdentity bot, Message
     // 登記的留多久：推回來通常不到一秒；留久一點是為了 SSE 重送時還認得。過期的推回來還是能靠表情認出來
     private static readonly TimeSpan PendingTtl = TimeSpan.FromHours(1);
 
-    // 從 Slack 同步過去的編輯 / 刪除（ADR 0013）留多久：推回來通常幾秒內就到
-    private static readonly TimeSpan SyncedChangeTtl = TimeSpan.FromMinutes(10);
-
     private readonly ConcurrentDictionary<string, PendingSend> _pending = new();
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _syncedChanges = new();
+    // @人、#頻道 → 名字（送到 Teams 前換掉）；發話與比對推回來的內容兩邊共用
+    private readonly ConcurrentDictionary<string, string> _userNames = new();
+    private readonly ConcurrentDictionary<string, string> _channelNames = new();
     private bool _customSentEmojiUnknown;
 
     /// <summary>有沒有開發話（設了 <c>Relay:Slack:AppToken</c>）。沒開時推回來的不必去 Slack 查表情。</summary>
@@ -74,25 +73,18 @@ public sealed class SendTracker(SlackClient slack, SlackBotIdentity bot, Message
         return _pending[clientMessageId] = new PendingSend(channel, ts, inThread, DateTimeOffset.UtcNow);
     }
 
-    /// <summary>
-    /// 要把 Slack 上的編輯 / 刪除同步到這則 Teams 訊息了（ADR 0013）。推回來時 <see cref="TakeSyncedChange"/> 認得出是自己改的，
-    /// 頂層發的那則就不再貼「Edited / Deleted in Teams」：Slack 上本來就是這個樣子了。
-    /// </summary>
-    public void ExpectSyncedChange(string teamsId)
+    /// <summary>這則 Slack 訊息送到 Teams 的樣子（HTML）：開頭的 @bot 拿掉、@人 / #頻道換成名字（查過的記著）。</summary>
+    internal async Task<string> ToHtmlAsync(HistoryMessage message, string botUserId, CancellationToken ct)
     {
-        var cutoff = DateTimeOffset.UtcNow - SyncedChangeTtl;
-        foreach (var (id, at) in _syncedChanges)
-            if (at < cutoff)
-                _syncedChanges.TryRemove(id, out _);
-        _syncedChanges[teamsId] = DateTimeOffset.UtcNow;
+        var (users, channels) = SlackRichText.References(message);
+        foreach (var user in users.Where(u => !_userNames.ContainsKey(u)))
+            if (await slack.GetUserNameAsync(user, ct) is { } name)
+                _userNames[user] = name;
+        foreach (var channel in channels.Where(c => !_channelNames.ContainsKey(c)))
+            if (await slack.GetChannelNameAsync(channel, ct) is { } name)
+                _channelNames[channel] = name;
+        return SlackRichText.ToHtml(message, botUserId, _userNames.GetValueOrDefault, _channelNames.GetValueOrDefault);
     }
-
-    /// <summary>沒改成：之後推回來的就不是自己改的。</summary>
-    public void ForgetSyncedChange(string teamsId) => _syncedChanges.TryRemove(teamsId, out _);
-
-    /// <summary>推回來的編輯 / 刪除是不是剛從 Slack 同步過去的；是就消掉這筆，之後在 Teams 上再改照常貼。</summary>
-    public bool TakeSyncedChange(string teamsId) =>
-        _syncedChanges.TryRemove(teamsId, out var at) && DateTimeOffset.UtcNow - at < SyncedChangeTtl;
 
     /// <summary>記憶體裡登記過的那則（不問 Slack）；沒有回 null。</summary>
     public PendingSend? Pending(string? clientMessageId) =>

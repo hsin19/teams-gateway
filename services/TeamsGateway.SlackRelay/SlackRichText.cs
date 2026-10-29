@@ -62,6 +62,16 @@ internal static partial class SlackRichText
     public static bool IsBlank(string html) => string.IsNullOrWhiteSpace(WebUtility.HtmlDecode(TagRegex().Replace(html, "")));
 
     /// <summary>
+    /// 兩段 HTML 看起來的文字一不一樣（ADR 0013：推回來的編輯是不是 Slack 上現在這個樣子）。只比文字：Teams 存回來的 HTML 會多
+    /// <c>\r\n</c>、<c>&lt;tbody&gt;</c> 之類（spike/FINDINGS.md），標籤換成空白、空白縮成一個再比。比錯了只是多貼一則 note。
+    /// </summary>
+    public static bool SameText(string? a, string? b) => VisibleText(a) == VisibleText(b);
+
+    private static string VisibleText(string? html) =>
+        string.Join(' ', WebUtility.HtmlDecode(TagRegex().Replace(html ?? "", " "))
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    /// <summary>
     /// 確認訊息裡的預覽：原文（拿掉開頭的 @bot）放在 Slack 的引用裡，Slack 自己畫格式與名字。
     /// 太長就截斷：section 上限 3000 字，超過的話整則確認貼不出來。
     /// </summary>

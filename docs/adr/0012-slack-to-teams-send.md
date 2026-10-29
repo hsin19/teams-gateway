@@ -95,7 +95,7 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
   - 附件：個人版的檔案放在發送者的 OneDrive（`AttachmentDto` 的 `ShareUrl`），要先上傳 OneDrive、建分享連結，再掛在訊息上。可能要另外的 token，最麻煩。
 
   做的時候 gateway 的發話 API 跟著擴充，relay 確認時就不再提醒。
-- Slack 上編輯、刪除已送出的那則，同步到 Teams：（做了，見 ADR 0013。）
+- Slack 上編輯、刪除已送出的那則，同步到 Teams：（做了，見 ADR 0013。刪除選 Keep 不補貼回頂層；頂層發的那則推回來時不靠記憶體認，改成比 Slack 上現在的內容。）
   - 跟發話一樣要確認，不自動同步：Teams 那邊是對外的，順手改個錯字不該直接改過去。偵測到編輯就回 ephemeral「Already sent to Teams. Update it there too?」**[Update]** / **[Keep]**，預覽改過的內容；刪除就問「Delete it in Teams too?」。
   - 刪除選 Keep 時，頂層發的那則在 Slack 上沒了、Teams 上還在，bot 把它補貼成一般的「*Eric*: …」，頂層的 Teams 對話才不會缺一句。
   - 同步過去的編輯、刪除 Teams 會再推回來：thread 裡發的照 Phase 1 原地更新 bot 那則；頂層發的要認出是自己剛同步的、跳過（bot 改不了人發的訊息）。

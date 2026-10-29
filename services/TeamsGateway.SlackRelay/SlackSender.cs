@@ -18,7 +18,6 @@ public sealed partial class SlackSender(
     GatewayStatusClient chats,
     SendTracker tracker,
     SlackBotIdentity bot,
-    RelayWorker relay,
     IOptions<RelayOptions> options,
     ILogger<SlackSender> logger)
 {
@@ -36,8 +35,6 @@ public sealed partial class SlackSender(
     private readonly ConcurrentDictionary<string, byte> _inFlight = new();
     // Socket Mode 沒及時 ack 會重送同一個事件
     private readonly ConcurrentDictionary<string, DateTimeOffset> _seenEvents = new();
-    private readonly ConcurrentDictionary<string, string> _userNames = new();
-    private readonly ConcurrentDictionary<string, string> _channelNames = new();
     private (IReadOnlyDictionary<string, string?> Topics, DateTimeOffset At)? _topics;
 
     internal async Task HandleAsync(SocketEnvelope envelope, CancellationToken ct)
@@ -144,9 +141,6 @@ public sealed partial class SlackSender(
             case DeleteAction:
                 await DeleteInTeamsAsync(user, target, responseUrl, ct);
                 break;
-            case KeepDeletedAction:
-                await KeepDeletedAsync(user, target, responseUrl, ct);
-                break;
         }
     }
 
@@ -206,7 +200,7 @@ public sealed partial class SlackSender(
                 await Respond(responseUrl, error, ct);
                 return;
             }
-            var html = await ToHtmlAsync(message, bot, ct);
+            var html = await tracker.ToHtmlAsync(message, bot, ct);
             if (SlackRichText.IsBlank(html))
             {
                 await Respond(responseUrl, "There's nothing to send after the @mention.", ct);
@@ -429,18 +423,6 @@ public sealed partial class SlackSender(
     }
 
     private bool IsSender(string user) => options.Value.Slack.Senders.Contains(user);
-
-    private async Task<string> ToHtmlAsync(HistoryMessage message, string bot, CancellationToken ct)
-    {
-        var (users, channels) = SlackRichText.References(message);
-        foreach (var user in users.Where(u => !_userNames.ContainsKey(u)))
-            if (await slack.GetUserNameAsync(user, ct) is { } name)
-                _userNames[user] = name;
-        foreach (var channel in channels.Where(c => !_channelNames.ContainsKey(c)))
-            if (await slack.GetChannelNameAsync(channel, ct) is { } name)
-                _channelNames[channel] = name;
-        return SlackRichText.ToHtml(message, bot, _userNames.GetValueOrDefault, _channelNames.GetValueOrDefault);
-    }
 
     /// <summary>確認訊息裡的對話名稱：從 gateway 的對話清單查（快取一陣子），1:1 沒有名稱。</summary>
     private async Task<string> ChatLabelAsync(string chat, CancellationToken ct)

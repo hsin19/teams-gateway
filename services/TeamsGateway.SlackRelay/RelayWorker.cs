@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using Microsoft.Extensions.Options;
 using TeamsGateway.Contracts;
@@ -21,16 +20,14 @@ public sealed class RelayWorker(
 {
     private const int MaxImagesPerMessage = 10;
 
-    // Teams 圖片網址 → 已上傳的 Slack file id：編輯時同一張圖不重傳。訊息平常逐則處理，但發話那邊補貼回頂層
-    // （RepostAsync，ADR 0013）會同時跑，所以用 concurrent。
+    // Teams 圖片網址 → 已上傳的 Slack file id：編輯時同一張圖不重傳（訊息是逐則處理，不用 concurrent）。
     // 滿了就整個清掉：代價只是很舊的訊息被編輯時圖再傳一次，換來常駐時記憶體不會一直長
-    private readonly ConcurrentDictionary<string, string> _uploadedImages = new();
+    private readonly Dictionary<string, string> _uploadedImages = new();
     private const int MaxUploadedImages = 2000;
 
     // Teams 帳號（MRI）→ 最近看到的顯示名稱。引用 HTML 裡的作者名不可靠（可能是舊名或 "Display Name"），
-    // Teams 自己也是拿 MRI 查名字。純記憶體：重啟後要等那個人講過話才查得到，查不到就退回 HTML 裡的名字。
-    // 跟上面一樣會被補貼回頂層同時用到
-    private readonly ConcurrentDictionary<string, string> _senderNames = new();
+    // Teams 自己也是拿 MRI 查名字。純記憶體：重啟後要等那個人講過話才查得到，查不到就退回 HTML 裡的名字
+    private readonly Dictionary<string, string> _senderNames = new();
     private const int MaxSenderNames = 5000;
 
     // Slack thread（channel/ts）→ 裡面已經貼過的表情留言的事件序號。relay 重啟後從 afterMessage 續接會重送表情事件，
@@ -229,27 +226,10 @@ public sealed class RelayWorker(
         if (string.IsNullOrEmpty(message.Content) && message.Attachments is not { Count: > 0 })
             return; // 新訊息但無文字也無附件（純系統事件），不轉
 
-        await PostAsync(message, channel, version, ct);
-    }
-
-    /// <summary>
-    /// 把 Teams 上的一則照一般轉送的樣子補貼到 <paramref name="channel"/> 頂層（ADR 0013：從 Slack 頂層發的那則在 Slack 上刪了、
-    /// Teams 上留著，頂層才不會缺一句）。之後 Teams 上的編輯 / 刪除照 Phase 1 原地更新這則。貼成了回 true。
-    /// </summary>
-    internal async Task<bool> RepostAsync(MessageDto message, string channel, CancellationToken ct)
-    {
-        RememberSender(message);
-        return await PostAsync(message, channel, message.Version > 0 ? message.Version : null, ct);
-    }
-
-    private async Task<bool> PostAsync(MessageDto message, string channel, long? version, CancellationToken ct)
-    {
         var content = await FormatAsync(message, channel, ct);
         var ts = await slack.PostMessageAsync(channel, content.Text, message.Id, version, content.Images, ct, message.ConversationId);
-        if (ts is null)
-            return false;
-        links.Remember(message.Id, channel, ts, content.Text, version, content.Images, message.ConversationId); // 記住對應，給之後的回覆 / 編輯用
-        return true;
+        if (ts is not null)
+            links.Remember(message.Id, channel, ts, content.Text, version, content.Images, message.ConversationId); // 記住對應，給之後的回覆 / 編輯用
     }
 
     /// <summary>
@@ -271,27 +251,40 @@ public sealed class RelayWorker(
     /// <summary>
     /// 人在 Slack 頂層發、送到 Teams 的那則（ADR 0012）在 Teams 上被改了：bot 改不了人發的訊息，新版貼在它的 thread。
     /// 對應表沒記版本（剛送出、或重啟後從表情補回來的）時先看 thread 裡貼過哪一版：重啟後 gateway 會重送之前的編輯，不要每次重啟都再貼。
-    /// 貼成了才記版本，沒貼成的下次重送還會再試。
+    /// Slack 上本來就是這個樣子（從 Slack 同步過去的，ADR 0013）也不貼。貼成了才記版本，沒貼成的下次重送還會再試。
     /// </summary>
     private async Task RelayHumanSendEditAsync(MessageDto message, MessageLinks.SlackRef prior, long? version, CancellationToken ct)
     {
         var chat = prior.Chat ?? message.ConversationId;
-        // 從 Slack 同步過去的（ADR 0013）：Slack 上本來就是這一版，不貼；記下版本，重送時才不會當成新的編輯
-        if (sends.TakeSyncedChange(message.Id))
-        {
-            links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, version, prior.Images, chat, byBot: false);
-            return;
-        }
         if (prior.Version is null && version is { } incoming
             && await slack.ReadEditNoteVersionAsync(prior.Channel, prior.Ts, message.Id, (await bot.RequireAsync(ct)).BotId, ct) is { } noted && noted >= incoming)
         {
             links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, noted, prior.Images, chat, byBot: false);
             return;
         }
+        if (await SlackAlreadyShowsAsync(message, prior, ct))
+        {
+            links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, version, prior.Images, chat, byBot: false);
+            return;
+        }
         var changed = message.Deleted ? new SlackContent("", []) : await FormatAsync(message, prior.Channel, ct);
         if (await slack.PostEditNoteAsync(prior.Channel, prior.Ts,
                 message.Deleted ? "_Deleted in Teams_" : $"_Edited in Teams_\n{changed.Text}", changed.Images, message.Id, version, ct))
             links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, version, prior.Images, chat, byBot: false);
+    }
+
+    /// <summary>
+    /// Slack 上那則已經是 Teams 推回來的這個樣子，不用貼 note：刪除時 Slack 上也刪了；編輯時轉成送出用的 HTML 後文字一樣。
+    /// 從 Slack 同步過去的編輯 / 刪除（ADR 0013）推回來就是這樣，relay 重啟後重送也認得出來（不靠記憶體）。
+    /// Slack 上刪了、Teams 上只是改了也不貼：刪掉的訊息底下沒地方貼，那是本人刪的。
+    /// </summary>
+    private async Task<bool> SlackAlreadyShowsAsync(MessageDto message, MessageLinks.SlackRef prior, CancellationToken ct)
+    {
+        var current = await slack.GetMessageAsync(prior.Channel, prior.Ts, null, ct);
+        if (current is null or { Subtype: "tombstone" })
+            return true;
+        return !message.Deleted
+               && SlackRichText.SameText(await sends.ToHtmlAsync(current, (await bot.RequireAsync(ct)).UserId, ct), message.Content);
     }
 
     /// <summary>

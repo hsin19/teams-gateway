@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using TeamsGateway.Contracts;
 
 namespace TeamsGateway.SlackRelay;
@@ -93,7 +94,9 @@ public sealed class GatewaySendClient(HttpClient http, ILogger<GatewaySendClient
             if (resp.IsSuccessStatusCode)
                 return new ChangeOutcome(null, null);
             var body = await resp.Content.ReadAsStringAsync(ct);
-            return new ChangeOutcome(resp.StatusCode, $"HTTP {(int)resp.StatusCode}{(body.Length > 0 ? $": {(body.Length > 200 ? body[..200] : body)}" : "")}");
+            // 404 要是 gateway 自己回的「沒有這則」（ApiError）才算 Teams 上沒有；其他的 404 多半是 gateway 還沒有這個端點（舊版）
+            var gone = resp.StatusCode == HttpStatusCode.Conflict || (resp.StatusCode == HttpStatusCode.NotFound && IsApiError(body));
+            return new ChangeOutcome(resp.StatusCode, $"HTTP {(int)resp.StatusCode}{(body.Length > 0 ? $": {(body.Length > 200 ? body[..200] : body)}" : "")}", gone);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -104,17 +107,29 @@ public sealed class GatewaySendClient(HttpClient http, ILogger<GatewaySendClient
 
     private static string MessageUrl(string chat, string messageId) =>
         $"/v1/chats/{Uri.EscapeDataString(chat)}/messages/{Uri.EscapeDataString(messageId)}";
+
+    private static bool IsApiError(string body)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(body, ContractsJsonContext.Default.ApiError) is { Error: not null };
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 }
 
 /// <summary>
-/// 改 / 刪的結果：<c>Error</c> 是 null = 成功。<c>Status</c> 是 gateway 回的狀態碼（連不上是 null）：
-/// 404 = Teams 上沒有那則、409 = 在 Teams 上刪掉了，這兩種重試也沒用。
+/// 改 / 刪的結果：<c>Error</c> 是 null = 成功。<c>Status</c> 是 gateway 回的狀態碼（連不上是 null）。
+/// <c>Gone</c> = Teams 上沒有那則（404）或已經刪了（409），重試也沒用；其他 4xx 是請求本身不對，也不用重試。
 /// </summary>
-public readonly record struct ChangeOutcome(HttpStatusCode? Status, string? Error)
+public readonly record struct ChangeOutcome(HttpStatusCode? Status, string? Error, bool Gone = false)
 {
     public bool Ok => Error is null;
 
-    public bool Gone => Status is HttpStatusCode.NotFound or HttpStatusCode.Conflict;
+    public bool Retryable => !Ok && !Gone && Status is not (>= HttpStatusCode.BadRequest and < HttpStatusCode.InternalServerError);
 }
 
 public enum SendStatus

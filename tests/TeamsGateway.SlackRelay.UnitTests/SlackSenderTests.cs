@@ -662,7 +662,6 @@ public partial class SlackSenderTests
             new GatewayStatusClient(RelayFakes.Gateway(gateway), NullLogger<GatewayStatusClient>.Instance),
             tracker,
             RelayFakes.Bot(slack),
-            worker,
             Options.Create(options),
             NullLogger<SlackSender>.Instance) { VerifyDelay = TimeSpan.Zero };
         return new Setup(sender, slack, gateway, links, worker);

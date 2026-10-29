@@ -5,26 +5,29 @@ namespace TeamsGateway.SlackRelay;
 
 /// <summary>
 /// 送到 Teams 之後在 Slack 上改、刪（ADR 0013）。不自動同步：Teams 那邊是對外的，順手改個錯字不該直接改過去。
-/// 回只有本人看得到的確認，按了才改 / 刪 Teams 上那則。改、刪重送都安全，失敗一律給 Retry。
+/// 回只有本人看得到的確認，按了才改 / 刪 Teams 上那則。改、刪重送都安全，失敗給 Retry。
+/// Teams 推回來時頂層發的那則不再貼「Edited / Deleted in Teams」：轉送那邊看 Slack 上已經是這個樣子就不貼（<see cref="RelayWorker"/>）。
 /// </summary>
 public sealed partial class SlackSender
 {
     internal const string UpdateAction = "update";
     internal const string DeleteAction = "delete";
-    internal const string KeepDeletedAction = "keep_deleted";
 
     private const string MessageChanged = "message_changed";
     private const string MessageDeleted = "message_deleted";
+    private const string Tombstone = "tombstone";
 
     /// <summary>
     /// 頻道裡的訊息被改 / 刪（<c>message.channels</c>）。只理會轉送的頻道、白名單裡的人、已經送到 Teams 的那幾則。
-    /// 有回覆的頂層訊息被刪時，Slack 送的是 <c>message_changed</c>、新版是 <c>tombstone</c>，一樣當成刪除。
+    /// 有回覆的頂層訊息被刪時，Slack 送的是 <c>message_changed</c>、新版是 <c>tombstone</c>，一樣當成刪除；
+    /// 之後那則 thread 有動靜時 Slack 還會再送（舊版也是 tombstone），不再問。
     /// </summary>
     internal async Task OnMessageChangedAsync(SlackEvent evt, CancellationToken ct)
     {
-        if (evt.Channel is not { } channel || ChatsFor(channel) is [] || await tracker.BotUserIdAsync(ct) is not { } bot)
+        if (evt.Channel is not { } channel || ChatsFor(channel) is [] || evt.PreviousMessage?.Subtype == Tombstone
+            || await tracker.BotUserIdAsync(ct) is not { } bot)
             return;
-        if (evt.Subtype == MessageDeleted || evt.Message?.Subtype == "tombstone")
+        if (evt.Subtype == MessageDeleted || evt.Message?.Subtype == Tombstone)
             await OnDeletedAsync(channel, evt.PreviousMessage, evt.DeletedTs ?? evt.Message?.Ts, bot, ct);
         else if (evt.Message is { Edited: not null } edited && edited.Text != evt.PreviousMessage?.Text)
             await OnEditedAsync(channel, edited, evt.PreviousMessage, bot, ct); // 沒有 edited 的是 Slack 自己補的（連結預覽之類），內容沒變
@@ -70,11 +73,9 @@ public sealed partial class SlackSender
                 || await FindInTeamsQuietlyAsync(new MessageRef(channel, ts, threadTs), ct) is null))
             return;
         var value = Ref(channel, ts, threadTs);
-        // 頂層發的那則在 Slack 上沒了：留在 Teams 的話補貼回頂層。thread 裡發的頂層本來就有 bot 貼的那則
-        var keep = threadTs is null ? KeepDeletedAction : CancelAction;
         await slack.PostEphemeralAsync(channel, user, "Deleted here, but it's still in Teams. Delete it there too?",
             [SlackBlock.Section($"*Deleted here, but it's still in Teams.* Delete it there too?\n{SlackRichText.Preview(before.Text, bot)}"),
-             SlackBlock.Actions(SlackButton.Of("Delete", DeleteAction, value, "danger"), SlackButton.Of("Keep", keep, value))],
+             SlackBlock.Actions(SlackButton.Of("Delete", DeleteAction, value, "danger"), SlackButton.Of("Keep", CancelAction, value))],
             threadTs, ct);
     }
 
@@ -117,16 +118,17 @@ public sealed partial class SlackSender
                 await Respond(responseUrl, "It isn't in Teams anymore (deleted there?), so there's nothing to update.", ct);
                 return;
             }
-            var html = await ToHtmlAsync(message, bot, ct);
+            var html = await tracker.ToHtmlAsync(message, bot, ct);
             if (SlackRichText.IsBlank(html))
             {
                 await Respond(responseUrl, "There's nothing left after the @mention. To take it off Teams, delete the message here instead.", ct);
                 return;
             }
 
-            // 原本是引用回覆的要再帶引用：Teams 的編輯整則換掉，不帶就變成普通訊息
-            var outcome = await ChangeInTeamsAsync(r, sent.Id,
-                () => gateway.EditAsync(target.Chat!, sent.Id, new EditMessageRequest(Html: html, ReplyToId: target.ReplyToId), ct));
+            // Teams 的編輯整則換掉，原本的引用要再帶，不然變成普通訊息。引用看 Teams 上那則現在引用誰：
+            // Slack 上的 thread 上層可能已經刪了，從那邊推不回來
+            var replyToId = TeamsText.Quotes(sent.Content).Select(q => q.Id).FirstOrDefault();
+            var outcome = await gateway.EditAsync(target.Chat!, sent.Id, new EditMessageRequest(Html: html, ReplyToId: replyToId), ct);
             if (outcome.Ok)
                 await Respond(responseUrl, ":white_check_mark: Updated in Teams.", ct);
             else if (outcome.Gone)
@@ -140,9 +142,23 @@ public sealed partial class SlackSender
     private async Task DeleteInTeamsAsync(string user, MessageRef r, string responseUrl, CancellationToken ct) =>
         await WithMessageLockAsync(user, r, responseUrl, ct, async () =>
         {
-            if (await FindForChangeAsync(r, responseUrl, "Not deleted in Teams", DeleteAction, ct) is not { } found)
+            (SendTarget Target, MessageDto? Sent) found;
+            try
+            {
+                found = await FindSentFromSlackAsync(r, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "Looking up Slack message {Channel}/{Ts} in Teams failed", r.Channel, r.Ts);
+                await RespondWithRetryAsync(responseUrl, r, "Not deleted in Teams", $"Looking the message up failed ({ex.Message}), so nothing was changed.", ct, DeleteAction);
                 return;
+            }
             var (target, sent) = found;
+            if (target.Error is { } error)
+            {
+                await Respond(responseUrl, error, ct);
+                return;
+            }
             if (sent is null)
             {
                 await Respond(responseUrl, "It isn't in Teams anymore, so there's nothing to delete.", ct);
@@ -153,28 +169,11 @@ public sealed partial class SlackSender
                 await Respond(responseUrl, ":white_check_mark: It was already deleted in Teams.", ct);
                 return;
             }
-            var outcome = await ChangeInTeamsAsync(r, sent.Id, () => gateway.DeleteAsync(target.Chat!, sent.Id, ct));
+            var outcome = await gateway.DeleteAsync(target.Chat!, sent.Id, ct);
             if (outcome.Ok || outcome.Gone)
                 await Respond(responseUrl, ":white_check_mark: Deleted in Teams.", ct);
             else
                 await RespondChangeFailedAsync(responseUrl, r, "Not deleted in Teams", outcome, DeleteAction, ct);
-        });
-
-    /// <summary>頂層發的那則在 Slack 上刪了、選擇留在 Teams：照一般轉送的樣子補貼回頂層，只看頂層才不會缺一句。</summary>
-    private async Task KeepDeletedAsync(string user, MessageRef r, string responseUrl, CancellationToken ct) =>
-        await WithMessageLockAsync(user, r, responseUrl, ct, async () =>
-        {
-            if (await FindForChangeAsync(r, responseUrl, "Not posted back", KeepDeletedAction, ct) is not { Sent: var sent })
-                return;
-            if (sent is null or { Deleted: true })
-            {
-                await Respond(responseUrl, "It isn't in Teams anymore, so there's nothing to post back here.", ct);
-                return;
-            }
-            if (await relay.RepostAsync(sent, r.Channel, ct))
-                await Respond(responseUrl, ":white_check_mark: Kept in Teams, and posted back here so the channel still shows it.", ct);
-            else
-                await RespondWithRetryAsync(responseUrl, r, "Not posted back", "Posting it back to the channel failed. It's still in Teams.", ct, KeepDeletedAction);
         });
 
     /// <summary>白名單、同一則同時只處理一個（跟發話共用，送到一半不能改 / 刪）。</summary>
@@ -210,28 +209,6 @@ public sealed partial class SlackSender
             : (target, await gateway.FindSentMessageAsync(target.Chat!, SendTracker.ClientMessageId(r.Ts), ct));
     }
 
-    /// <summary><see cref="FindSentFromSlackAsync"/>，查不了或找不到對話時先回話、回 null。</summary>
-    private async Task<(SendTarget Target, MessageDto? Sent)?> FindForChangeAsync(MessageRef r, string responseUrl, string title, string retryAction, CancellationToken ct)
-    {
-        (SendTarget Target, MessageDto? Sent) found;
-        try
-        {
-            found = await FindSentFromSlackAsync(r, ct);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            logger.LogWarning(ex, "Looking up Slack message {Channel}/{Ts} in Teams failed", r.Channel, r.Ts);
-            await RespondWithRetryAsync(responseUrl, r, title, $"Looking the message up failed ({ex.Message}), so nothing was changed.", ct, retryAction);
-            return null;
-        }
-        if (found.Target.Error is { } error)
-        {
-            await Respond(responseUrl, error, ct);
-            return null;
-        }
-        return found;
-    }
-
     private async Task<string?> FindInTeamsQuietlyAsync(MessageRef r, CancellationToken ct)
     {
         try
@@ -246,23 +223,12 @@ public sealed partial class SlackSender
         }
     }
 
-    /// <summary>
-    /// 改 / 刪 Teams 上那則。頂層發的那則推回來時要認得出是自己改的（不再貼「Edited / Deleted in Teams」），先記下來，沒改成就撤掉。
-    /// thread 裡發的推回來是原地更新 bot 那則，不用記。
-    /// </summary>
-    private async Task<ChangeOutcome> ChangeInTeamsAsync(MessageRef r, string teamsId, Func<Task<ChangeOutcome>> change)
-    {
-        if (r.ThreadTs is null)
-            tracker.ExpectSyncedChange(teamsId);
-        var outcome = await change();
-        if (!outcome.Ok)
-            tracker.ForgetSyncedChange(teamsId);
-        return outcome;
-    }
-
+    /// <summary>改、刪重送都安全：連不上、5xx 給 Retry；請求本身被拒（4xx，例如 gateway 還沒有這個端點）重試也沒用，只說明。</summary>
     private Task RespondChangeFailedAsync(string responseUrl, MessageRef r, string title, ChangeOutcome outcome, string retryAction, CancellationToken ct)
     {
         logger.LogWarning("{Title}: Slack message {Channel}/{Ts}: {Error}", title, r.Channel, r.Ts, outcome.Error);
-        return RespondWithRetryAsync(responseUrl, r, title, $"The gateway didn't take it ({outcome.Error}). Retrying is safe.", ct, retryAction);
+        return outcome.Retryable
+            ? RespondWithRetryAsync(responseUrl, r, title, $"The gateway didn't take it ({outcome.Error}). Retrying is safe.", ct, retryAction)
+            : Respond(responseUrl, $":warning: {title}. The gateway refused it ({outcome.Error}).", ct);
     }
 }
