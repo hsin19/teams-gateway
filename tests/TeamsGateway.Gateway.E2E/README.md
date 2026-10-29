@@ -21,6 +21,8 @@ GATEWAY_API_KEY=tgw_xxx dotnet test --project tests/TeamsGateway.Gateway.E2E/Tea
 - **列對話** — 成功就隱含證明 skypetoken 換發（打得到 chatsvc）、讀路徑、回傳形狀還能反序列化進 `TeamsGateway.Contracts`（Teams 改 schema 會在這爆）。
 - **推播 + 發話 → 讀回** — 先連上 `/v1/events`（SSE），發一則帶唯一標記的訊息到自測群，10 秒內要從 SSE 收到它，再從 Teams 讀回同一則。輪詢會把 10 秒內的新訊息留給 Trouter，所以這段時間內收到就是 Trouter 推的；Trouter 壞了、只剩輪詢在補，這裡會失敗。
 
+- **發話的選填欄位**（ADR 0012）— 先發一則 `html` 加自訂 16 碼 `clientMessageId`，再用 `replyToId` 發一則引用它的回覆：回應的 `messageId` 就是推回來那則的 id，`clientMessageId` 原樣推回、讀回，HTML 標籤還在，引用回覆的 `qtdMsgs` 被 Teams 驗成 `Valid`（真的當成回覆）。每次多發兩則到自測群。gateway 還沒升到支援這些欄位的版本時這條會失敗，合併後到部署端換版前 canary 會紅。
+
 形狀斷言共用 `packages/TeamsGateway.Contracts` 的 wire DTO：契約只有一份 source of truth，Teams 真的變了就一定被我們看到。
 
 ## 排程
