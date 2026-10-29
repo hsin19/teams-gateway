@@ -66,6 +66,65 @@ public sealed class SendApiTests(GatewayFixture fx) : IClassFixture<GatewayFixtu
         Assert.Contains(page!.Messages, m => m.Id == first.MessageId && m.ClientMessageId == clientMessageId);
     }
 
+    /// <summary>
+    /// 改、刪自己發的（ADR 0013）：PUT 整則換掉，推回來的是同一個 id 的編輯、clientMessageId 還在（發話端靠它認自己發的）；
+    /// 引用回覆改的時候再帶 replyToId，引用還在、仍是 Valid；DELETE 推回來是刪除；刪掉的再改 409、沒有的 404。
+    /// 每次多發兩則到自測群，最後都刪掉。
+    /// </summary>
+    [Fact]
+    public async Task Edit_and_delete_round_trip()
+    {
+        Assert.SkipUnless(fx.Configured, NotConfigured);
+        await fx.SkipUnlessVersionAtLeastAsync("0.7.0");
+        var ct = TestContext.Current.CancellationToken;
+        var marker = Guid.NewGuid().ToString("N");
+        var clientMessageId = string.Create(CultureInfo.InvariantCulture,
+            $"{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}{Random.Shared.Next(1_000_000):D6}");
+
+        using var events = await fx.Client.GetAsync(
+            $"/v1/events?chats={Uri.EscapeDataString(fx.Chat)}", HttpCompletionOption.ResponseHeadersRead, ct);
+        events.EnsureSuccessStatusCode();
+        var pushed = Channel.CreateUnbounded<Pushed>();
+        _ = ReadEventsAsync(await events.Content.ReadAsStreamAsync(ct), pushed.Writer, ct);
+
+        var first = await SendAsync(new SendMessageRequest(Text: $"e2e edit {marker}", ClientMessageId: clientMessageId), ct);
+        await WaitForAsync(pushed.Reader, first.MessageId!, ct);
+        await ChangeAsync(HttpMethod.Put, first.MessageId!, new EditMessageRequest(Html: $"<p>e2e edited <b>{marker}</b></p>"), ct);
+        var edited = await WaitForAsync(pushed.Reader, first.MessageId!, ct, m => m.Edited);
+        Assert.Contains($"<b>{marker}</b>", edited.Message.Content);
+        Assert.Equal(clientMessageId, edited.Message.ClientMessageId);
+
+        // 要等引用的那則進了 gateway 才引用得到
+        var reply = await SendAsync(new SendMessageRequest(Text: $"e2e reply {marker}", ReplyToId: first.MessageId), ct);
+        await WaitForAsync(pushed.Reader, reply.MessageId!, ct);
+        await ChangeAsync(HttpMethod.Put, reply.MessageId!, new EditMessageRequest(Text: $"e2e reply edited {marker}", ReplyToId: first.MessageId), ct);
+        var replyEdited = await WaitForAsync(pushed.Reader, reply.MessageId!, ct, m => m.Edited);
+        Assert.Contains($"e2e reply edited {marker}", replyEdited.Message.Content);
+        Assert.Contains("http://schema.skype.com/Reply", replyEdited.Message.Content);
+        Assert.Equal("Valid", Assert.Single(QuotedMessages(replyEdited.Raw)).GetProperty("validationResult").GetString());
+
+        foreach (var id in new[] { reply.MessageId!, first.MessageId! })
+        {
+            await ChangeAsync(HttpMethod.Delete, id, null, ct);
+            await WaitForAsync(pushed.Reader, id, ct, m => m.Deleted);
+        }
+
+        using var editDeleted = await fx.Client.PutAsJsonAsync(MessageUrl(first.MessageId!), new EditMessageRequest(Text: "too late"), ct);
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, editDeleted.StatusCode);
+        using var deleteMissing = await fx.Client.DeleteAsync(MessageUrl("1"), ct);
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, deleteMissing.StatusCode);
+    }
+
+    private string MessageUrl(string messageId) => $"/v1/chats/{Uri.EscapeDataString(fx.Chat)}/messages/{messageId}";
+
+    private async Task ChangeAsync(HttpMethod method, string messageId, EditMessageRequest? body, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(method, MessageUrl(messageId)) { Content = body is null ? null : JsonContent.Create(body) };
+        using var resp = await fx.Client.SendAsync(request, ct);
+        if (!resp.IsSuccessStatusCode)
+            Assert.Fail($"{method} {messageId} failed with HTTP {(int)resp.StatusCode}: {await resp.Content.ReadAsStringAsync(ct)}");
+    }
+
     private async Task<SendMessageResult> SendAsync(SendMessageRequest request, CancellationToken ct)
     {
         using var resp = await fx.Client.PostAsJsonAsync($"/v1/chats/{fx.Chat}/messages", request, ct);
@@ -74,14 +133,16 @@ public sealed class SendApiTests(GatewayFixture fx) : IClassFixture<GatewayFixtu
         return (await resp.Content.ReadFromJsonAsync<SendMessageResult>(ct))!;
     }
 
-    private static async Task<Pushed> WaitForAsync(ChannelReader<Pushed> reader, string messageId, CancellationToken ct)
+    /// <summary>等那則推回來；<paramref name="match"/> 沒給就是新訊息那次（不是編輯）。</summary>
+    private static async Task<Pushed> WaitForAsync(ChannelReader<Pushed> reader, string messageId, CancellationToken ct, Func<MessageDto, bool>? match = null)
     {
+        match ??= m => !m.Edited;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(PushTimeout);
         try
         {
             await foreach (var item in reader.ReadAllAsync(timeout.Token))
-                if (item.Message.Id == messageId && !item.Message.Edited)
+                if (item.Message.Id == messageId && match(item.Message))
                     return item;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)

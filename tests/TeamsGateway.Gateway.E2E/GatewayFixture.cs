@@ -20,11 +20,40 @@ public sealed class GatewayFixture : IDisposable
 
     public HttpClient Client { get; }
 
+    private readonly Lazy<Task<Version?>> _version;
+
     public GatewayFixture()
     {
         Client = new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(30) };
         if (!string.IsNullOrWhiteSpace(ApiKey))
             Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiKey);
+        _version = new(FetchVersionAsync);
+    }
+
+    /// <summary>
+    /// 目標 gateway 比 <paramref name="minimum"/> 舊就 skip：功能合併了、部署端還沒換版時，每天的 canary 不會因為舊版沒有這個功能而紅。
+    /// 本機沒帶版本時是 <c>1.0.0</c>，一律會跑；讀不到版本（連不上、看不懂）也照跑，讓真正的錯誤露出來。
+    /// </summary>
+    public async Task SkipUnlessVersionAtLeastAsync(string minimum)
+    {
+        var target = await _version.Value;
+        Assert.SkipWhen(target is { } v && v < Version.Parse(minimum), $"Gateway {target} is older than {minimum}; skipping");
+    }
+
+    /// <summary><c>/version</c> 的 <c>0.6.1+9028dee</c> → 0.6.1；看不懂回 null。</summary>
+    internal static Version? ParseVersion(string text) =>
+        Version.TryParse(text.Split('+', '-')[0].Trim(), out var version) ? version : null;
+
+    private async Task<Version?> FetchVersionAsync()
+    {
+        try
+        {
+            return ParseVersion(await Client.GetStringAsync("/version"));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return null;
+        }
     }
 
     public void Dispose() => Client.Dispose();
