@@ -27,11 +27,12 @@ bot 的 app 定義在 [`slack-app-manifest.yaml`](slack-app-manifest.yaml)。到
 - **誰能發**：`Relay:Slack:Senders` 裡的 Slack user id，而且只能送自己寫的那則。發話用的是 gateway 綁的 Teams 帳號，不要隨便加人。
 - **狀態**：bot 在那則按 ⏳（送出中）→ Teams 收下後換成已送出表情（`Relay:Slack:SentEmoji`，預設 📤）；固定的 📤 標記會保留，讓改設定或重啟後仍能去重。失敗時按 ⚠️，確認那則改成原因加 **Retry**。gateway 沒給明確結果時，relay 會先到對話裡找那則有沒有送到（從現在往前翻到那則 Slack 訊息寫下的時間）；查不完時保留 ⏳，Retry 會再查一次才送（Teams 不會替同一則去重，直接重送可能變兩則）。按 Send 之後確認那則會變成「Sending to Teams…」，附一個 **Check again**：relay 剛好重啟、一直沒有結果時按它，會先到對話裡找再決定要不要送。確認那則不見了（ephemeral 不保存）：那則上沒有 bot 的狀態表情就是沒送，重新 @bot 一次；還停在 ⏳、或帶著 ⚠️（gateway 沒回應時，當時查不到的也可能之後才出現，確認那則不見了就分不出是哪一種）都可能已經送出，先到 Teams 看或等一下看會不會換成 📤，不然重新 @bot 是新的一則、不經過防重送的查詢，可能變兩則。
 - **Teams 推回來時**：頂層發的那則就代表 Teams 上的這句，不再貼；thread 裡發的由 bot 照一般訊息貼到頂層（Teams 個人版沒有 thread，頂層才拼得出 Teams 上的對話），因為是引用回覆，會畫成「*名字* replied to <連結>」。之後 Teams 上有人引用、按表情，都接得回 Slack 上那則。
-- **Teams 上改了頂層發的那則**：bot 改不了人發的訊息，在那則的 thread 貼「_Edited in Teams_」加新版（刪除是「_Deleted in Teams_」），Slack 上的原文不動。這則留言夾著 metadata（`teams_edit_note`：Teams id 與版本），relay 重啟後 gateway 重送同一個編輯時認得出貼過了，不會重貼。反過來，在 Slack 上編輯、刪除已送出的那則，Teams 不會跟著變。
+- **Teams 上改了頂層發的那則**：bot 改不了人發的訊息，在那則的 thread 貼「_Edited in Teams_」加新版（刪除是「_Deleted in Teams_」），Slack 上的原文不動。這則留言夾著 metadata（`teams_edit_note`：Teams id 與版本），relay 重啟後 gateway 重送同一個編輯時認得出貼過了，不會重貼。
+- **送出後在 Slack 上改、刪**（[ADR 0013](../../docs/adr/0013-slack-edit-delete-sync.md)）：不自動同步，relay 回一則只有你看得到的確認。改了是「Already sent to Teams. Update it there too?」加新內容的預覽，**Update** 才把 Teams 上那則整則換掉（引用回覆會再帶引用），**Keep** 就只改 Slack。刪了是「Deleted here, but it's still in Teams. Delete it there too?」，**Delete** 刪 Teams 上那則；**Keep** 留在 Teams（Slack 上那句就沒了，不會補貼回來）。改、刪重送都安全，連不上或 gateway 出錯給 **Retry**。同步過去的編輯 / 刪除 Teams 會推回來：頂層發的那則，Slack 上已經是這個樣子（內容一樣、或 Slack 上也刪了）就不再貼「Edited / Deleted in Teams」，relay 重啟後重送的也一樣；thread 裡發的照常原地更新 bot 那則。還沒按 Send 就改了不會問（按 Send 時本來就讀最新的）；確認那則沒按就等於 Keep。private 頻道要另外訂 `message.groups` 才會問（目前沒訂）。
 
 開啟步驟：
 
-1. 用更新過的 [`slack-app-manifest.yaml`](slack-app-manifest.yaml) 更新 app（多了 Socket Mode、interactivity、`app_mention` 事件與 `app_mentions:read`、`reactions:read`、`users:read`），然後重新 Install。
+1. 用更新過的 [`slack-app-manifest.yaml`](slack-app-manifest.yaml) 更新 app（多了 Socket Mode、interactivity、`app_mention` 與 `message.channels` 事件、`app_mentions:read`、`reactions:read`、`users:read`），然後重新 Install。
 2. Basic Information → App-Level Tokens 建一個有 `connections:write` 的 token（`xapp-…`），設成 `Relay__Slack__AppToken`。
 3. 把能發話的人的 Slack user id 設進 `Relay__Slack__Senders__0`、`__1`…
 4. 想用自訂的已送出顯示表情（例如用 relay 的 icon 做 `:teams-relay:`），先在 Slack 手動上傳，再設 `Relay__Slack__SentEmoji=teams-relay`；固定的 📤 去重標記仍會保留，Slack 不認得自訂名稱時會只用 📤 並記 warning。

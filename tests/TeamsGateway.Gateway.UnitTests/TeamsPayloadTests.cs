@@ -111,6 +111,29 @@ public class TeamsPayloadTests
     }
 
     [Fact]
+    public async Task Chatsvc_edit_body_leaves_out_the_client_message_id()
+    {
+        // 編輯不帶 clientmessageid：沒帶時伺服器留著原本的，發話端（relay）靠它認自己發的那則
+        var ct = TestContext.Current.CancellationToken;
+        var body = await JsonContent.Create(ChatsvcClient.SendBody(new OutgoingMessage("<p>fixed</p>", Html: true), null, "teams-gateway"),
+            TeamsJsonContext.Default.ChatsvcSendRequest).ReadAsStringAsync(ct);
+
+        var json = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("<p>fixed</p>", json.GetProperty("content").GetString());
+        Assert.False(json.TryGetProperty("clientmessageid", out _));
+    }
+
+    // chatsvc 的錯誤細項藏在 message 欄位那段 JSON 字串裡（spike 看到的原文）；看不懂就是 null
+    [Theory]
+    [InlineData("""{"errorCode":209,"message":"{\"subCode\":\"MessageAlreadyDeleted\",\"details\":\"Deleted message cannot be edited.\",\"errorCode\":null,\"errorSubCode\":null}"}""", "MessageAlreadyDeleted")]
+    [InlineData("""{"errorCode":404,"message":"{\"subCode\":\"MessageNotFound\",\"details\":\"Message: 1 not found in coldstore\"}"}""", "MessageNotFound")]
+    [InlineData("""{"errorCode":400,"message":"Bad request"}""", null)]
+    [InlineData("<html>gateway timeout</html>", null)]
+    [InlineData("", null)]
+    public void Chatsvc_error_sub_code_is_read_from_the_nested_message(string body, string? expected) =>
+        Assert.Equal(expected, ChatsvcException.SubCodeOf(body));
+
+    [Fact]
     public void Chatsvc_send_body_for_quote_reply()
     {
         // 引用回覆：內容前面加 Reply blockquote，properties.qtdMsgs 是字串化的陣列（spike 驗證過兩個都要有）；純文字轉成跳脫過的段落

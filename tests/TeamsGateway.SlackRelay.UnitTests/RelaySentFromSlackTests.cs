@@ -285,6 +285,64 @@ public class RelaySentFromSlackTests
         Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
     }
 
+    // Teams 上的新版跟 Slack 上現在的一樣（從 Slack 同步過去的，ADR 0013）：不貼 note，記下版本；之後在 Teams 上改成別的照常貼
+    [Fact]
+    public async Task Teams_edit_that_matches_slack_is_not_posted()
+    {
+        var (worker, slack, links, _) = Worker();
+        slack.Responses["conversations.history"] = SlackMessage("fixed");
+        links.Remember(TeamsId, "C1", Ts, "", null, chat: Chat, byBot: false);
+        var synced = Echo() with { Content = "<p>fixed</p>\r\n", Version = 1793220599999, Edited = true };
+
+        await worker.RelayWithRetryAsync(synced, Routes, null, Ct);
+        await worker.RelayWithRetryAsync(synced, Routes, null, Ct);
+        Assert.DoesNotContain(slack.Requests, r => r.Method == "chat.postMessage");
+        Assert.Equal(1793220599999, links.Lookup(TeamsId)?.Version);
+
+        await worker.RelayWithRetryAsync(synced with { Content = "<p>again</p>", Version = 1793220600000 }, Routes, null, Ct);
+        var note = Assert.Single(slack.Requests, r => r.Method == "chat.postMessage").Body;
+        Assert.StartsWith("_Edited in Teams_", note.GetProperty("text").GetString());
+    }
+
+    // relay 重啟後 gateway 重送從 Slack 同步過去的編輯：記憶體裡什麼都沒有，靠比 Slack 上現在的內容一樣認得出來
+    [Fact]
+    public async Task Replayed_synced_edit_after_a_restart_is_not_posted()
+    {
+        var (worker, slack, links, _) = Worker();
+        slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT"}""";
+        slack.Responses["reactions.get"] = """
+            {"ok":true,"type":"message","message":{"ts":"1729834567.123456","user":"UME","reactions":[{"name":"outbox_tray","users":["UBOT"],"count":1}]}}
+            """;
+        slack.Responses["conversations.history"] = SlackMessage("fixed");
+
+        await worker.RelayWithRetryAsync(Echo() with { Content = "<p>fixed</p>", Version = 1793220599999, Edited = true }, Routes, null, Ct);
+
+        Assert.DoesNotContain(slack.Requests, r => r.Method == "chat.postMessage");
+        Assert.Equal(1793220599999, links.Lookup(TeamsId)?.Version);
+    }
+
+    // Slack 上已經刪了：Teams 上也刪了就一致；Teams 上只是改了也沒地方貼（刪掉的訊息底下沒 thread 可貼）
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Teams_change_of_a_message_deleted_in_slack_is_not_posted(bool deleted)
+    {
+        var (worker, slack, links, _) = Worker();
+        slack.Responses["conversations.history"] = """{"ok":true,"messages":[]}""";
+        links.Remember(TeamsId, "C1", Ts, "", null, chat: Chat, byBot: false);
+
+        await worker.RelayWithRetryAsync(
+            Echo() with { Content = deleted ? "" : "<p>fixed</p>", Version = 1793220599999, Edited = !deleted, Deleted = deleted }, Routes, null, Ct);
+
+        Assert.DoesNotContain(slack.Requests, r => r.Method == "chat.postMessage");
+    }
+
+    /// <summary>人從 Slack 頂層發的那則（開頭 @bot）現在的樣子。</summary>
+    private static string SlackMessage(string text) => $$"""
+        {"ok":true,"messages":[{"ts":"{{Ts}}","user":"UME","text":"<@UBOT> {{text}}",
+          "blocks":[{"type":"rich_text","elements":[{"type":"rich_text_section","elements":[{"type":"user","user_id":"UBOT"},{"type":"text","text":" {{text}}"}]}]}]}]}
+        """;
+
     private static MessageDto Echo() =>
         new(TeamsId, Chat, "8:me", "Me", "RichText/Html", "<p>hello</p>", 1, DateTimeOffset.FromUnixTimeSeconds(1729834567 + 30), long.Parse(TeamsId),
             ClientMessageId: ClientMessageId);
@@ -292,6 +350,8 @@ public class RelaySentFromSlackTests
     private static (RelayWorker Worker, RecordingSlack Slack, MessageLinks Links, SendTracker Sends) Worker(TimeSpan? rateLimitFallback = null)
     {
         var slack = new RecordingSlack();
+        // Slack 上那則還在、內容是發出去時的樣子：Teams 上改成別的才貼 note
+        slack.Responses["conversations.history"] = SlackMessage("hello");
         var links = new MessageLinks();
         var options = new RelayOptions { Slack = { AppToken = "xapp-1" } };
         var sends = RelayFakes.Sends(slack, links, options);

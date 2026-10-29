@@ -39,6 +39,12 @@ public sealed record MessagePage(IReadOnlyList<MessageDto> Messages, string? Nex
 /// </summary>
 public sealed record SendMessageRequest(string? Text = null, string? Html = null, string? ClientMessageId = null, string? ReplyToId = null);
 
+/// <summary>
+/// 改一則綁定帳號自己發的訊息：整則換掉。<c>Text</c> 與 <c>Html</c> 二選一，同 <see cref="SendMessageRequest"/>。
+/// 原本是引用回覆的話要再帶 <c>ReplyToId</c>：不帶就變成普通訊息（Teams 的編輯不留原本的引用）。
+/// </summary>
+public sealed record EditMessageRequest(string? Text = null, string? Html = null, string? ReplyToId = null);
+
 /// <summary>SSE 的 <c>event</c> 名稱，也是 webhook 的 <c>X-TeamsGateway-Event</c> header 值。</summary>
 public static class EventKinds
 {

@@ -17,6 +17,7 @@ namespace TeamsGateway.Contracts;
 [JsonSerializable(typeof(MessagePage))]
 [JsonSerializable(typeof(SendMessageRequest))]
 [JsonSerializable(typeof(SendMessageResult))]
+[JsonSerializable(typeof(EditMessageRequest))]
 [JsonSerializable(typeof(AuthStatusDto))]
 [JsonSerializable(typeof(ApiError))]
 [JsonSerializable(typeof(MessageRevisionsDto))]

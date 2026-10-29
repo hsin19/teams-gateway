@@ -35,12 +35,15 @@ internal sealed record RegistrationTransports(TrouterTransport[] Trouter);
 
 internal sealed record TrouterTransport(string Context, string Path, int Ttl);
 
-/// <summary>chatsvc 發一則訊息（<c>Text</c> 或 <c>RichText/Html</c>）。沒有引用時不帶 <c>properties</c>。</summary>
+/// <summary>
+/// chatsvc 發一則訊息（<c>Text</c> 或 <c>RichText/Html</c>），編輯也是同一個格式。沒有引用時不帶 <c>properties</c>；
+/// 編輯不帶 <c>clientmessageid</c>：沒帶時伺服器留著原本的（spike/FINDINGS.md「編輯與刪除」），帶別的會不會蓋掉沒驗過。
+/// </summary>
 internal sealed record ChatsvcSendRequest(
     string Content,
     [property: JsonPropertyName("messagetype")] string MessageType,
     [property: JsonPropertyName("contenttype")] string ContentType,
-    [property: JsonPropertyName("clientmessageid")] string ClientMessageId,
+    [property: JsonPropertyName("clientmessageid"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ClientMessageId,
     [property: JsonPropertyName("imdisplayname")] string ImDisplayName,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ChatsvcSendProperties? Properties = null);
 

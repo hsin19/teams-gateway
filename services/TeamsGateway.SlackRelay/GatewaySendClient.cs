@@ -1,9 +1,14 @@
+using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using TeamsGateway.Contracts;
 
 namespace TeamsGateway.SlackRelay;
 
-/// <summary>經 gateway 發到 Teams（<c>POST /v1/chats/{id}/messages</c>），以及結果不明時到對話裡找那則有沒有送到（ADR 0012）。</summary>
+/// <summary>
+/// 經 gateway 發到 Teams（<c>POST /v1/chats/{id}/messages</c>），以及結果不明時到對話裡找那則有沒有送到（ADR 0012）；
+/// 送出後在 Slack 上改 / 刪，同步過去（ADR 0013）。
+/// </summary>
 public sealed class GatewaySendClient(HttpClient http, ILogger<GatewaySendClient> logger)
 {
     /// <summary>
@@ -41,7 +46,11 @@ public sealed class GatewaySendClient(HttpClient http, ILogger<GatewaySendClient
     /// 或翻到對話開頭（沒有下一頁、空頁）。gateway 不通、游標重複、翻了 <see cref="MaxSearchPages"/> 頁還沒到都丟例外：
     /// 呼叫端要當成結果不明，不能當成確定沒送而重送（Teams 不會去重）。
     /// </summary>
-    public async Task<string?> FindSentAsync(string chat, string clientMessageId, CancellationToken ct)
+    public async Task<string?> FindSentAsync(string chat, string clientMessageId, CancellationToken ct) =>
+        (await FindSentMessageAsync(chat, clientMessageId, ct))?.Id;
+
+    /// <summary>同 <see cref="FindSentAsync"/>，回整則（在 Teams 上刪掉的也找得到：內容清空、<c>Deleted</c>，clientMessageId 還在）。</summary>
+    public async Task<MessageDto?> FindSentMessageAsync(string chat, string clientMessageId, CancellationToken ct)
     {
         // 停止點看 version 不看 composetime：chatsvc 的排序沒驗證過，最近被改的舊訊息可能排在前面；version 一定不小於 id
         var notBefore = SendTracker.EarliestSend(clientMessageId)?.ToUnixTimeMilliseconds();
@@ -54,7 +63,7 @@ public sealed class GatewaySendClient(HttpClient http, ILogger<GatewaySendClient
             var page = await http.GetFromJsonAsync(url, ContractsJsonContext.Default.MessagePage, ct)
                        ?? throw new InvalidDataException("The gateway returned an empty message page.");
             if (page.Messages.FirstOrDefault(m => m.ClientMessageId == clientMessageId) is { } sent)
-                return sent.Id;
+                return sent;
             if (page.NextCursor is null || page.Messages.Count == 0
                 || (notBefore is { } cutoff && page.Messages.Any(m => m.Version > 0 && m.Version < cutoff)))
                 return null;
@@ -64,6 +73,63 @@ public sealed class GatewaySendClient(HttpClient http, ILogger<GatewaySendClient
         }
         throw new InvalidDataException($"Searched {MaxSearchPages} pages without reaching the time the Slack message was written.");
     }
+
+    /// <summary>
+    /// 改自己發的那則（<c>PUT /v1/chats/{id}/messages/{messageId}</c>，ADR 0013）。跟發話不同，重送是安全的（整則換掉），
+    /// 所以不用先查：失敗就讓人重試。
+    /// </summary>
+    public Task<ChangeOutcome> EditAsync(string chat, string messageId, EditMessageRequest request, CancellationToken ct) =>
+        ChangeAsync("Editing", chat, messageId,
+            () => http.PutAsJsonAsync(MessageUrl(chat, messageId), request, ContractsJsonContext.Default.EditMessageRequest, ct), ct);
+
+    /// <summary>刪自己發的那則（<c>DELETE</c>，ADR 0013）。刪過的再刪也成功，一樣可以直接重試。</summary>
+    public Task<ChangeOutcome> DeleteAsync(string chat, string messageId, CancellationToken ct) =>
+        ChangeAsync("Deleting", chat, messageId, () => http.DeleteAsync(MessageUrl(chat, messageId), ct), ct);
+
+    private async Task<ChangeOutcome> ChangeAsync(string what, string chat, string messageId, Func<Task<HttpResponseMessage>> call, CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await call();
+            if (resp.IsSuccessStatusCode)
+                return new ChangeOutcome(null, null);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            // 404 要是 gateway 自己回的「沒有這則」（ApiError）才算 Teams 上沒有；其他的 404 多半是 gateway 還沒有這個端點（舊版）
+            var gone = resp.StatusCode == HttpStatusCode.Conflict || (resp.StatusCode == HttpStatusCode.NotFound && IsApiError(body));
+            return new ChangeOutcome(resp.StatusCode, $"HTTP {(int)resp.StatusCode}{(body.Length > 0 ? $": {(body.Length > 200 ? body[..200] : body)}" : "")}", gone);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "{What} Teams message {MessageId} in chat {Chat} got no answer from the gateway", what, messageId, chat);
+            return new ChangeOutcome(null, ex.Message);
+        }
+    }
+
+    private static string MessageUrl(string chat, string messageId) =>
+        $"/v1/chats/{Uri.EscapeDataString(chat)}/messages/{Uri.EscapeDataString(messageId)}";
+
+    private static bool IsApiError(string body)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(body, ContractsJsonContext.Default.ApiError) is { Error: not null };
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+}
+
+/// <summary>
+/// 改 / 刪的結果：<c>Error</c> 是 null = 成功。<c>Status</c> 是 gateway 回的狀態碼（連不上是 null）。
+/// <c>Gone</c> = Teams 上沒有那則（404）或已經刪了（409），重試也沒用；其他 4xx 是請求本身不對，也不用重試。
+/// </summary>
+public readonly record struct ChangeOutcome(HttpStatusCode? Status, string? Error, bool Gone = false)
+{
+    public bool Ok => Error is null;
+
+    public bool Retryable => !Ok && !Gone && Status is not (>= HttpStatusCode.BadRequest and < HttpStatusCode.InternalServerError);
 }
 
 public enum SendStatus

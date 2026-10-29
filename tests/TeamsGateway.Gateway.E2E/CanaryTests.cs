@@ -8,20 +8,17 @@ namespace TeamsGateway.Gateway.E2E;
 /// <summary>
 /// 對實際在跑的 gateway 打真帳號、驗跟 Teams 的溝通沒被它改版打爛的 canary。
 /// 每天定期跑（GitHub cron），失敗代表非官方 API 可能變了，要去看。
-/// 沒配置 live 目標（<c>GATEWAY_API_KEY</c> 未設）時整組 skip，所以一般 CI 不會誤跑。
+/// 沒配置 live 目標（<c>GATEWAY_API_KEY</c> 未設）時整組 skip（<see cref="LiveFactAttribute"/>），所以一般 CI 不會誤跑。
 /// </summary>
 public sealed class CanaryTests(GatewayFixture fx) : IClassFixture<GatewayFixture>
 {
-    private const string NotConfigured = "GATEWAY_API_KEY is not set; skipping live E2E canary";
-
     /// <summary>
     /// 列對話成功，就隱含證明了：skypetoken 換發正常（打得到 chatsvc）、chatsvc 讀路徑正常、
     /// 回傳形狀還能反序列化進我們的 wire DTO（Teams 改 schema 會在這裡爆）。
     /// </summary>
-    [Fact]
+    [LiveFact]
     public async Task Chats_lists_conversations_with_expected_shape()
     {
-        Assert.SkipUnless(fx.Configured, NotConfigured);
         var ct = TestContext.Current.CancellationToken;
 
         var chats = await fx.Client.GetFromJsonAsync<IReadOnlyList<ConversationDto>>("/v1/chats", ct);
@@ -35,10 +32,9 @@ public sealed class CanaryTests(GatewayFixture fx) : IClassFixture<GatewayFixtur
     /// 先連上 SSE 再發一則帶唯一標記的訊息到自測群：驗即時推播（Trouter → SSE）和 send + 讀回整條活著。
     /// 一則訊息驗兩條路，不多發。自測群要在 gateway 上訂閱，不然進不了事件串流。
     /// </summary>
-    [Fact]
+    [LiveFact]
     public async Task Send_is_pushed_over_sse_and_read_back()
     {
-        Assert.SkipUnless(fx.Configured, NotConfigured);
         var ct = TestContext.Current.CancellationToken;
         var marker = $"e2e-canary {Guid.NewGuid():N}";
 

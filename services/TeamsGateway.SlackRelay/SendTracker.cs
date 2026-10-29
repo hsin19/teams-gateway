@@ -26,6 +26,9 @@ public sealed class SendTracker(SlackClient slack, SlackBotIdentity bot, Message
     private static readonly TimeSpan PendingTtl = TimeSpan.FromHours(1);
 
     private readonly ConcurrentDictionary<string, PendingSend> _pending = new();
+    // @人、#頻道 → 名字（送到 Teams 前換掉）；發話與比對推回來的內容兩邊共用
+    private readonly ConcurrentDictionary<string, string> _userNames = new();
+    private readonly ConcurrentDictionary<string, string> _channelNames = new();
     private bool _customSentEmojiUnknown;
 
     /// <summary>有沒有開發話（設了 <c>Relay:Slack:AppToken</c>）。沒開時推回來的不必去 Slack 查表情。</summary>
@@ -68,6 +71,19 @@ public sealed class SendTracker(SlackClient slack, SlackBotIdentity bot, Message
             if (old.RegisteredAt < cutoff)
                 _pending.TryRemove(id, out _);
         return _pending[clientMessageId] = new PendingSend(channel, ts, inThread, DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>這則 Slack 訊息送到 Teams 的樣子（HTML）：開頭的 @bot 拿掉、@人 / #頻道換成名字（查過的記著）。</summary>
+    internal async Task<string> ToHtmlAsync(HistoryMessage message, string botUserId, CancellationToken ct)
+    {
+        var (users, channels) = SlackRichText.References(message);
+        foreach (var user in users.Where(u => !_userNames.ContainsKey(u)))
+            if (await slack.GetUserNameAsync(user, ct) is { } name)
+                _userNames[user] = name;
+        foreach (var channel in channels.Where(c => !_channelNames.ContainsKey(c)))
+            if (await slack.GetChannelNameAsync(channel, ct) is { } name)
+                _channelNames[channel] = name;
+        return SlackRichText.ToHtml(message, botUserId, _userNames.GetValueOrDefault, _channelNames.GetValueOrDefault);
     }
 
     /// <summary>記憶體裡登記過的那則（不問 Slack）；沒有回 null。</summary>

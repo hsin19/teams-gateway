@@ -78,6 +78,18 @@
   - 只有 `qtdMsgs`：一樣 `Valid`，但伺服器不補 blockquote，畫成普通訊息。
 - 測試用群組 `teams-gateway test`（只有自己）的 id 存在 `spike/.local/state.json`；`48:notes` 在個人版不存在（404）。
 
+## 編輯與刪除自己發的訊息（2026-10-29，`edit_delete.py`）
+
+- 編輯：`PUT .../conversations/{id}/messages/{訊息 id}`，body 跟發話一樣（`content`、`messagetype`、`contenttype`）→ 200、空 body，**不回新版本**。
+  `clientmessageid`、`imdisplayname` 可以不帶，原本的 `clientmessageid` 照樣留著；`messagetype` 可以從 `Text` 改成 `RichText/Html`。
+  id 不變；讀回來 `version` 與 `properties.edittime` 是編輯的時間。
+- 引用回覆要重帶引用：PUT 時 blockquote 與 `qtdMsgs` 都帶，引用留著（伺服器一樣照原訊息重寫 blockquote）；只給新文字，`qtdMsgs` 跟著消失，變成普通訊息。
+- 刪除：`DELETE .../messages/{訊息 id}` → 200、body `null`。帶不帶 `?behavior=softDelete` 結果一樣：內容清空、`properties.deletetime`、
+  `skypeeditedid` 變成那則的 `clientmessageid`。再刪一次一樣回 200。
+- 推播：編輯與刪除都是 `resourceType: MessageUpdate`，`resource` 跟讀回來的一樣（`edittime` / `deletetime` 是字串）。
+- 錯誤：刪掉的再 PUT → 403、`subCode: MessageAlreadyDeleted`；不存在的 id，PUT 與 DELETE 都是 404、`subCode: MessageNotFound`。
+  別人的訊息改不改得了沒驗（測試群組只有自己）。
+
 ## 即時事件（Trouter 推播，不需要瀏覽器）
 
 `trouter_client.py` 只用 skypetoken 就能收到推播，發話後約 0.4 秒到。

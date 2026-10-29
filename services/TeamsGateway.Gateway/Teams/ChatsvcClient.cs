@@ -7,7 +7,7 @@ using TeamsGateway.Contracts;
 namespace TeamsGateway.Gateway.Teams;
 
 /// <summary>
-/// 個人版 Teams 的 chatsvc REST client（列對話、讀訊息、發話）。對照 spike/FINDINGS.md「讀取」「發話」。
+/// 個人版 Teams 的 chatsvc REST client（列對話、讀訊息、發話、改 / 刪自己的訊息）。對照 spike/FINDINGS.md「讀取」「發話」「編輯與刪除」。
 /// token 從 <see cref="SkypeTokenProvider"/> 拿，401 時強制換一次再重試。
 /// </summary>
 public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, ILogger<ChatsvcClient> logger)
@@ -219,7 +219,30 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         return new SendMessageResult(clientMessageId, SentMessageId(await resp.Content.ReadAsStringAsync(ct), resp.Headers.Location));
     }
 
-    internal static ChatsvcSendRequest SendBody(OutgoingMessage message, string clientMessageId, string displayName)
+    /// <summary>
+    /// 改綁定帳號自己發的那則：整則換掉，原本是引用回覆的話引用要再帶（<see cref="OutgoingMessage.Quote"/>）。
+    /// 不回新版本，編輯會照常推回來。刪掉的 → <see cref="ChatsvcException"/> 403 <c>MessageAlreadyDeleted</c>；沒有這則 → 404。
+    /// </summary>
+    public async Task EditMessageAsync(string threadId, string messageId, OutgoingMessage message, string displayName, CancellationToken ct = default)
+    {
+        var body = SendBody(message, clientMessageId: null, displayName);
+        using var _ = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Put, $"conversations/{Uri.EscapeDataString(threadId)}/messages/{Uri.EscapeDataString(messageId)}")
+            {
+                Content = JsonContent.Create(body, TeamsJsonContext.Default.ChatsvcSendRequest),
+            },
+            ct);
+    }
+
+    /// <summary>刪掉綁定帳號自己發的那則。刪過的再刪一樣成功；沒有這則 → <see cref="ChatsvcException"/> 404。</summary>
+    public async Task DeleteMessageAsync(string threadId, string messageId, CancellationToken ct = default)
+    {
+        using var _ = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Delete, $"conversations/{Uri.EscapeDataString(threadId)}/messages/{Uri.EscapeDataString(messageId)}"),
+            ct);
+    }
+
+    internal static ChatsvcSendRequest SendBody(OutgoingMessage message, string? clientMessageId, string displayName)
     {
         if (message.Quote is not { } quote)
             return new(message.Content, message.Html ? "RichText/Html" : "Text", "text", clientMessageId, displayName);
@@ -397,7 +420,7 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
         {
             var body = await resp.Content.ReadAsStringAsync(ct);
             resp.Dispose();
-            throw new InvalidOperationException($"chatsvc {(int)resp.StatusCode}: {(body.Length > 300 ? body[..300] : body)}");
+            throw new ChatsvcException(resp.StatusCode, ChatsvcException.SubCodeOf(body), $"chatsvc {(int)resp.StatusCode}: {(body.Length > 300 ? body[..300] : body)}");
         }
         return resp;
     }
@@ -449,3 +472,34 @@ public sealed record OutgoingMessage(string Content, bool Html = false, string? 
 
 /// <summary>引用回覆的對象：Teams 訊息 id（數字）、作者 MRI 與名字、純文字預覽。</summary>
 public sealed record QuotedMessage(string Id, string SenderMri, string? SenderName, string Preview);
+
+/// <summary>
+/// chatsvc 回了非 2xx。<see cref="SubCode"/> 是錯誤 body 裡的細項（例如 <c>MessageNotFound</c>、<c>MessageAlreadyDeleted</c>），
+/// 藏在 <c>message</c> 欄位那段 JSON 字串裡；讀不到是 null。
+/// </summary>
+public sealed class ChatsvcException(HttpStatusCode status, string? subCode, string message) : InvalidOperationException(message)
+{
+    public HttpStatusCode Status { get; } = status;
+
+    public string? SubCode { get; } = subCode;
+
+    internal static string? SubCodeOf(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.String)
+                return null;
+            using var inner = JsonDocument.Parse(message.GetString()!);
+            return inner.RootElement.ValueKind == JsonValueKind.Object && inner.RootElement.TryGetProperty("subCode", out var sub)
+                   && sub.ValueKind == JsonValueKind.String
+                ? sub.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+}
