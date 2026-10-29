@@ -27,15 +27,15 @@ public sealed partial class SlackSender
         if (evt.Subtype == MessageDeleted || evt.Message?.Subtype == "tombstone")
             await OnDeletedAsync(channel, evt.PreviousMessage, evt.DeletedTs ?? evt.Message?.Ts, bot, ct);
         else if (evt.Message is { Edited: not null } edited && edited.Text != evt.PreviousMessage?.Text)
-            await OnEditedAsync(channel, edited, bot, ct); // 沒有 edited 的是 Slack 自己補的（連結預覽之類），內容沒變
+            await OnEditedAsync(channel, edited, evt.PreviousMessage, bot, ct); // 沒有 edited 的是 Slack 自己補的（連結預覽之類），內容沒變
     }
 
     /// <summary>還沒按 Send 的改了就改了（按 Send 時本來就讀最新的）；已經送出去的才問要不要也改 Teams 上那則。</summary>
-    private async Task OnEditedAsync(string channel, HistoryMessage edited, string bot, CancellationToken ct)
+    private async Task OnEditedAsync(string channel, HistoryMessage edited, HistoryMessage? before, string bot, CancellationToken ct)
     {
         if (edited is not { User: { } user, Ts: { } ts } || !IsSender(user))
             return;
-        var threadTs = edited.ThreadTs is { } t && t != ts ? t : null;
+        var threadTs = (edited.ThreadTs ?? before?.ThreadTs) is { } t && t != ts ? t : null;
         // 事件裡的那份不保證帶表情：重讀一次看送過了沒
         HistoryMessage? current;
         try

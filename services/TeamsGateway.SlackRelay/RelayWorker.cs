@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using Microsoft.Extensions.Options;
 using TeamsGateway.Contracts;
@@ -20,14 +21,16 @@ public sealed class RelayWorker(
 {
     private const int MaxImagesPerMessage = 10;
 
-    // Teams 圖片網址 → 已上傳的 Slack file id：編輯時同一張圖不重傳（訊息是逐則處理，不用 concurrent）。
+    // Teams 圖片網址 → 已上傳的 Slack file id：編輯時同一張圖不重傳。訊息平常逐則處理，但發話那邊補貼回頂層
+    // （RepostAsync，ADR 0013）會同時跑，所以用 concurrent。
     // 滿了就整個清掉：代價只是很舊的訊息被編輯時圖再傳一次，換來常駐時記憶體不會一直長
-    private readonly Dictionary<string, string> _uploadedImages = new();
+    private readonly ConcurrentDictionary<string, string> _uploadedImages = new();
     private const int MaxUploadedImages = 2000;
 
     // Teams 帳號（MRI）→ 最近看到的顯示名稱。引用 HTML 裡的作者名不可靠（可能是舊名或 "Display Name"），
-    // Teams 自己也是拿 MRI 查名字。純記憶體：重啟後要等那個人講過話才查得到，查不到就退回 HTML 裡的名字
-    private readonly Dictionary<string, string> _senderNames = new();
+    // Teams 自己也是拿 MRI 查名字。純記憶體：重啟後要等那個人講過話才查得到，查不到就退回 HTML 裡的名字。
+    // 跟上面一樣會被補貼回頂層同時用到
+    private readonly ConcurrentDictionary<string, string> _senderNames = new();
     private const int MaxSenderNames = 5000;
 
     // Slack thread（channel/ts）→ 裡面已經貼過的表情留言的事件序號。relay 重啟後從 afterMessage 續接會重送表情事件，
