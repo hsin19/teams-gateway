@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 namespace TeamsGateway.SlackRelay;
 
 /// <summary>
-/// Slack Socket Mode（ADR 0012）：relay 主動連出去收 <c>app_mention</c> 與按鈕事件，部署那台不用開對外的 HTTP。
+/// Slack Socket Mode（ADR 0012）：relay 主動連出去收 <c>app_mention</c>、訊息改 / 刪（ADR 0013）與按鈕事件，部署那台不用開對外的 HTTP。
 /// 要 ack 的 envelope 先 ack（Slack 要 3 秒內），再丟給 <see cref="SlackSender"/> 在背景處理；
 /// Slack 要求換連線（<c>disconnect</c>）就馬上重連，其他斷線退避後重連。沒設 <c>Relay:Slack:AppToken</c> 就不連，只轉送。
 /// Native AOT 用不了 Slack 的 SDK，所以自己接 <see cref="ClientWebSocket"/>。

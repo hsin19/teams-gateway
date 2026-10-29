@@ -29,7 +29,7 @@
 | `tools/TeamsGateway.AppHost` | Aspire 編排：本機開發一次起 gateway + relay（不部署） | ✅ |
 | `spike/` | 逆向非官方 API 的拋棄式 Python 腳本；結論在 [`spike/FINDINGS.md`](spike/FINDINGS.md) | — |
 
-技術選型、結構等決策的理由見 [`docs/adr/`](docs/adr/)（0001 選型、0002 服務內部結構、0003 monorepo、0004 先跑在本機、0005 agent 介面用 MCP、0006 事件出入口抽象化、0007 本機只當開發環境、0008 資料庫可切換 SQLite / Postgres、0009 EF migration、0010 image 由 SDK 出、0011 認證與授權分開、接上 Cloudflare Access、0012 Slack → Teams 發話）。
+技術選型、結構等決策的理由見 [`docs/adr/`](docs/adr/)（0001 選型、0002 服務內部結構、0003 monorepo、0004 先跑在本機、0005 agent 介面用 MCP、0006 事件出入口抽象化、0007 本機只當開發環境、0008 資料庫可切換 SQLite / Postgres、0009 EF migration、0010 image 由 SDK 出、0011 認證與授權分開、接上 Cloudflare Access、0012 Slack → Teams 發話、0013 送出後在 Slack 上改 / 刪同步到 Teams）。
 
 ## 開始
 

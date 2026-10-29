@@ -66,8 +66,9 @@ internal sealed record PermalinkResponse(bool Ok, string? Permalink, string? Err
 internal sealed record HistoryResponse(bool Ok, HistoryMessage[]? Messages, ResponseMetadata? ResponseMetadata, string? Error);
 
 /// <summary>
-/// 讀歷史 / 讀單則 / <c>reactions.get</c> 回的訊息。<c>Blocks</c> 是人發的訊息的 rich_text（原樣留著給 <c>SlackRichText</c> 轉）；
-/// <c>User</c> 是作者（bot 貼的是 <c>BotId</c>）。
+/// 讀歷史 / 讀單則 / <c>reactions.get</c> 回的訊息，也是 <c>message_changed</c> 事件裡的新舊版。
+/// <c>Blocks</c> 是人發的訊息的 rich_text（原樣留著給 <c>SlackRichText</c> 轉）；<c>User</c> 是作者（bot 貼的是 <c>BotId</c>）。
+/// <c>Edited</c> 有值 = 人改過內容；<c>Subtype</c> 是 <c>tombstone</c> = 有回覆的頂層訊息被刪了（只剩「This message was deleted.」）。
 /// </summary>
 internal sealed record HistoryMessage(
     string? Ts,
@@ -78,7 +79,11 @@ internal sealed record HistoryMessage(
     string? ThreadTs = null,
     JsonElement? Blocks = null,
     SlackReaction[]? Reactions = null,
-    SlackFileInfo[]? Files = null);
+    SlackFileInfo[]? Files = null,
+    string? Subtype = null,
+    SlackEdited? Edited = null);
+
+internal sealed record SlackEdited(string? User, string? Ts);
 
 internal sealed record SlackReaction(string? Name, string[]? Users, int Count);
 
@@ -123,8 +128,23 @@ internal sealed record SocketAck(string EnvelopeId);
 
 internal sealed record EventCallback(string? Type, string? EventId, SlackEvent? Event);
 
-/// <summary>訂閱的事件（目前只有 <c>app_mention</c>）。<c>ThreadTs</c> 有值而且不等於 <c>Ts</c> = thread 裡的回覆。</summary>
-internal sealed record SlackEvent(string? Type, string? User, string? Text, string? Ts, string? Channel, string? ThreadTs = null, string? BotId = null);
+/// <summary>
+/// 訂閱的事件：<c>app_mention</c>，與 <c>message.channels</c> 的 <c>message</c>（只用 <c>message_changed</c> / <c>message_deleted</c> 這兩種
+/// <c>Subtype</c>，新舊版在 <c>Message</c> / <c>PreviousMessage</c>，被刪的那則是 <c>DeletedTs</c>）。
+/// <c>ThreadTs</c> 有值而且不等於 <c>Ts</c> = thread 裡的回覆。
+/// </summary>
+internal sealed record SlackEvent(
+    string? Type,
+    string? User,
+    string? Text,
+    string? Ts,
+    string? Channel,
+    string? ThreadTs = null,
+    string? BotId = null,
+    string? Subtype = null,
+    HistoryMessage? Message = null,
+    HistoryMessage? PreviousMessage = null,
+    string? DeletedTs = null);
 
 /// <summary>按鈕事件。<c>Container</c> 是按鈕所在的那則 ephemeral。</summary>
 internal sealed record BlockActionsPayload(string? Type, SlackIdRef? User, SlackIdRef? Channel, string? ResponseUrl, BlockAction[]? Actions);

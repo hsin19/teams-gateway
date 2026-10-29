@@ -49,7 +49,9 @@ public static class Extensions
         builder.Services.AddSingleton<MessageLinks>();
         builder.Services.AddSingleton<SlackBotIdentity>();
         builder.Services.AddSingleton<SendTracker>();
-        builder.Services.AddHostedService<RelayWorker>();
+        // 發話那邊也要用（Slack 上刪了、Teams 上留著的那則補貼回頂層）：先註冊成單一實例，hosted service 用同一個
+        builder.Services.AddSingleton<RelayWorker>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<RelayWorker>());
 
         // Slack → Teams 發話（ADR 0012）：沒設 Relay:Slack:AppToken 時 Socket Mode 不連，其他照常
         builder.Services.AddSingleton<SlackSender>();

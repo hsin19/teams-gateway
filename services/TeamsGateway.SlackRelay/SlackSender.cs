@@ -10,13 +10,15 @@ namespace TeamsGateway.SlackRelay;
 /// Slack → Teams 發話（ADR 0012）：訊息開頭 @bot → 只有本人看得到的確認 → 按 Send 才重讀那則、經 gateway 發出。
 /// 事件由 <see cref="SlackSocketMode"/> 收進來、ack 完丟給 <see cref="HandleAsync"/> 在背景處理，所以同時可能有好幾個在跑。
 /// 按鈕只帶著頻道與 ts，不記待確認的東西：relay 中間重啟，按鈕照樣有效。
+/// 送出後在 Slack 上改 / 刪的同步在 <c>SlackSender.Edits.cs</c>（ADR 0013）。
 /// </summary>
-public sealed class SlackSender(
+public sealed partial class SlackSender(
     SlackClient slack,
     GatewaySendClient gateway,
     GatewayStatusClient chats,
     SendTracker tracker,
     SlackBotIdentity bot,
+    RelayWorker relay,
     IOptions<RelayOptions> options,
     ILogger<SlackSender> logger)
 {
@@ -42,10 +44,17 @@ public sealed class SlackSender(
     {
         try
         {
+            // message.channels 會送來頻道裡的每一則：只有改 / 刪要處理，其他的連去重表都不進
             if (envelope is { Type: "events_api", Payload: { } events }
-                && events.Deserialize(SlackJsonContext.Default.EventCallback) is { Event: { Type: "app_mention" } mention } callback
+                && events.Deserialize(SlackJsonContext.Default.EventCallback) is { Event: { } evt } callback
+                && (evt.Type == "app_mention" || evt is { Type: "message", Subtype: MessageChanged or MessageDeleted })
                 && FirstTime(callback.EventId))
-                await OnMentionAsync(mention, ct);
+            {
+                if (evt.Type == "app_mention")
+                    await OnMentionAsync(evt, ct);
+                else
+                    await OnMessageChangedAsync(evt, ct);
+            }
             else if (envelope is { Type: "interactive", Payload: { } interaction }
                      && interaction.Deserialize(SlackJsonContext.Default.BlockActionsPayload) is { Type: "block_actions" } actions)
                 await OnActionAsync(actions, ct);
@@ -122,8 +131,23 @@ public sealed class SlackSender(
             await slack.RespondAsync(responseUrl, new ResponseUrlRequest(DeleteOriginal: true), ct);
             return;
         }
-        if (action.ActionId is SendAction or RetryAction && ParseRef(action.Value) is { } target)
-            await SendAsync(user, target, responseUrl, ct);
+        if (ParseRef(action.Value) is not { } target)
+            return;
+        switch (action.ActionId)
+        {
+            case SendAction or RetryAction:
+                await SendAsync(user, target, responseUrl, ct);
+                break;
+            case UpdateAction:
+                await UpdateInTeamsAsync(user, target, responseUrl, ct);
+                break;
+            case DeleteAction:
+                await DeleteInTeamsAsync(user, target, responseUrl, ct);
+                break;
+            case KeepDeletedAction:
+                await KeepDeletedAsync(user, target, responseUrl, ct);
+                break;
+        }
     }
 
     private async Task SendAsync(string user, MessageRef r, string responseUrl, CancellationToken ct)
@@ -345,13 +369,13 @@ public sealed class SlackSender(
         return RespondWithRetryAsync(responseUrl, r, "Send outcome unknown", why, ct);
     }
 
-    private Task RespondWithRetryAsync(string responseUrl, MessageRef r, string title, string why, CancellationToken ct)
+    private Task RespondWithRetryAsync(string responseUrl, MessageRef r, string title, string why, CancellationToken ct, string retryAction = RetryAction)
     {
         var value = Ref(r.Channel, r.Ts, r.ThreadTs);
         return slack.RespondAsync(responseUrl, new ResponseUrlRequest(
             Text: title,
             Blocks: [SlackBlock.Section($":warning: {title}. {Escape(why)}"),
-                     SlackBlock.Actions(SlackButton.Of("Retry", RetryAction, value, "primary"), SlackButton.Of("Dismiss", CancelAction, value))],
+                     SlackBlock.Actions(SlackButton.Of("Retry", retryAction, value, "primary"), SlackButton.Of("Dismiss", CancelAction, value))],
             ReplaceOriginal: true), ct);
     }
 

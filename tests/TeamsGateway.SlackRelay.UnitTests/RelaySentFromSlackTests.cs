@@ -285,6 +285,24 @@ public class RelaySentFromSlackTests
         Assert.Single(slack.Requests, r => r.Method == "chat.postMessage");
     }
 
+    // 從 Slack 同步過去的編輯（ADR 0013）只抵那一次：重送不貼，之後在 Teams 上再改照常貼進 thread
+    [Fact]
+    public async Task Only_the_change_synced_from_slack_is_skipped()
+    {
+        var (worker, slack, links, sends) = Worker();
+        links.Remember(TeamsId, "C1", Ts, "", null, chat: Chat, byBot: false);
+        sends.ExpectSyncedChange(TeamsId);
+        var synced = Echo() with { Content = "<p>fixed</p>", Version = 1793220599999, Edited = true };
+
+        await worker.RelayWithRetryAsync(synced, Routes, null, Ct);
+        await worker.RelayWithRetryAsync(synced, Routes, null, Ct);
+        Assert.DoesNotContain(slack.Requests, r => r.Method == "chat.postMessage");
+
+        await worker.RelayWithRetryAsync(synced with { Content = "<p>again</p>", Version = 1793220600000 }, Routes, null, Ct);
+        var note = Assert.Single(slack.Requests, r => r.Method == "chat.postMessage").Body;
+        Assert.StartsWith("_Edited in Teams_", note.GetProperty("text").GetString());
+    }
+
     private static MessageDto Echo() =>
         new(TeamsId, Chat, "8:me", "Me", "RichText/Html", "<p>hello</p>", 1, DateTimeOffset.FromUnixTimeSeconds(1729834567 + 30), long.Parse(TeamsId),
             ClientMessageId: ClientMessageId);

@@ -7,7 +7,7 @@ using TeamsGateway.Contracts;
 namespace TeamsGateway.SlackRelay.UnitTests;
 
 /// <summary>Slack → Teams 發話的流程：@bot → 確認 → Send / Cancel / Retry（ADR 0012）。Slack 與 gateway 都是假的。</summary>
-public class SlackSenderTests
+public partial class SlackSenderTests
 {
     private const string Chat = "19:a@thread.v2";
     private const string Ts = "1729834567.123456";
@@ -662,6 +662,7 @@ public class SlackSenderTests
             new GatewayStatusClient(RelayFakes.Gateway(gateway), NullLogger<GatewayStatusClient>.Instance),
             tracker,
             RelayFakes.Bot(slack),
+            worker,
             Options.Create(options),
             NullLogger<SlackSender>.Instance) { VerifyDelay = TimeSpan.Zero };
         return new Setup(sender, slack, gateway, links, worker);

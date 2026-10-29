@@ -82,7 +82,7 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
 ### Slack 連線
 
 - **Socket Mode**：relay 主動連出去，部署那台不用開對外的 HTTP。要 app-level token（`xapp-…`，`connections:write`），設定是 `Relay:Slack:AppToken`；沒設就不開發話，只轉送（Phase 1 照舊）。（一個 Slack app 只給一個 relay 開 Socket Mode：同一個 app 開了好幾條連線時，Slack 會把事件分給它們，@bot 與按鈕可能被另一個 relay 收走。本機開發用另一個 Slack app，有自己的 bot token 與 app token；頻道可以跟正式環境共用。）
-- 只訂 `app_mention`，不訂 `message.channels`：relay 只拿到有 @bot 的訊息，讀不到頻道裡其他討論。
+- 只訂 `app_mention`，不訂 `message.channels`：relay 只拿到有 @bot 的訊息，讀不到頻道裡其他討論。（後來為了偵測 Slack 上的改、刪，改訂 `message.channels`，只處理改、刪那兩種事件，見 ADR 0013。）
 - manifest 加：`socket_mode_enabled`、`interactivity`、事件 `app_mention`，scope `app_mentions:read`、`reactions:read`、`users:read`（@ 換名字）。
 - Native AOT 用不了 Slack 的 SDK：Socket Mode 用 `ClientWebSocket` 自己接（收 envelope、回 ack、遇到 `disconnect` 重連），payload 走 `SlackJsonContext`。envelope 收到就先 ack（Slack 要 3 秒內），處理丟到背景；同一個事件重送的照 `event_id` 略過。
 - 發話跟 Phase 1 的轉送是兩條同時跑的路：發話的流程放在自己的類別，跟 `RelayWorker` 共用的狀態（剛送出的、`MessageLinks`）要能並行存取。`RelayWorker` 裡逐筆處理用的 `Dictionary` 不能直接拿來共用。
@@ -95,7 +95,7 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
   - 附件：個人版的檔案放在發送者的 OneDrive（`AttachmentDto` 的 `ShareUrl`），要先上傳 OneDrive、建分享連結，再掛在訊息上。可能要另外的 token，最麻煩。
 
   做的時候 gateway 的發話 API 跟著擴充，relay 確認時就不再提醒。
-- Slack 上編輯、刪除已送出的那則，同步到 Teams：
+- Slack 上編輯、刪除已送出的那則，同步到 Teams：（做了，見 ADR 0013。）
   - 跟發話一樣要確認，不自動同步：Teams 那邊是對外的，順手改個錯字不該直接改過去。偵測到編輯就回 ephemeral「Already sent to Teams. Update it there too?」**[Update]** / **[Keep]**，預覽改過的內容；刪除就問「Delete it in Teams too?」。
   - 刪除選 Keep 時，頂層發的那則在 Slack 上沒了、Teams 上還在，bot 把它補貼成一般的「*Eric*: …」，頂層的 Teams 對話才不會缺一句。
   - 同步過去的編輯、刪除 Teams 會再推回來：thread 裡發的照 Phase 1 原地更新 bot 那則；頂層發的要認出是自己剛同步的、跳過（bot 改不了人發的訊息）。
@@ -123,7 +123,7 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
 
 - 發話用的是 gateway 綁的那個 Teams 帳號。白名單管的是「誰能用這個帳號說話」，不要隨便加人。
 - ephemeral 不保存：重新整理、換裝置就不見。不見就是沒送，要送再 @bot 一次；不會在不知情的情況下送出。（只限還沒按 Send 的確認。按了之後不見——重新整理、換裝置，或在結果那則按 Dismiss——不代表沒送：那則還帶著 bot 的 ⏳ 或 ⚠️ 就可能已經送出，先到 Teams 看或等 📤，再決定要不要重新 @bot。）
-- 送出後在 Slack 編輯、刪除，Teams 不會跟著變，relay 也看不到（沒訂 `message.channels`），不會提醒。
+- 送出後在 Slack 編輯、刪除，Teams 不會跟著變，relay 也看不到（沒訂 `message.channels`），不會提醒。（ADR 0013 之後會問要不要同步。）
 - 反過來，在 Teams 那邊編輯、刪除從頂層發的那則：bot 不能改人發的訊息（`chat.update` 回 `cant_update_message`），所以不走 Phase 1 的原地更新，改在那則的 thread 貼「_Edited in Teams_」加新版（刪除是「_Deleted in Teams_」），Slack 上的原文不動。對應表記著那則不是 bot 的（`MessageLinks` 的 `ByBot`），才分得出要走哪條。thread 裡發的推回來時是 bot 貼的，照 Phase 1 原地更新。「Edited / Deleted in Teams」那則夾著 Teams id 與版本（metadata；讀 thread 去重時同樣只認自己的 bot 貼的，表情留言也一樣），對應表沒記版本時（剛送出、重啟後從表情補回來）先讀那則 thread：重啟後 gateway 重送之前的編輯，貼過的版本不再貼。
 - 這一版不送附件、圖片。Slack 的格式大多轉得過去，Teams 沒有對應的（例如 `@usergroup`）照字面送。
 - 結果不明時，「經 gateway 找有沒有這個 `clientMessageId`」是唯一擋重送的地方：Teams 不去重。找的時候訊息剛好還沒出現，會誤判成沒送，按 Retry 就多一則。找的時候使用者在等：從現在往前翻到那則 Slack 訊息寫下的時間，通常一兩頁；確認之後隔很久才按 Send、對話又很熱鬧時頁數會多，最多 40 頁，超過就當查不完。

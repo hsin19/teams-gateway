@@ -226,10 +226,27 @@ public sealed class RelayWorker(
         if (string.IsNullOrEmpty(message.Content) && message.Attachments is not { Count: > 0 })
             return; // 新訊息但無文字也無附件（純系統事件），不轉
 
+        await PostAsync(message, channel, version, ct);
+    }
+
+    /// <summary>
+    /// 把 Teams 上的一則照一般轉送的樣子補貼到 <paramref name="channel"/> 頂層（ADR 0013：從 Slack 頂層發的那則在 Slack 上刪了、
+    /// Teams 上留著，頂層才不會缺一句）。之後 Teams 上的編輯 / 刪除照 Phase 1 原地更新這則。貼成了回 true。
+    /// </summary>
+    internal async Task<bool> RepostAsync(MessageDto message, string channel, CancellationToken ct)
+    {
+        RememberSender(message);
+        return await PostAsync(message, channel, message.Version > 0 ? message.Version : null, ct);
+    }
+
+    private async Task<bool> PostAsync(MessageDto message, string channel, long? version, CancellationToken ct)
+    {
         var content = await FormatAsync(message, channel, ct);
         var ts = await slack.PostMessageAsync(channel, content.Text, message.Id, version, content.Images, ct, message.ConversationId);
-        if (ts is not null)
-            links.Remember(message.Id, channel, ts, content.Text, version, content.Images, message.ConversationId); // 記住對應，給之後的回覆 / 編輯用
+        if (ts is null)
+            return false;
+        links.Remember(message.Id, channel, ts, content.Text, version, content.Images, message.ConversationId); // 記住對應，給之後的回覆 / 編輯用
+        return true;
     }
 
     /// <summary>
@@ -256,6 +273,12 @@ public sealed class RelayWorker(
     private async Task RelayHumanSendEditAsync(MessageDto message, MessageLinks.SlackRef prior, long? version, CancellationToken ct)
     {
         var chat = prior.Chat ?? message.ConversationId;
+        // 從 Slack 同步過去的（ADR 0013）：Slack 上本來就是這一版，不貼；記下版本，重送時才不會當成新的編輯
+        if (sends.TakeSyncedChange(message.Id))
+        {
+            links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, version, prior.Images, chat, byBot: false);
+            return;
+        }
         if (prior.Version is null && version is { } incoming
             && await slack.ReadEditNoteVersionAsync(prior.Channel, prior.Ts, message.Id, (await bot.RequireAsync(ct)).BotId, ct) is { } noted && noted >= incoming)
         {
