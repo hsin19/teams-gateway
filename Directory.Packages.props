@@ -14,7 +14,7 @@
 
   <!-- Aspire hosting 整合（AppHost 與 functional test 起 container 用），版本跟 global.json 的 Aspire.AppHost.Sdk 一致 -->
   <ItemGroup>
-    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.3" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.4" />
   </ItemGroup>
 
   <!-- Cloudflare Access 的身分 JWT（ADR 0011） -->
