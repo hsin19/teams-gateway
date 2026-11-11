@@ -4,19 +4,40 @@ using TeamsGateway.Contracts;
 
 namespace TeamsGateway.Gateway.Events;
 
-/// <summary>要記進內部 log（<c>PublishedEvents</c>）的一個事件：一則訊息（新 / 編輯 / 刪除）或一次表情變動，兩者擇一。</summary>
-public sealed record GatewayEvent(MessageDto? Message = null, ReactionDto? Reaction = null)
+/// <summary>要記進內部 log（<c>PublishedEvents</c>）的一個事件：一則訊息（新 / 編輯 / 刪除）或一次表情變動，兩者擇一（C# 15 Union）。</summary>
+public sealed record GatewayEvent(EventPayload Payload)
 {
+    public GatewayEvent(MessageDto? Message = null, ReactionDto? Reaction = null)
+        : this(Message is not null ? (EventPayload)Message : (EventPayload)Reaction!) { }
+
+    public MessageDto? Message => Payload is MessageDto m ? m : null;
+
+    public ReactionDto? Reaction => Payload is ReactionDto r ? r : null;
+
     /// <summary>SSE 的 event 名稱 / webhook header（見 <see cref="EventKinds"/>）。</summary>
-    public string Kind => Reaction is null ? EventKinds.Message : EventKinds.Reaction;
+    public string Kind => Payload switch
+    {
+        MessageDto => EventKinds.Message,
+        ReactionDto => EventKinds.Reaction,
+    };
 
-    public string MessageId => Message?.Id ?? Reaction!.MessageId;
+    public string MessageId => Payload switch
+    {
+        MessageDto m => m.Id,
+        ReactionDto r => r.MessageId,
+    };
 
-    public string ConversationId => Message?.ConversationId ?? Reaction!.ConversationId;
+    public string ConversationId => Payload switch
+    {
+        MessageDto m => m.ConversationId,
+        ReactionDto r => r.ConversationId,
+    };
 
-    public string ToJson() => Reaction is null
-        ? JsonSerializer.Serialize(Message!, ContractsJsonContext.Default.MessageDto)
-        : JsonSerializer.Serialize(Reaction, ContractsJsonContext.Default.ReactionDto);
+    public string ToJson() => Payload switch
+    {
+        MessageDto m => JsonSerializer.Serialize(m, ContractsJsonContext.Default.MessageDto),
+        ReactionDto r => JsonSerializer.Serialize(r, ContractsJsonContext.Default.ReactionDto),
+    };
 }
 
 /// <summary>

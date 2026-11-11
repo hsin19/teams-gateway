@@ -4,7 +4,7 @@
 
 ## 專案速覽
 
-個人版 Teams（teams.live.com）→ HTTP / SSE gateway，加上把訊息轉進 Slack 的 relay。.NET 10 + Aspire 的 monorepo（ADR 0003）。
+個人版 Teams（teams.live.com）→ HTTP / SSE gateway，加上把訊息轉進 Slack 的 relay。.NET 11 + Aspire 的 monorepo（ADR 0003）。
 
 | 路徑 | 內容 |
 |---|---|
@@ -30,7 +30,7 @@ dotnet publish services/TeamsGateway.Gateway -t:PublishContainer -p:ContainerRun
 
 # relay 是 Native AOT，Linux 的原生碼在 macOS 上編不出來：在 AOT 版的 SDK image 裡出成檔案再 load。
 # --platform 決定架構（Apple Silicon 上 linux/amd64 走模擬，比較慢）
-docker run --rm --platform linux/arm64 -v "$PWD:/src" -w /src mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
+docker run --rm --platform linux/arm64 -v "$PWD:/src" -w /src mcr.microsoft.com/dotnet/sdk:11.0-noble-aot \
   dotnet publish services/TeamsGateway.SlackRelay -t:PublishContainer -p:ContainerRuntimeIdentifier=linux-arm64 -p:ContainerArchiveOutputPath=/src/bin/relay.tar.gz
 docker load -i bin/relay.tar.gz
 ```

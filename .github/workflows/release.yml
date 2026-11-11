@@ -95,7 +95,7 @@ jobs:
       - name: Build AOT image into local Docker
         if: ${{ matrix.app.aot }}
         run: |
-          docker run --rm -v "$PWD:/src" -w /src mcr.microsoft.com/dotnet/sdk:10.0-noble-aot \
+          docker run --rm -v "$PWD:/src" -w /src mcr.microsoft.com/dotnet/sdk:11.0-noble-aot \
             dotnet publish ${{ matrix.app.project }} -t:PublishContainer \
             -p:ContainerRuntimeIdentifier=${{ matrix.platform.rid }} \
             -p:ContainerImageTag=smoke \
