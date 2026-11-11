@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace TeamsGateway.Contracts;
 
 /// <summary>對外的對話資訊。</summary>
@@ -59,6 +61,7 @@ public static class EventKinds
 /// Gateway 事件資料的聯集型別（C# 15 Union Type）。
 /// 包含新訊息 / 編輯 / 刪除（<see cref="MessageDto"/>）或表情變動（<see cref="ReactionDto"/>）。
 /// </summary>
+[JsonUnion(TypeClassifier = typeof(JsonUnionTypeStructuralClassifier))]
 public union EventPayload(MessageDto, ReactionDto);
 
 /// <summary>
