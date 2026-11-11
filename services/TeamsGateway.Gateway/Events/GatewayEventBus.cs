@@ -7,8 +7,8 @@ namespace TeamsGateway.Gateway.Events;
 /// <summary>要記進內部 log（<c>PublishedEvents</c>）的一個事件：一則訊息（新 / 編輯 / 刪除）或一次表情變動，兩者擇一（C# 15 Union）。</summary>
 public sealed record GatewayEvent(EventPayload Payload)
 {
-    public GatewayEvent(MessageDto? message = null, ReactionDto? reaction = null)
-        : this(message is not null ? (EventPayload)message : (EventPayload)reaction!) { }
+    public GatewayEvent(MessageDto? Message = null, ReactionDto? Reaction = null)
+        : this(Message is not null ? (EventPayload)Message : (EventPayload)Reaction!) { }
 
     public MessageDto? Message => Payload is MessageDto m ? m : null;
 

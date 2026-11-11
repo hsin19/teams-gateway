@@ -106,11 +106,11 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
                     conv.LastMessageId = dto.Id;
                     conv.UpdatedAt = DateTimeOffset.UtcNow;
                 }
-                outgoing.Add(Record(db, new GatewayEvent(Message: dto), rawJson));
+                outgoing.Add(Record(db, new GatewayEvent(dto), rawJson));
                 // 晚到的訊息（睡眠 / 停機後才被輪詢、回補補到）第一次看到時可能已經有人按了表情：
                 // 之後的比對都以這版為準，現在不發就永遠發不出去
                 foreach (var reaction in await ReactionChangesAsync(db, beforeJson: "{}", rawJson, dto, names, ct))
-                    outgoing.Add(Record(db, new GatewayEvent(Reaction: reaction), rawJson));
+                    outgoing.Add(Record(db, new GatewayEvent(reaction), rawJson));
             }
             result = IngestResult.Inserted;
         }
@@ -151,11 +151,11 @@ public sealed class MessageIngestor(IDbContextFactory<GatewayDbContext> factory,
                 existing.UpdatedAt = DateTimeOffset.UtcNow;
                 existing.RawJson = rawJson;
                 if (publish)
-                    outgoing.Add(Record(db, new GatewayEvent(Message: dto), rawJson));
+                    outgoing.Add(Record(db, new GatewayEvent(dto), rawJson));
                 result = IngestResult.Updated;
             }
             foreach (var reaction in reactions)
-                outgoing.Add(Record(db, new GatewayEvent(Reaction: reaction), rawJson));
+                outgoing.Add(Record(db, new GatewayEvent(reaction), rawJson));
         }
 
         await db.SaveChangesAsync(ct);
