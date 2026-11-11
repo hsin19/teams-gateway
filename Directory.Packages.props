@@ -7,10 +7,10 @@
   <!-- 資料存取 -->
   <ItemGroup>
     <PackageVersion Include="Aspire.Hosting" Version="13.6.5" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="11.0.0" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <!-- dotnet ef 產生 migration 用（只在設計期，不進發佈輸出）；版本跟 EF Core、dotnet-tools.json 的 dotnet-ef 一致 -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="11.0.0" />
   </ItemGroup>
 
   <!-- Aspire hosting 整合（AppHost 與 functional test 起 container 用），版本跟 global.json 的 Aspire.AppHost.Sdk 一致 -->
@@ -20,7 +20,7 @@
 
   <!-- Cloudflare Access 的身分 JWT（ADR 0011） -->
   <ItemGroup>
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="11.0.0" />
   </ItemGroup>
 
   <!-- MCP -->
@@ -30,14 +30,14 @@
 
   <!-- API doc：內建 OpenAPI + Scalar UI -->
   <ItemGroup>
-    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="11.0.0" />
     <PackageVersion Include="Scalar.AspNetCore" Version="2.18.6" />
   </ItemGroup>
 
   <!-- Aspire ServiceDefaults：resilience / service discovery / OpenTelemetry -->
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.11.0" />
-    <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.11.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="11.0.0" />
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.20.1" />
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.20.1" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.20.1" />
@@ -49,7 +49,7 @@
   <ItemGroup>
     <PackageVersion Include="xunit.v3" Version="4.0.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="11.0.0" />
   </ItemGroup>
 
 </Project>

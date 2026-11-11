@@ -11,9 +11,9 @@ updates:
       prefix: 'chore'
       include: 'scope'
     ignore:
-      # The repo targets .NET 10 (global.json, Directory.Build.props). Packages that ship with the
-      # .NET major would arrive as 11.x needing net11.0, so every such PR would stay red and reopen
-      # weekly. Lift these when the TFM moves to net11.0.
+      # The repo targets .NET 11 (global.json, Directory.Build.props). Packages that ship with the
+      # .NET major would arrive as 12.x needing net12.0, so every such PR would stay red and reopen
+      # weekly. Lift these when the TFM moves to net12.0.
       - dependency-name: 'Microsoft.AspNetCore.*'
         update-types: ['version-update:semver-major']
       - dependency-name: 'Microsoft.EntityFrameworkCore*'
