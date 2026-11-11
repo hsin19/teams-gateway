@@ -7,6 +7,7 @@
   <!-- 資料存取 -->
   <ItemGroup>
     <PackageVersion Include="Aspire.Hosting" Version="13.6.5" />
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.5" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <!-- dotnet ef 產生 migration 用（只在設計期，不進發佈輸出）；版本跟 EF Core、dotnet-tools.json 的 dotnet-ef 一致 -->
