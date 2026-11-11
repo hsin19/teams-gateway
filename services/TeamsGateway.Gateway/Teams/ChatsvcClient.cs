@@ -118,20 +118,19 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
     {
         var result = new List<RawMessage>();
         string? cursor = null;
-        for (var page = 0; page < 40 && result.Count < maxMessages; page++)
+        pages: for (var page = 0; page < 40 && result.Count < maxMessages; page++)
         {
             var (items, next) = await FetchPageAsync(threadId, pageSize, cursor, ct);
             if (items.Count == 0)
                 break;
-            var reachedCutoff = false;
             foreach (var item in items)
             {
                 if (item.Dto.Time is { } t && t < cutoff)
-                    reachedCutoff = true;
-                else if (item.Dto.Type is "Text" or "RichText/Html")
+                    break pages;
+                if (item.Dto.Type is "Text" or "RichText/Html")
                     result.Add(item);
             }
-            if (reachedCutoff || next is null)
+            if (next is null)
                 break;
             cursor = next;
         }

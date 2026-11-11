@@ -56,6 +56,12 @@ public static class EventKinds
 }
 
 /// <summary>
+/// Gateway 事件資料的聯集型別（C# 15 Union Type）。
+/// 包含新訊息 / 編輯 / 刪除（<see cref="MessageDto"/>）或表情變動（<see cref="ReactionDto"/>）。
+/// </summary>
+public union EventPayload(MessageDto, ReactionDto);
+
+/// <summary>
 /// 事件 payload 的格式版本（ADR 0006 的事件契約）。SSE 的 <c>data</c>、webhook 的 body 是 DTO 的欄位，
 /// 再加上 <c>schemaVersion</c> 與 <c>raw</c>（Teams 原始訊息 JSON）；webhook 另外放在 <c>X-TeamsGateway-Schema-Version</c> header。
 /// 只有不相容的改動才升版；只加欄位不升（consumer 本來就要略過不認得的欄位）。

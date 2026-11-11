@@ -6,8 +6,15 @@ using TeamsGateway.Contracts;
 
 namespace TeamsGateway.SlackRelay;
 
-/// <summary>SSE 的一個事件：訊息或表情變動擇一。<see cref="Id"/> 是 gateway 的事件序號，重連時當 <c>Last-Event-ID</c> 帶回去。</summary>
-public readonly record struct StreamEvent(string? Id, MessageDto? Message = null, ReactionDto? Reaction = null);
+/// <summary>SSE 的一個事件：訊息或表情變動擇一（C# 15 Union）。<see cref="Id"/> 是 gateway 的事件序號，重連時當 <c>Last-Event-ID</c> 帶回去。</summary>
+public readonly record struct StreamEvent(string? Id, EventPayload Payload)
+{
+    public StreamEvent(string? id, MessageDto? message = null, ReactionDto? reaction = null)
+        : this(id, message is not null ? (EventPayload)message : (EventPayload)reaction!) { }
+
+    public MessageDto? Message => Payload is MessageDto m ? m : null;
+    public ReactionDto? Reaction => Payload is ReactionDto r ? r : null;
+}
 
 /// <summary>
 /// 連 gateway 的 <c>GET /v1/events</c>（SSE），解析出 <see cref="StreamEvent"/>。
@@ -80,7 +87,7 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
                     var parsed = data.Length == 0 ? null : eventType switch
                     {
                         EventKinds.Message when TryParse(data.ToString(), ContractsJsonContext.Default.MessageDto) is { } message => new StreamEvent(eventId, message),
-                        EventKinds.Reaction when TryParse(data.ToString(), ContractsJsonContext.Default.ReactionDto) is { } reaction => new StreamEvent(eventId, Reaction: reaction),
+                        EventKinds.Reaction when TryParse(data.ToString(), ContractsJsonContext.Default.ReactionDto) is { } reaction => new StreamEvent(eventId, reaction),
                         _ => (StreamEvent?)null, // 不認得的事件種類：略過
                     };
                     eventType = null;

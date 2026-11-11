@@ -56,10 +56,12 @@ public sealed class RelayWorker(
         // 單則的失敗在 WithRetryAsync 裡吞掉，不會冒出來中斷串流
         await foreach (var evt in source.ReadAsync(chats, ct))
         {
-            if (evt.Message is { } message)
-                await RelayWithRetryAsync(message, routes, opts.Slack.DefaultChannel, ct);
-            else if (evt.Reaction is { } reaction)
-                await WithRetryAsync($"reaction {reaction.Emoji} (message {reaction.MessageId})", () => RelayReactionAsync(reaction, Seq(evt.Id), ct), ct);
+            var task = evt.Payload switch
+            {
+                MessageDto message => RelayWithRetryAsync(message, routes, opts.Slack.DefaultChannel, ct),
+                ReactionDto reaction => WithRetryAsync($"reaction {reaction.Emoji} (message {reaction.MessageId})", () => RelayReactionAsync(reaction, Seq(evt.Id), ct), ct),
+            };
+            await task;
         }
     }
 
