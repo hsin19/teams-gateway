@@ -15,6 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Aspire.Dashboard.Sdk.linux-x64" />
     <PackageReference Include="Aspire.Hosting" />
     <PackageReference Include="Aspire.Hosting.PostgreSQL" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />

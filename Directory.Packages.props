@@ -6,6 +6,7 @@
 
   <!-- 資料存取 -->
   <ItemGroup>
+    <PackageVersion Include="Aspire.Dashboard.Sdk.linux-x64" Version="13.6.5" />
     <PackageVersion Include="Aspire.Hosting" Version="13.6.5" />
     <!-- EF Core 暫留 10.0.14，待 Npgsql.EntityFrameworkCore.PostgreSQL 釋出 11.0.0 後再一併升級（避免版本衝突 NU1107） -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
