@@ -20,7 +20,9 @@ public sealed class GatewayFixture : IDisposable
 
     public GatewayFixture()
     {
-        Client = new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(30) };
+        // 要比 gateway 打 Teams 的 resilience 總時限（預設 30 秒）長：Teams 慢或出錯時才拿得到 gateway 回的錯誤，
+        // 不然兩邊同時放棄，只看得到 client 端 timeout、看不出是哪段出問題
+        Client = new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(60) };
         if (!string.IsNullOrWhiteSpace(ApiKey))
             Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiKey);
     }
