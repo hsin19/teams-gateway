@@ -6,7 +6,6 @@
 
   <!-- 資料存取 -->
   <ItemGroup>
-    <PackageVersion Include="Aspire.Hosting" Version="13.6.5" />
     <!-- EF Core 暫留 10.0.14，待 Npgsql.EntityFrameworkCore.PostgreSQL 釋出 11.0.0 後再一併升級（避免版本衝突 NU1107） -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
@@ -16,7 +15,7 @@
 
   <!-- Aspire hosting 整合（AppHost 與 functional test 起 container 用），版本跟 global.json 的 Aspire.AppHost.Sdk 一致 -->
   <ItemGroup>
-    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.4" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.5" />
   </ItemGroup>
 
   <!-- Cloudflare Access 的身分 JWT（ADR 0011） -->
