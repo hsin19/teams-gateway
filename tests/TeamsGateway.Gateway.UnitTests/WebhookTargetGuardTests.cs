@@ -42,6 +42,6 @@ public class WebhookTargetGuardTests
 
         var ex = await Assert.ThrowsAsync<HttpRequestException>(() =>
             http.PostAsync(url, new StringContent("{}"), TestContext.Current.CancellationToken));
-        Assert.Contains("不允許的位址", ex.ToString());
+        Assert.Contains("disallowed addresses", ex.ToString());
     }
 }

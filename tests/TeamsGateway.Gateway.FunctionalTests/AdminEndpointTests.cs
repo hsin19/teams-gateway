@@ -19,7 +19,7 @@ public sealed class AdminEndpointTests(GatewayAppFixture fx) : IClassFixture<Gat
 
         var bad = await admin.PutAsync("/admin/login-cookies", new StringContent("not json", Encoding.UTF8, "application/json"), ct);
         Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
-        Assert.Equal("不是合法的 cookie JSON 陣列", (await bad.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("error").GetString());
+        Assert.Equal("Not a valid cookie JSON array", (await bad.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("error").GetString());
 
         var ok = await admin.PutAsync("/admin/login-cookies",
             new StringContent("""[{"name":"MSPAuth","value":"v","domain":"login.live.com","path":"/"}]""", Encoding.UTF8, "application/json"), ct);

@@ -65,7 +65,7 @@ public sealed class PeopleDirectory(IHttpClientFactory httpFactory, SkypeTokenPr
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            logger.LogWarning(ex, "查 {Count} 個人的顯示名稱失敗", missing.Count);
+            logger.LogWarning(ex, "Looking up display names for {Count} people failed", missing.Count);
         }
         return result;
     }

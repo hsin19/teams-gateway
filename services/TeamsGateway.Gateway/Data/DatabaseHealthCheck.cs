@@ -12,11 +12,11 @@ public sealed class DatabaseHealthCheck(IDbContextFactory<GatewayDbContext> fact
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
             return await db.Database.CanConnectAsync(cancellationToken)
                 ? HealthCheckResult.Healthy()
-                : HealthCheckResult.Unhealthy("資料庫連不上");
+                : HealthCheckResult.Unhealthy("Cannot connect to the database");
         }
         catch (Exception ex)
         {
-            return HealthCheckResult.Unhealthy("資料庫檢查失敗", ex);
+            return HealthCheckResult.Unhealthy("Database check failed", ex);
         }
     }
 }

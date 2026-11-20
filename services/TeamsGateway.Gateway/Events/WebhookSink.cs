@@ -186,12 +186,12 @@ public sealed class WebhookSink(
         var retention = TimeSpan.FromDays(options.Value.EventRetentionDays);
         if (DateTimeOffset.UtcNow - evt.PublishedAt <= retention)
         {
-            logger.LogWarning("webhook {Id} 送事件 {Seq} 失敗（{Error}），稍後重試", hook.Id, evt.Seq, error);
+            logger.LogWarning("Webhook {Id} failed to deliver event {Seq} ({Error}); will retry", hook.Id, evt.Seq, error);
             return;
         }
         await using var db = await factory.CreateDbContextAsync(ct);
         await db.WebhookSubscriptions.Where(w => w.Id == hook.Id).ExecuteUpdateAsync(s => s.SetProperty(w => w.Active, false), ct);
-        logger.LogWarning("webhook {Id}（{Url}）落後超過 {Days} 天還送不出去（{Error}），已停用；要恢復就重新登記",
+        logger.LogWarning("Webhook {Id} ({Url}) is more than {Days} days behind and still failing ({Error}); deactivated it, register it again to resume",
             hook.Id, hook.TargetUrl, options.Value.EventRetentionDays, error);
     }
 

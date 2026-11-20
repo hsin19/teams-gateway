@@ -48,7 +48,7 @@ public class TrouterReceiveTests
         await trouter.ReceiveLoopAsync(ws, "token", "epid", (incoming, _) =>
         {
             if (incoming.Message.Content == "boom")
-                throw new InvalidOperationException("DB 一時寫不進去");
+                throw new InvalidOperationException("The database is briefly unwritable");
             handled.Add(incoming.Message.Content);
             return Task.CompletedTask;
         }, TestContext.Current.CancellationToken);

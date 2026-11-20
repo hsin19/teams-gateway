@@ -1,8 +1,7 @@
 name: Pull Request
 
-# Everything a PR gets: the shared gate in check.yml, plus the policy that only makes sense on a
-# PR -- dependency review and the Dependabot auto-merge. Named for its trigger rather than
-# `ci.yml`, because CI is not what distinguishes it: release.yml calls the same gate.
+# PR 要跑的全部：共用的 check.yml，加上只對 PR 有意義的規則——dependency review 與 Dependabot 自動 merge。
+# 用觸發它的事件命名、不叫 `ci.yml`：release.yml 也呼叫同一套檢查，CI 不是分辨它們的地方。
 on:
   pull_request:
 
@@ -17,7 +16,7 @@ jobs:
   check:
     uses: ./.github/workflows/check.yml
 
-  # Needs the Dependency graph turned on (see README.md); until then every PR fails here.
+  # 要先開 Dependency graph（見 README.md），沒開之前每個 PR 都會在這裡失敗。
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
@@ -36,9 +35,9 @@ jobs:
           fail-on-severity: moderate
           comment-summary-in-pr: on-failure
 
-  # Merges a green Dependabot PR through the shared workflow in hsin19/actions; `needs` is what
-  # "green" means here. AUTOMERGE_TOKEN is a Dependabot secret, not GITHUB_TOKEN, so the merge's
-  # push to main still runs check.yml. See README.md for the token setup.
+  # 經 hsin19/actions 的共用 workflow merge 綠燈的 Dependabot PR；這裡的「綠燈」就是 `needs` 列的那些。
+  # AUTOMERGE_TOKEN 是 Dependabot secret、不是 GITHUB_TOKEN，merge 後 push 到 main 才會照樣跑 check.yml。
+  # token 怎麼設見 README.md。
   auto-merge:
     needs: [check, dependency-review]
     uses: hsin19/actions/.github/workflows/dependabot-automerge.yml@v1

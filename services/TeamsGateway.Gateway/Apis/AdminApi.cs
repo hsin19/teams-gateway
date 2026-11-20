@@ -27,16 +27,17 @@ public static class AdminApi
             }
             catch (JsonException)
             {
-                return TypedResults.BadRequest(new ApiError("不是合法的 cookie JSON 陣列"));
+                return TypedResults.BadRequest(new ApiError("Not a valid cookie JSON array"));
             }
             if (cookies is not { Count: > 0 })
-                return TypedResults.BadRequest(new ApiError("cookie 陣列是空的"));
+                return TypedResults.BadRequest(new ApiError("The cookie array is empty"));
 
             await store.SetAsync(TeamsAuthConstants.CookieSecureKey, json, ct);
             return TypedResults.Ok(new ImportedCookies(cookies.Count));
         })
-        .WithSummary("匯入登入 cookie")
-        .WithDescription("一次性 bootstrap：把瀏覽器匯出的 Teams 登入 cookie 加密存進來，之後自動換 skypetoken。約一年效期，到期重匯。");
+        .WithSummary("Import login cookies")
+        .WithDescription("One-time bootstrap: stores the Teams login cookies exported from a browser, encrypted, and exchanges them for a skypetoken automatically from then on. "
+            + "They last about a year; import them again when they expire.");
 
         admin.MapGet("/auth", async (SkypeTokenProvider tokens, SecureStore store, CancellationToken ct) =>
         {
@@ -44,7 +45,7 @@ public static class AdminApi
             var current = tokens.Current;
             return TypedResults.Ok(new AuthInfo(hasCookies, current?.SkypeId, current?.ExpiresAt));
         })
-        .WithSummary("看認證狀態");
+        .WithSummary("Show the auth state");
 
         admin.MapPost("/auth/refresh", async Task<Results<Ok<TokenInfo>, ProblemHttpResult>> (SkypeTokenProvider tokens, CancellationToken ct) =>
         {
@@ -56,33 +57,33 @@ public static class AdminApi
             }
             catch (InvalidOperationException ex)
             {
-                return TypedResults.Problem($"換不到 skypetoken：{ex.Message}", statusCode: StatusCodes.Status502BadGateway);
+                return TypedResults.Problem($"Could not get a skypetoken: {ex.Message}", statusCode: StatusCodes.Status502BadGateway);
             }
         })
-        .WithSummary("強制換一次 skypetoken")
-        .WithDescription("驗證 cookie 還有效（換得到 token 就 ok，失敗代表該重匯）。");
+        .WithSummary("Force a skypetoken refresh")
+        .WithDescription("Checks that the login cookies still work: ok if a token comes back, a failure means they need importing again.");
 
         admin.MapPost("/api-keys", async Task<Results<Ok<CreatedApiKey>, BadRequest<ApiError>>> (CreateApiKeyRequest body, ApiKeyService keys, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(body.Name))
-                return TypedResults.BadRequest(new ApiError("name 必填"));
+                return TypedResults.BadRequest(new ApiError("name is required"));
             var (key, raw) = await keys.CreateAsync(body.Name, ct);
             // 明文只回這一次
             return TypedResults.Ok(new CreatedApiKey(key.Id, key.Name, raw));
         })
-        .WithSummary("建 API key")
-        .WithDescription("給訂閱者（relay / client）打 /v1 用。回的 `apiKey` 明文只出現這一次。");
+        .WithSummary("Create an API key")
+        .WithDescription("For subscribers (relay / clients) to call /v1. The plaintext `apiKey` is returned only this once.");
 
         admin.MapGet("/api-keys", async (ApiKeyService keys, CancellationToken ct) =>
         {
             var all = await keys.ListAsync(ct);
             return TypedResults.Ok<IReadOnlyList<ApiKeyInfo>>(all.Select(k => new ApiKeyInfo(k.Id, k.Name, k.CreatedAt, k.RevokedAt)).ToList());
         })
-        .WithSummary("列出 API key");
+        .WithSummary("List API keys");
 
         admin.MapDelete("/api-keys/{id:guid}", async Task<Results<NoContent, NotFound>> (Guid id, ApiKeyService keys, CancellationToken ct) =>
             await keys.RevokeAsync(id, ct) ? TypedResults.NoContent() : TypedResults.NotFound())
-        .WithSummary("撤銷 API key");
+        .WithSummary("Revoke an API key");
 
         // 訂閱對話：gateway 只追 / 存訂閱中的對話（Trouter 會推帳號所有對話，但只有這些入庫）
         admin.MapGet("/subscriptions", async (IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
@@ -92,7 +93,7 @@ public static class AdminApi
                 .Select(c => new SubscriptionInfo(c.Id, c.Topic, c.LastMessageId, c.UpdatedAt)).ToListAsync(ct);
             return TypedResults.Ok<IReadOnlyList<SubscriptionInfo>>(subs);
         })
-        .WithSummary("列出訂閱中的對話");
+        .WithSummary("List subscribed chats");
 
         // chat 可給 id 或群名；訂閱後同步回補歷史（預設一週）
         admin.MapPut("/subscriptions", async Task<Results<Ok<SubscribedConversation>, NotFound<ApiError>, BadRequest<ApiError>>> (
@@ -106,7 +107,7 @@ public static class AdminApi
             {
                 var hits = ChatsvcClient.MatchByName(chats, body.Chat);
                 if (hits.Count == 0)
-                    return TypedResults.NotFound(new ApiError($"找不到對話 '{body.Chat}'"));
+                    return TypedResults.NotFound(new ApiError($"No chat named '{body.Chat}'"));
                 if (hits.Count > 1)
                     return TypedResults.BadRequest(new ApiError(ChatsvcClient.Ambiguous(body.Chat, hits)));
                 hit = hits[0];
@@ -132,8 +133,9 @@ public static class AdminApi
             await backfiller.BackfillAsync(hit.Id, publishGap: false, ct); // 回補歷史（只存不發）
             return TypedResults.Ok(new SubscribedConversation(hit.Id, hit.Topic));
         })
-        .WithSummary("訂閱對話")
-        .WithDescription("`chat` 可給對話 id 或群名。訂閱後同步回補歷史（預設一週），之後即時訊息進 SSE / webhook。");
+        .WithSummary("Subscribe to a chat")
+        .WithDescription("`chat` is a chat id or a group name. Subscribing backfills the history (a week by default) before returning; "
+            + "new messages then go to SSE / webhooks.");
 
         admin.MapDelete("/subscriptions/{id}", async Task<Results<NoContent, NotFound>> (string id, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
         {
@@ -145,8 +147,8 @@ public static class AdminApi
             await db.SaveChangesAsync(ct);
             return TypedResults.NoContent();
         })
-        .WithSummary("取消訂閱")
-        .WithDescription("停止追這個對話，但保留已存的歷史。");
+        .WithSummary("Unsubscribe from a chat")
+        .WithDescription("Stops following the chat but keeps the stored history.");
 
         return admin;
     }

@@ -41,13 +41,13 @@ public sealed class RelayWorker(
         var routes = BuildRoutes(opts.Slack.Routes, logger);
         if (!HasDestination(opts.Slack, routes))
         {
-            logger.LogError("未設定 Relay:Slack:BotToken 或任何頻道，relay 不啟動");
+            logger.LogError("Relay:Slack:BotToken or a channel is not configured; the relay is not starting");
             return;
         }
 
         // 有路由就只訂閱那些對話；否則訂全部（走 DefaultChannel）
         IReadOnlyCollection<string>? chats = routes.Count > 0 ? routes.Keys : null;
-        logger.LogInformation("relay 啟動：{Count} 條路由，default={Default}", routes.Count, opts.Slack.DefaultChannel ?? "(無)");
+        logger.LogInformation("Relay starting: {Count} routes, default={Default}", routes.Count, opts.Slack.DefaultChannel ?? "(none)");
 
         // 從 Slack 歷史回補近期的訊息對應（metadata 夾著 Teams id），重啟後才連得回舊訊息的回覆 / 編輯；
         // SSE source 剛啟動時也靠它決定從哪則之後續接，所以要先做完
@@ -80,11 +80,11 @@ public sealed class RelayWorker(
         {
             if (string.IsNullOrWhiteSpace(route.Chat) || string.IsNullOrWhiteSpace(route.Channel))
             {
-                logger.LogWarning("略過不完整的路由：chat={Chat} channel={Channel}", route.Chat, route.Channel);
+                logger.LogWarning("Skipping an incomplete route: chat={Chat} channel={Channel}", route.Chat, route.Channel);
                 continue;
             }
             if (map.TryGetValue(route.Chat, out var existing) && existing != route.Channel)
-                logger.LogWarning("路由重複：{Chat} 同時設了 {First} 和 {Second}，用後者", route.Chat, existing, route.Channel);
+                logger.LogWarning("Duplicate route: {Chat} is set to both {First} and {Second}; using the latter", route.Chat, existing, route.Channel);
             map[route.Chat] = route.Channel;
         }
         return map;
@@ -334,10 +334,10 @@ public sealed class RelayWorker(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex, "回補 {Channel} 的訊息對應失敗（可能 app 還沒加 channels:history/join 權限）", channel);
+                logger.LogWarning(ex, "Loading message links from {Channel} failed (the app may lack the channels:history / channels:join scopes)", channel);
             }
         }
-        logger.LogInformation("從 Slack 回補 {Count} 筆訊息對應（近 {Hours}h）", links.Count, retentionHours);
+        logger.LogInformation("Loaded {Count} message links from Slack (last {Hours}h)", links.Count, retentionHours);
     }
 
     /// <summary>回補前要先知道自己是哪個 bot：一時查不到就退避重試，不能不分是誰貼的就讀（會把別的 bot 轉的當成自己的、續接點跑掉）。</summary>
@@ -468,14 +468,14 @@ public sealed class RelayWorker(
                 return null;
             if (ImageExtension(image.ContentType) is not { } ext)
             {
-                logger.LogWarning("圖片格式 {ContentType} 不能用 Slack image block 顯示，略過", image.ContentType);
+                logger.LogWarning("Image type {ContentType} can't be shown in a Slack image block; skipping it", image.ContentType);
                 return null;
             }
             return await slack.UploadFileAsync(image.Bytes, $"teams-image{ext}", ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "轉送圖片失敗：{Url}", url);
+            logger.LogWarning(ex, "Relaying an image failed: {Url}", url);
             return null;
         }
     }

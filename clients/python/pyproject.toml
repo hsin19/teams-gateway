@@ -1,7 +1,7 @@
 [project]
 name = "teams-gateway-client"
 version = "0.1.0"
-description = "個人版 Teams gateway 的 Python client（REST + SSE）"
+description = "Python client for the personal Teams gateway (REST + SSE)"
 requires-python = ">=3.11"
 dependencies = ["httpx>=0.27"]
 

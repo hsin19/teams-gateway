@@ -26,11 +26,11 @@ public sealed class PublishedEventPruner(
                 var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromDays(options.Value.EventRetentionDays);
                 var deleted = await PruneAsync(factory, sinks, cutoff, stoppingToken);
                 if (deleted > 0)
-                    logger.LogInformation("清掉 {Count} 筆 {Cutoff:u} 之前、所有 sink 都送過的事件", deleted, cutoff);
+                    logger.LogInformation("Pruned {Count} events published before {Cutoff:u} that every sink has delivered", deleted, cutoff);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex, "清舊事件失敗");
+                logger.LogWarning(ex, "Pruning old events failed");
             }
 
             try

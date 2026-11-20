@@ -155,7 +155,7 @@ public sealed class EventsEndpointTests(GatewayAppFixture fx) : IClassFixture<Ga
         var stopwatch = Stopwatch.StartNew();
         await app.DisposeAsync();
 
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), $"關閉花了 {stopwatch.Elapsed.TotalSeconds:F1} 秒");
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), $"Shutdown took {stopwatch.Elapsed.TotalSeconds:F1}s");
     }
 
     private static async Task<(long Seq, MessageDto Message)> NextAsync(StreamReader reader, CancellationToken ct)
@@ -168,6 +168,6 @@ public sealed class EventsEndpointTests(GatewayAppFixture fx) : IClassFixture<Ga
             else if (line.StartsWith("data: ", StringComparison.Ordinal))
                 return (seq!.Value, JsonSerializer.Deserialize<MessageDto>(line["data: ".Length..], Web)!);
         }
-        throw new InvalidOperationException("SSE 串流提早結束");
+        throw new InvalidOperationException("The SSE stream ended early");
     }
 }

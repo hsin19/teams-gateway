@@ -46,7 +46,7 @@ public sealed class PollService(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex, "輪詢失敗");
+                logger.LogWarning(ex, "Poll failed");
             }
         }
     }
@@ -79,7 +79,7 @@ public sealed class PollService(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex, "輪詢 {Conversation} 失敗", id);
+                logger.LogWarning(ex, "Polling {Conversation} failed", id);
             }
         }
     }
@@ -90,7 +90,7 @@ public sealed class PollService(
     {
         if (NeedsBackfill(syncedThrough, now))
         {
-            logger.LogInformation("{Conversation} 上次同步到 {Synced:u}，超過輪詢回看範圍，整段回補", id, syncedThrough);
+            logger.LogInformation("{Conversation} was last synced at {Synced:u}, beyond the poll lookback; backfilling the gap", id, syncedThrough);
             await backfiller.BackfillAsync(id, publishGap: true, ct);
             return;
         }
@@ -101,7 +101,7 @@ public sealed class PollService(
             var result = await ingestor.UpsertAsync(item.Dto, item.Raw, publish: true, ct);
             metrics.Delivered(IngestSource.Poll, result, item.Dto);
             if (result is IngestResult.Inserted)
-                logger.LogWarning("Trouter 漏接，輪詢補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
+                logger.LogWarning("Trouter missed a message, caught by poll: {Conversation} message {MessageId} ({Time:u}, {From})",
                     id, item.Dto.Id, item.Dto.Time, item.Dto.FromName);
         }
 

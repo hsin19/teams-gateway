@@ -26,7 +26,7 @@ public static class Extensions
         // 收事件的來源（ADR 0006）：換傳輸 = 多一個 IEventSource 實作 + Relay:Source，RelayWorker 不用改
         var source = builder.Configuration["Relay:Source"] ?? "Sse";
         if (!string.Equals(source, "Sse", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"不支援的 Relay:Source「{source}」（目前只有 Sse）");
+            throw new InvalidOperationException($"Unsupported Relay:Source '{source}' (only Sse is supported)");
         builder.Services.AddSingleton<IEventSource, SseEventSource>();
 
         // 只進 /health；/alive 照 ServiceDefaults 只看 process 有沒有回應

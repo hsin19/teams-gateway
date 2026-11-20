@@ -45,7 +45,7 @@ docker load -i bin/relay.tar.gz
 ## 程式慣例
 
 - 照周圍的寫法：primary constructor、`sealed`、DTO 用 `record`；JSON 走 source generator（`*JsonContext`），新的 wire 型別要註冊進去。
-- 語言：只有打開 repo 讀原始碼才看得到的用繁體中文（文件、註解、XML doc）；其他一律英文，包括執行時或在 UI 上會出現的字串（log、例外與錯誤訊息、health check 的描述、API 回應、發到 Slack 的文字、console 輸出、workflow 的 job / step 名稱）。舊的還沒改完，動到哪段就順手改哪段。
+- 語言：只有打開 repo 讀原始碼才看得到的用繁體中文（文件、註解、XML doc）；其他一律英文，包括執行時或在 UI 上會出現的字串（log、例外與錯誤訊息、health check 與 metric 的描述、API 回應、OpenAPI 的 summary / description、發到 Slack 的文字、console 輸出、workflow 的 job / step 名稱）。
 - 註解有需要才寫：只寫程式碼看不出來的事（為什麼這樣做、限制、踩過的坑）。程式碼已經講清楚的不要再用中文翻一遍。
 - 測試名稱是英文、底線分隔的句子（例如 `Upsert_inserts_then_dedupes_same_version`），上面用中文註解說明情境；`CancellationToken` 用 `TestContext.Current.CancellationToken`，DB 用 `TestDb`。
 - DB 可切換 SQLite / Postgres（`Gateway:Database:Provider`，ADR 0008），本機預設 SQLite。動到 DB 的程式兩邊都要能跑：改完跑一次 Postgres 版的 functional test；寫 `PublishedEvents` 只能經過 `MessageIngestor` 的寫入鎖（序號要等於 commit 順序）。
@@ -85,4 +85,4 @@ docker load -i bin/relay.tar.gz
 - repo 根目錄的 `aspire.config.json` 指定 AppHost：functional test 專案也是 Aspire SDK（Postgres 版測試要起 container），不指定的話 CLI 會要你二選一，非互動模式直接失敗。
 - 全域 `aspire` CLI 要跟 `global.json` 的 `Aspire.AppHost.Sdk` 同一個 minor（現在 13.6）。CLI 比較舊時會經 `dnx` 轉給新版跑、外層連不上 backchannel，`aspire start` 剛好 120 秒後整組被砍（log 有 `Timed out waiting 120s for AppHost to start`）；`dotnet tool update -g Aspire.Cli` 升上去。
 - log：`aspire logs <resource> -t`（帶時間）、`aspire otel logs <resource>`（structured）。`Microsoft.*` / `System.*` / `Polly` 只記 warning 以上。dashboard 不留歷史，要查更早「什麼時候發生」看 DB 的時間欄位（`MessageEvents.ComposeTime` / `ReceivedAt`、`PublishedEvents.PublishedAt`，Unix 毫秒），用唯讀模式開：`sqlite3 'file:.data/gateway.db?mode=ro'`。
-- 訊息晚到先查 Mac 有沒有睡眠（`pmset -g log`）：睡眠時 gateway 跟著暫停，醒來後由輪詢補上並記 `Trouter 漏接` warning，不一定是推播壞了。
+- 訊息晚到先查 Mac 有沒有睡眠（`pmset -g log`）：睡眠時 gateway 跟著暫停，醒來後由輪詢補上並記 `Trouter missed a message`（睡超過 15 分鐘是整段回補，記 `Missed while down`）warning，不一定是推播壞了。

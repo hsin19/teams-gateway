@@ -56,7 +56,7 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
-        logger.LogInformation("已連上 gateway SSE（chats={Chats}）", chats ?? "全部");
+        logger.LogInformation("Connected to the gateway SSE stream (chats={Chats})", chats ?? "all");
         _connected = true;
         try
         {
@@ -120,7 +120,7 @@ public sealed class GatewayEventStream(HttpClient http, ILogger<GatewayEventStre
         }
         catch (JsonException ex)
         {
-            logger.LogWarning(ex, "SSE data 解析失敗，跳過");
+            logger.LogWarning(ex, "Could not parse SSE data; skipping it");
             return null;
         }
     }

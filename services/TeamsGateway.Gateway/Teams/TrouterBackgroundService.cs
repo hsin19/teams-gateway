@@ -34,9 +34,9 @@ public sealed class TrouterBackgroundService(
             // 對方正常關閉也要等：一連上就被關（例如 token 被拒）時不等就會無延遲狂連
             delay = DelayAfter(delay, DateTimeOffset.UtcNow - connectedAt);
             if (error is null)
-                logger.LogInformation("Trouter 連線結束，{Delay} 後重連", delay);
+                logger.LogInformation("Trouter connection closed; reconnecting in {Delay}", delay);
             else
-                logger.LogWarning(error, "Trouter 連線中斷，{Delay} 後重連", delay);
+                logger.LogWarning(error, "Trouter connection dropped; reconnecting in {Delay}", delay);
             try
             {
                 await Task.Delay(delay, stoppingToken);

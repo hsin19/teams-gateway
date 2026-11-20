@@ -30,34 +30,34 @@ public sealed class RouteLogger(
                     channelNames[channel] = name;
 
             foreach (var (teams, slackChannel) in Describe(routes, opts.Slack.DefaultChannel, topics, channelNames))
-                logger.LogInformation("路由：{Teams} → {Slack}", teams, slackChannel);
+                logger.LogInformation("Route: {Teams} → {Slack}", teams, slackChannel);
 
             // 查得到對話清單卻沒有這個 id：多半是 id 打錯，或帳號不在這個群
             if (topics is not null)
                 foreach (var chat in routes.Keys.Where(c => !topics.ContainsKey(c)))
-                    logger.LogWarning("路由的 Teams 對話 {Chat} 不在帳號的對話清單裡（id 打錯，或帳號不在這個群？）", chat);
+                    logger.LogWarning("Routed Teams chat {Chat} is not in the account's chat list (wrong id, or the account is not in that chat?)", chat);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             // 只是印 log：查名稱的例外不能冒出去，BackgroundService 掛掉會把整個 host 停掉
-            logger.LogWarning(ex, "查路由的名稱失敗，略過");
+            logger.LogWarning(ex, "Looking up route names failed; skipping");
         }
     }
 
     /// <summary>
-    /// 每條路由的（Teams 標籤, Slack 標籤）：有名稱是「名稱（id）」，沒有就只有 id。
+    /// 每條路由的（Teams 標籤, Slack 標籤）：有名稱是 <c>名稱 (id)</c>，沒有就只有 id。
     /// 有 Routes 時只訂閱表內的對話、DefaultChannel 用不到，所以只在沒有 Routes 時列 DefaultChannel。
     /// </summary>
     internal static IEnumerable<(string Teams, string Slack)> Describe(
         IReadOnlyDictionary<string, string> routes, string? defaultChannel,
         IReadOnlyDictionary<string, string?>? topics, IReadOnlyDictionary<string, string> channelNames)
     {
-        string TeamsLabel(string chat) => topics?.GetValueOrDefault(chat) is { } topic ? $"{topic}（{chat}）" : chat;
-        string SlackLabel(string channel) => channelNames.TryGetValue(channel, out var name) ? $"#{name}（{channel}）" : channel;
+        string TeamsLabel(string chat) => topics?.GetValueOrDefault(chat) is { } topic ? $"{topic} ({chat})" : chat;
+        string SlackLabel(string channel) => channelNames.TryGetValue(channel, out var name) ? $"#{name} ({channel})" : channel;
 
         foreach (var (chat, channel) in routes)
             yield return (TeamsLabel(chat), SlackLabel(channel));
         if (routes.Count == 0 && defaultChannel is not null)
-            yield return ("所有對話", SlackLabel(defaultChannel));
+            yield return ("all chats", SlackLabel(defaultChannel));
     }
 }

@@ -92,7 +92,7 @@ public static class Extensions
             {
                 document.Info.Title = "teams-gateway";
                 document.Info.Version = AppVersion.Value;
-                document.Info.Description = "個人版 Teams 的 HTTP gateway。/v1 給訂閱者（Bearer tgw_…）、/admin 帶 X-Admin-Token。";
+                document.Info.Description = "HTTP gateway for personal Teams. /v1 is for subscribers (Bearer tgw_…); /admin takes X-Admin-Token.";
 
                 document.Components ??= new OpenApiComponents();
                 document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
@@ -100,14 +100,14 @@ public static class Extensions
                 {
                     Type = SecuritySchemeType.Http,
                     Scheme = "bearer",
-                    Description = "訂閱者 API key：Authorization: Bearer tgw_…",
+                    Description = "Subscriber API key: Authorization: Bearer tgw_…",
                 };
                 document.Components.SecuritySchemes["AdminToken"] = new OpenApiSecurityScheme
                 {
                     Type = SecuritySchemeType.ApiKey,
                     In = ParameterLocation.Header,
                     Name = "X-Admin-Token",
-                    Description = "管理端點用的 token",
+                    Description = "Token for the admin endpoints",
                 };
 
                 // 每個端點依路徑套對應 auth，Scalar 的 try-it 就會帶，不用手動貼 header

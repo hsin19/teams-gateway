@@ -148,5 +148,5 @@ class TeamsGatewayClient:
         if resp.is_success:
             return
         if resp.status_code in (401, 403):
-            raise GatewayError(f"API key 無效或沒權限（HTTP {resp.status_code}）")
-        raise GatewayError(f"gateway 回 HTTP {resp.status_code}: {resp.text[:200]}")
+            raise GatewayError(f"API key is invalid or lacks permission (HTTP {resp.status_code})")
+        raise GatewayError(f"gateway returned HTTP {resp.status_code}: {resp.text[:200]}")

@@ -50,8 +50,8 @@ public static class WebhookTargetGuard
         var allowed = addresses.Where(a => IsAllowedAddress(a, allowPrivate)).ToArray();
         if (allowed.Length == 0)
             throw new HttpRequestException(
-                $"webhook 目標 {host} 解析到不允許的位址（{string.Join(", ", addresses.Select(a => a.ToString()))}）；" +
-                "內網 / loopback 要設 Gateway:WebhookAllowPrivateNetworks=true");
+                $"Webhook target {host} resolves only to disallowed addresses ({string.Join(", ", addresses.Select(a => a.ToString()))}); " +
+                "set Gateway:WebhookAllowPrivateNetworks=true to allow private / loopback targets");
 
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         try

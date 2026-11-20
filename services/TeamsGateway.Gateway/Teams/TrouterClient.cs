@@ -45,7 +45,7 @@ public sealed class TrouterClient(
         ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
         ws.Options.KeepAliveTimeout = TimeSpan.FromSeconds(30);
         await ws.ConnectAsync(new Uri(TrouterUrl + query), ct);
-        logger.LogInformation("Trouter 已連線");
+        logger.LogInformation("Trouter connected");
 
         using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var ping = PingLoopAsync(ws, pingCts.Token);
@@ -85,14 +85,14 @@ public sealed class TrouterClient(
                 var status = await RegisterAsync(token.Token, epid, surl, ct);
                 if (status is >= 200 and < 300)
                 {
-                    logger.LogInformation("Trouter 推播註冊續約 HTTP {Status}", status);
+                    logger.LogInformation("Trouter push registration renewed: HTTP {Status}", status);
                     continue;
                 }
-                logger.LogWarning("Trouter 推播註冊續約 HTTP {Status}，重連", status);
+                logger.LogWarning("Trouter push registration renewal got HTTP {Status}; reconnecting", status);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex, "Trouter 推播註冊續約失敗，重連");
+                logger.LogWarning(ex, "Trouter push registration renewal failed; reconnecting");
             }
             ws.Abort();
             return;
@@ -107,7 +107,7 @@ public sealed class TrouterClient(
         {
             if (await ReceiveTextAsync(ws, buffer, message, ct) is not { } frame)
             {
-                logger.LogInformation("Trouter 關閉連線：{Status}", ws.CloseStatus);
+                logger.LogInformation("Trouter closed the connection: {Status}", ws.CloseStatus);
                 return;
             }
             try
@@ -117,7 +117,7 @@ public sealed class TrouterClient(
             catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException)
             {
                 // 格式認不得的 frame 跳過就好，不要拖垮整條連線（漏掉的訊息輪詢會補）
-                logger.LogWarning(ex, "Trouter frame 解析失敗，略過：{Frame}", frame.Length <= 300 ? frame : frame[..300]);
+                logger.LogWarning(ex, "Could not parse a Trouter frame; skipping it: {Frame}", frame.Length <= 300 ? frame : frame[..300]);
             }
         }
     }
@@ -157,9 +157,9 @@ public sealed class TrouterClient(
                 _surl = surl;
                 var status = await RegisterAsync(skypeToken, epid, surl, ct);
                 if (status is >= 200 and < 300)
-                    logger.LogInformation("Trouter 註冊推播 HTTP {Status}", status);
+                    logger.LogInformation("Trouter push registration: HTTP {Status}", status);
                 else
-                    logger.LogWarning("Trouter 註冊推播 HTTP {Status}，收不到推播，靠輪詢補", status);
+                    logger.LogWarning("Trouter push registration got HTTP {Status}; no pushes will arrive, relying on polling", status);
             }
             else if (name == "trouter.message_loss")
             {
@@ -188,7 +188,7 @@ public sealed class TrouterClient(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // 一則推播處理失敗（內容格式不認得、DB 一時寫不進去）不能拖垮整條連線；照樣 ack，漏掉的輪詢會補
-            logger.LogWarning(ex, "Trouter 推播處理失敗，略過（輪詢會補）");
+            logger.LogWarning(ex, "Handling a Trouter push failed; skipping it (polling will catch up)");
         }
 
         // 一定要 ack，否則 Trouter 會重送

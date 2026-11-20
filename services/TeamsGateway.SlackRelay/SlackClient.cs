@@ -63,9 +63,9 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         var ticket = await ticketResp.Content.ReadFromJsonAsync(SlackJsonContext.Default.UploadTicketResponse, ct);
         if (ticket is not { Ok: true, UploadUrl: { } uploadUrl, FileId: { } fileId })
         {
-            logger.LogWarning("Slack files.getUploadURLExternal 失敗：{Error}{Hint}",
+            logger.LogWarning("Slack files.getUploadURLExternal failed: {Error}{Hint}",
                 ticket?.Error ?? ((int)ticketResp.StatusCode).ToString(CultureInfo.InvariantCulture),
-                ticket?.Error == "missing_scope" ? "（Slack app 要加 files:write 並重新安裝）" : "");
+                ticket?.Error == "missing_scope" ? " (add the files:write scope to the Slack app and reinstall it)" : "");
             return null;
         }
 
@@ -73,7 +73,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         {
             if (!uploadResp.IsSuccessStatusCode)
             {
-                logger.LogWarning("上傳圖片內容到 Slack 失敗 HTTP {Status}", (int)uploadResp.StatusCode);
+                logger.LogWarning("Uploading image content to Slack failed with HTTP {Status}", (int)uploadResp.StatusCode);
                 return null;
             }
         }
@@ -84,7 +84,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         var done = await doneResp.Content.ReadFromJsonAsync(SlackJsonContext.Default.PostResponse, ct);
         if (done is { Ok: true })
             return fileId;
-        logger.LogWarning("Slack files.completeUploadExternal 失敗：{Error}", done?.Error ?? ((int)doneResp.StatusCode).ToString(CultureInfo.InvariantCulture));
+        logger.LogWarning("Slack files.completeUploadExternal failed: {Error}", done?.Error ?? ((int)doneResp.StatusCode).ToString(CultureInfo.InvariantCulture));
         return null;
     }
 
@@ -240,9 +240,9 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.ChannelInfoResponse, ct);
         if (result is { Ok: true, Channel.Name: { } name })
             return name;
-        logger.LogWarning("Slack conversations.info 失敗（channel={Channel}）：{Error}{Hint}", channel,
+        logger.LogWarning("Slack conversations.info failed (channel={Channel}): {Error}{Hint}", channel,
             result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture),
-            result?.Error == "missing_scope" ? "（Slack app 要加 channels:read 並重新安裝；private 頻道要 groups:read）" : "");
+            result?.Error == "missing_scope" ? " (add the channels:read scope to the Slack app and reinstall it; private channels need groups:read)" : "");
         return null;
     }
 
@@ -252,7 +252,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         using var resp = await http.PostAsJsonAsync("conversations.join", new JoinRequest(channel), SlackJsonContext.Default.JoinRequest, ct);
         var result = await resp.Content.ReadFromJsonAsync(SlackJsonContext.Default.PostResponse, ct);
         if (result is not { Ok: true })
-            logger.LogWarning("Slack conversations.join 失敗（channel={Channel}）：{Error}", channel, result?.Error ?? ((int)resp.StatusCode).ToString());
+            logger.LogWarning("Slack conversations.join failed (channel={Channel}): {Error}", channel, result?.Error ?? ((int)resp.StatusCode).ToString());
     }
 
     /// <summary>
@@ -386,14 +386,14 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
                     await Task.Delay(FileNotReadyDelays[attempt], ct);
                     continue;
                 }
-                logger.LogWarning("Slack {Method} 帶圖一直 invalid_blocks（channel={Channel}），改送純文字", method, channel);
+                logger.LogWarning("Slack {Method} with images kept returning invalid_blocks (channel={Channel}); sending text only", method, channel);
                 withImages = false;
                 text += $"\n_({images.Count} image{(images.Count == 1 ? "" : "s")} could not be displayed)_";
                 continue;
             }
             if (result is { Ok: true })
                 return result;
-            logger.LogError("Slack {Method} 失敗（channel={Channel}）：{Error}", method, channel, result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture));
+            logger.LogError("Slack {Method} failed (channel={Channel}): {Error}", method, channel, result?.Error ?? ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture));
             return null;
         }
     }

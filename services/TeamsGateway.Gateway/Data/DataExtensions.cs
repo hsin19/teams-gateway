@@ -19,7 +19,7 @@ public static class DataExtensions
         if (provider == DatabaseProvider.Postgres)
         {
             if (string.IsNullOrWhiteSpace(connectionString))
-                throw new InvalidOperationException("Gateway:Database:Provider 是 Postgres，但沒有設 ConnectionStrings:gateway");
+                throw new InvalidOperationException("Gateway:Database:Provider is Postgres but ConnectionStrings:gateway is not set");
             AddFactory<PostgresGatewayDbContext>(builder.Services, options => options.UseNpgsql(connectionString));
         }
         else
@@ -63,9 +63,10 @@ public static class DataExtensions
         var creator = db.GetService<IRelationalDatabaseCreator>();
         if (await creator.ExistsAsync(ct) && await creator.HasTablesAsync(ct) && !(await db.Database.GetAppliedMigrationsAsync(ct)).Any())
             throw new InvalidOperationException(
-                $"資料庫（{db.Database.GetDbConnection().DataSource}）有表卻沒有 migration 紀錄：" +
-                "是導入 migration 之前用 EnsureCreated 建的，或是 Postgres 跟別的服務共用了同一個資料庫。" +
-                "schema 跟基線一樣的話補一筆基線紀錄就能接上（見 docs/adr/0009）；不然就重建 DB、重新 bootstrap。");
+                $"The database ({db.Database.GetDbConnection().DataSource}) has tables but no migration history: " +
+                "it was created by EnsureCreated before migrations were introduced, or the Postgres database is shared with another service. " +
+                "If the schema matches the baseline, insert a baseline history row to continue (see docs/adr/0009); " +
+                "otherwise recreate the database and bootstrap again.");
         await db.Database.MigrateAsync(ct);
     }
 }

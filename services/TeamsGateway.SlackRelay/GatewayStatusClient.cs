@@ -19,7 +19,7 @@ public sealed class GatewayStatusClient(HttpClient http, ILogger<GatewayStatusCl
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogDebug(ex, "查 /v1/status 失敗，當未知");
+            logger.LogDebug(ex, "Querying /v1/status failed; treating the auth state as unknown");
             return null;
         }
     }
@@ -34,7 +34,7 @@ public sealed class GatewayStatusClient(HttpClient http, ILogger<GatewayStatusCl
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "查 gateway /v1/chats 失敗，路由只印 id");
+            logger.LogWarning(ex, "Querying the gateway's /v1/chats failed; routes will show ids only");
             return null;
         }
     }

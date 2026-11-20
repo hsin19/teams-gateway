@@ -75,8 +75,12 @@ public static class EventsApi
             }
         })
         .RequireAuthorization(GatewayRoles.Api)
-        .WithSummary("SSE 即時訊息串流")
-        .WithDescription("連著收即時新訊息（像 Slack Socket Mode）。`chats` 逗號分隔過濾對話、省略 = 全部。SSE `id` 是事件序號；重連帶 `Last-Event-ID`（最後收到的 `id`）會先補回斷線期間發過的事件；沒有序號時可帶 `afterMessage`（最後處理的 Teams 訊息 id）從那則之後補。閒置時定期送 `: ping` 心跳；API key 被撤銷會斷線。")
+        .WithSummary("SSE stream of live events")
+        .WithDescription(
+            "Stay connected to receive new events as they happen (like Slack Socket Mode). `chats` filters by chat, comma-separated; omit it for all. "
+            + "The SSE `id` is the event sequence number: reconnect with `Last-Event-ID` (the last `id` received) to replay what was published while disconnected; "
+            + "without one, pass `afterMessage` (the last Teams message id handled) to resume after that message. "
+            + "Sends a `: ping` heartbeat while idle; the stream closes if the API key is revoked.")
         .WithTags("Events");
     }
 

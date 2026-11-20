@@ -44,7 +44,7 @@ public sealed class Backfiller(
             if (publish) // 首次訂閱的歷史只存不發，不算進「送達」
                 metrics.Delivered(IngestSource.Backfill, result, item.Dto);
             if (publish && result is IngestResult.Inserted) // 補缺口抓到的新訊息 = 停機期間漏接
-                logger.LogWarning("停機期間漏接，回補補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
+                logger.LogWarning("Missed while down, caught by backfill: {Conversation} message {MessageId} ({Time:u}, {From})",
                     conversationId, item.Dto.Id, item.Dto.Time, item.Dto.FromName);
         }
 
@@ -52,9 +52,9 @@ public sealed class Backfiller(
         if (history.Count < MaxMessages)
             await MarkSyncedAsync(factory, conversationId, startedAt - SettleTime, ct);
         else
-            logger.LogWarning("回補 {Conversation} 抓滿 {Max} 則上限，{Since:u} 之後可能還有沒補到的", conversationId, MaxMessages, since);
+            logger.LogWarning("Backfill of {Conversation} hit the {Max}-message limit; messages after {Since:u} may still be missing", conversationId, MaxMessages, since);
 
-        logger.LogInformation("回補 {Conversation}：抓到 {Fetched} 則、新增 / 更新 {Stored} 則（{Since:u} 起）",
+        logger.LogInformation("Backfilled {Conversation}: fetched {Fetched}, inserted / updated {Stored} (since {Since:u})",
             conversationId, history.Count, stored, since);
     }
 

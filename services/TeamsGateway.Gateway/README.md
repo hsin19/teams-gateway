@@ -84,7 +84,7 @@ gateway **只追 / 存訂閱中的對話**（Trouter 會推帳號的所有對話
 
 **表情**：有人按 / 收回表情時 Teams 也會讓 `version` 往上跳，但內容沒變，不當編輯（不留 revision、不重發 `message`），改比對前後兩版發 `reaction` 事件。晚到的訊息（例如睡眠後才被輪詢 / 回補抓到）第一次看到時就已經掛著的表情，會接在那則 `message` 之後一起發出，不會因為沒有前一版可比而漏掉。
 
-**輪詢保險**：Trouter 推播是主路徑，但另外每 `Gateway:PollSeconds`（預設 20）秒抓一次各訂閱對話最近 15 分鐘的訊息，把漏推的新訊息照時間順序補發（最近 10 秒內的先留給推播，避免搶先誤判）。水位線落後超過 15 分鐘（停機、Mac 睡眠）時，輪詢改成從水位線整段回補。凡是靠輪詢 / 慢更新 / 啟動回補才抓到的新訊息都會記 warning（`Trouter 漏接，…補到`），可以拿來觀察推播可靠度。Mac 睡眠期間發的訊息醒來後也是輪詢補到、記同一個 warning，不代表推播壞了——對照 `pmset -g log` 的睡眠時間判斷。
+**輪詢保險**：Trouter 推播是主路徑，但另外每 `Gateway:PollSeconds`（預設 20）秒抓一次各訂閱對話最近 15 分鐘的訊息，把漏推的新訊息照時間順序補發（最近 10 秒內的先留給推播，避免搶先誤判）。水位線落後超過 15 分鐘（停機、Mac 睡眠）時，輪詢改成從水位線整段回補。凡是靠輪詢 / 慢更新 / 啟動回補才抓到的新訊息都會記 warning（輪詢 / 慢更新補到的是 `Trouter missed a message, caught by poll|reconcile`，整段回補補到的是 `Missed while down, caught by backfill`），可以拿來觀察推播可靠度。Mac 睡眠期間發的訊息醒來後也是輪詢補到、記同一個 warning，不代表推播壞了——對照 `pmset -g log` 的睡眠時間判斷。
 
 **Metrics**（meter `TeamsGateway.Gateway`，隨 ServiceDefaults 的 OpenTelemetry 匯出；設了 `OTEL_EXPORTER_OTLP_ENDPOINT` 才會送出去）：
 

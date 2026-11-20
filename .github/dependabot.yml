@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # Central versions live in Directory.Packages.props; dotnet-ef in dotnet-tools.json.
+  # 版本集中在 Directory.Packages.props；dotnet-ef 在 dotnet-tools.json。
   - package-ecosystem: 'nuget'
     directory: '/'
     schedule:
@@ -11,9 +11,8 @@ updates:
       prefix: 'chore'
       include: 'scope'
     ignore:
-      # The repo targets .NET 11 (global.json, Directory.Build.props). Packages that ship with the
-      # .NET major would arrive as 12.x needing net12.0, so every such PR would stay red and reopen
-      # weekly. Lift these when the TFM moves to net12.0.
+      # repo 的目標是 .NET 11（global.json、Directory.Build.props）。跟著 .NET 大版本出的套件會升到 12.x、
+      # 要 net12.0，這種 PR 只會一直紅、每週重開。TFM 換到 net12.0 時再拿掉。
       - dependency-name: 'Microsoft.AspNetCore.*'
         update-types: ['version-update:semver-major']
       - dependency-name: 'Microsoft.EntityFrameworkCore*'
@@ -25,11 +24,11 @@ updates:
       - dependency-name: 'dotnet-ef'
         update-types: ['version-update:semver-major']
     groups:
-      # Aspire.AppHost.Sdk (global.json) and the Aspire.Hosting.* packages must stay on one version.
+      # Aspire.AppHost.Sdk（global.json）跟 Aspire.Hosting.* 要停在同一個版本。
       aspire:
         patterns:
           - 'Aspire.*'
-      # EF Core, its design-time package, dotnet-ef and the Npgsql provider move together.
+      # EF Core、它的 design-time 套件、dotnet-ef 跟 Npgsql provider 一起升。
       efcore:
         patterns:
           - 'Microsoft.EntityFrameworkCore*'

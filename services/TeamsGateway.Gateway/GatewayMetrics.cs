@@ -26,10 +26,10 @@ public sealed class GatewayMetrics
         var meter = meterFactory.Create(MeterName);
         _delivered = meter.CreateCounter<long>(
             "teams_gateway.messages.delivered", unit: "{message}",
-            description: "發給訂閱者的新訊息 / 編輯，依來源（trouter / poll / reconcile / backfill）、變更（new / edit）、發話者（self / others）分");
+            description: "New messages / edits published to subscribers, by source (trouter / poll / reconcile / backfill), change (new / edit) and sender (self / others)");
         _pushLatency = meter.CreateHistogram(
             "teams_gateway.push.latency", unit: "s",
-            description: "Trouter 推到的新訊息從發送到收到的延遲",
+            description: "Delay from send to receipt for new messages pushed by Trouter",
             advice: new InstrumentAdvice<double> { HistogramBucketBoundaries = [0.25, 0.5, 1, 2, 5, 10, 30, 60] });
     }
 

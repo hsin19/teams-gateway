@@ -13,9 +13,8 @@ using OpenTelemetry.Trace;
 
 namespace Microsoft.Extensions.Hosting;
 
-// Adds common Aspire services: service discovery, resilience, health checks, and OpenTelemetry.
-// This project should be referenced by each service project in your solution.
-// To learn more about using this project, see https://aka.ms/aspire/service-defaults
+// Aspire 的共用服務：service discovery、resilience、health check、OpenTelemetry。每個服務專案都要參照這個專案。
+// 詳見 https://aka.ms/aspire/service-defaults
 public static class Extensions
 {
     private const string HealthEndpointPath = "/health";
@@ -32,15 +31,13 @@ public static class Extensions
 
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
-            // Turn on resilience by default.
-            // 不重試 POST 這類非冪等請求：逾時 / 5xx 時對方可能其實收到了，重送會讓 Teams 發話、Slack 貼文、webhook 重複
+            // 預設開 resilience，但不重試 POST 這類非冪等請求：逾時 / 5xx 時對方可能其實收到了，重送會讓 Teams 發話、Slack 貼文、webhook 重複
             http.AddStandardResilienceHandler(options => options.Retry.DisableForUnsafeHttpMethods());
 
-            // Turn on service discovery by default
             http.AddServiceDiscovery();
         });
 
-        // Uncomment the following to restrict the allowed schemes for service discovery.
+        // 要限制 service discovery 允許的 scheme 就打開下面這段
         // builder.Services.Configure<ServiceDiscoveryOptions>(options =>
         // {
         //     options.AllowedSchemes = ["https"];
@@ -70,12 +67,12 @@ public static class Extensions
             {
                 tracing.AddSource(builder.Environment.ApplicationName)
                     .AddAspNetCoreInstrumentation(tracing =>
-                        // Exclude health check requests from tracing
+                        // health check 的請求不記 trace
                         tracing.Filter = context =>
                             !context.Request.Path.StartsWithSegments(HealthEndpointPath)
                             && !context.Request.Path.StartsWithSegments(AlivenessEndpointPath)
                     )
-                    // Uncomment the following line to enable gRPC instrumentation (requires the OpenTelemetry.Instrumentation.GrpcNetClient package)
+                    // 要記 gRPC 就打開下一行（要裝 OpenTelemetry.Instrumentation.GrpcNetClient）
                     //.AddGrpcClientInstrumentation()
                     .AddHttpClientInstrumentation();
             });
@@ -94,7 +91,7 @@ public static class Extensions
             builder.Services.AddOpenTelemetry().UseOtlpExporter();
         }
 
-        // Uncomment the following lines to enable the Azure Monitor exporter (requires the Azure.Monitor.OpenTelemetry.AspNetCore package)
+        // 要送 Azure Monitor 就打開下面這段（要裝 Azure.Monitor.OpenTelemetry.AspNetCore）
         //if (!string.IsNullOrEmpty(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
         //{
         //    builder.Services.AddOpenTelemetry()
@@ -107,7 +104,7 @@ public static class Extensions
     public static TBuilder AddDefaultHealthChecks<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         builder.Services.AddHealthChecks()
-            // Add a default liveness check to ensure app is responsive
+            // 預設的 liveness 檢查：app 還有回應就算活著
             .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
 
         return builder;
@@ -119,10 +116,10 @@ public static class Extensions
         // 這裡用預設 writer，只回 Healthy / Unhealthy，沒有細節，所以正式環境也開——不然 container healthcheck 只能打 /，
         // 註冊的 DB 等檢查形同虛設。
 
-        // All health checks must pass for app to be considered ready to accept traffic after starting
+        // /health：所有檢查都過，才算啟動完、可以接流量
         app.MapHealthChecks(HealthEndpointPath);
 
-        // Only health checks tagged with the "live" tag must pass for app to be considered alive
+        // /alive：只看標了 live 的檢查，判斷 app 還活著
         app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions
         {
             Predicate = r => r.Tags.Contains("live")

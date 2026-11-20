@@ -13,8 +13,8 @@ public class MigrationTests
         using var sqlite = new SqliteDesignTimeFactory().CreateDbContext([]);
         using var postgres = new PostgresDesignTimeFactory().CreateDbContext([]); // 只比對 model，不連 DB
 
-        Assert.False(sqlite.Database.HasPendingModelChanges(), "SQLite 的 migration 沒跟上 model：跑 tools/db-migration.sh add <名稱>");
-        Assert.False(postgres.Database.HasPendingModelChanges(), "Postgres 的 migration 沒跟上 model：跑 tools/db-migration.sh add <名稱>");
+        Assert.False(sqlite.Database.HasPendingModelChanges(), "SQLite migrations are behind the model: run tools/db-migration.sh add <Name>");
+        Assert.False(postgres.Database.HasPendingModelChanges(), "Postgres migrations are behind the model: run tools/db-migration.sh add <Name>");
     }
 
     // 新的 DB 照 migration 建；已經是最新的再跑一次沒事（每次啟動都會跑）
@@ -42,6 +42,6 @@ public class MigrationTests
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => DataExtensions.MigrateAsync(db, ct));
 
-        Assert.Contains("基線紀錄", ex.Message);
+        Assert.Contains("baseline history row", ex.Message);
     }
 }

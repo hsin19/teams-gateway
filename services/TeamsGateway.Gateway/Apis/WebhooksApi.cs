@@ -22,10 +22,10 @@ public static class WebhooksApi
             WebhookSecretProtector secrets, CancellationToken ct) =>
         {
             if (!Uri.TryCreate(body.TargetUrl, UriKind.Absolute, out var target) || !WebhookTargetGuard.IsAllowedScheme(target))
-                return TypedResults.BadRequest(new ApiError("targetUrl 要是合法的 http(s) 絕對網址"));
+                return TypedResults.BadRequest(new ApiError("targetUrl must be an absolute http(s) URL"));
             // IP 直接寫在網址裡的先擋，早點回饋；主機名在投遞連線時才檢查（見 WebhookTargetGuard）
             if (IPAddress.TryParse(target.IdnHost, out var ip) && !WebhookTargetGuard.IsAllowedAddress(ip, options.Value.WebhookAllowPrivateNetworks))
-                return TypedResults.BadRequest(new ApiError("targetUrl 不能指向內網 / loopback / link-local 位址"));
+                return TypedResults.BadRequest(new ApiError("targetUrl must not point at a private, loopback or link-local address"));
 
             if (user.ApiKeyId is not { } apiKeyId)
                 return TypedResults.BadRequest(new ApiError("Webhooks belong to an API key: call this with an API key"));
@@ -45,8 +45,12 @@ public static class WebhooksApi
             await db.SaveChangesAsync(ct);
             return TypedResults.Ok(View(hook));
         })
-        .WithSummary("登記 webhook")
-        .WithDescription("有符合的新事件時 gateway 會 POST 到 `targetUrl`（body 同 SSE 的 data），header 帶 `X-TeamsGateway-Event`、`X-TeamsGateway-Seq`（事件序號，送失敗會重送，照它去重）、`X-TeamsGateway-Schema-Version`，有設 secret 再帶 `X-TeamsGateway-Signature: sha256=<hmac>`。只收登記之後的事件；`conversationId` 省略 = 所有訂閱對話。");
+        .WithSummary("Register a webhook")
+        .WithDescription(
+            "The gateway POSTs each matching new event to `targetUrl` (the body is the SSE `data`) with the headers `X-TeamsGateway-Event`, "
+            + "`X-TeamsGateway-Seq` (the event sequence number; failed deliveries are retried, so dedupe on it) and `X-TeamsGateway-Schema-Version`, "
+            + "plus `X-TeamsGateway-Signature: sha256=<hmac>` when a secret is set. Only events after registration are delivered; "
+            + "omit `conversationId` for all subscribed chats.");
 
         group.MapGet("", async (CurrentUser user, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
         {
@@ -54,7 +58,7 @@ public static class WebhooksApi
             var hooks = await db.WebhookSubscriptions.Where(w => w.ApiKeyId == user.ApiKeyId).ToListAsync(ct);
             return TypedResults.Ok<IReadOnlyList<WebhookDto>>(hooks.Select(View).ToList());
         })
-        .WithSummary("列出自己登記的 webhook");
+        .WithSummary("List the webhooks this API key registered");
 
         group.MapDelete("/{id:guid}", async Task<Results<NoContent, NotFound>> (Guid id, CurrentUser user, IDbContextFactory<GatewayDbContext> factory, CancellationToken ct) =>
         {
@@ -66,7 +70,7 @@ public static class WebhooksApi
             await db.SaveChangesAsync(ct);
             return TypedResults.NoContent();
         })
-        .WithSummary("刪除 webhook");
+        .WithSummary("Delete a webhook");
     }
 
     private static WebhookDto View(WebhookSubscription w) =>

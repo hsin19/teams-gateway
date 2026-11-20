@@ -31,9 +31,9 @@ jobs:
         id: build
         run: dotnet build
 
-      # One step per suite rather than one chained command, so the red step names what failed;
-      # `!cancelled()` so a single run reports every failure instead of stopping at the first.
-      # Gated on the build too, or a compile error reds every step below it and buries the cause.
+      # 每組測試各一個 step，不串成一條指令：紅的那個 step 就說明了是哪組壞掉。
+      # `!cancelled()` 讓一次跑完就看得到所有失敗，不會停在第一個；
+      # 也要 build 成功才跑，不然編譯錯誤會讓下面整排 step 一起紅、把真正的原因埋掉。
       - name: Unit tests (gateway)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: dotnet test --project tests/TeamsGateway.Gateway.UnitTests --no-build
@@ -46,14 +46,14 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: dotnet test --project tests/TeamsGateway.Gateway.FunctionalTests --no-build
 
-      # The runner has Docker; DCP comes from NuGet, so no Aspire CLI install is needed (see the test csproj).
+      # runner 有 Docker；DCP 從 NuGet 來，所以不用裝 Aspire CLI（見測試專案的 csproj）。
       - name: Functional tests (Postgres)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: dotnet test --project tests/TeamsGateway.Gateway.FunctionalTests --no-build
         env:
           GATEWAY_TEST_DB: postgres
 
-      # shellcheck ships with the ubuntu runner image.
+      # ubuntu runner 的 image 內建 shellcheck。
       - name: ShellCheck
         if: ${{ !cancelled() }}
         run: shellcheck tools/*.sh

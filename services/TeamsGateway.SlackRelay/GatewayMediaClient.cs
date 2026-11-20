@@ -8,7 +8,7 @@ public sealed class GatewayMediaClient(HttpClient http, ILogger<GatewayMediaClie
         using var resp = await http.GetAsync($"/v1/media?url={Uri.EscapeDataString(url)}", ct);
         if (!resp.IsSuccessStatusCode)
         {
-            logger.LogWarning("代抓圖片失敗 HTTP {Status}：{Url}", (int)resp.StatusCode, url);
+            logger.LogWarning("Fetching an image through the gateway failed with HTTP {Status}: {Url}", (int)resp.StatusCode, url);
             return null;
         }
         var bytes = await resp.Content.ReadAsByteArrayAsync(ct);

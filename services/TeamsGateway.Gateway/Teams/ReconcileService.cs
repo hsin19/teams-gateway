@@ -31,7 +31,7 @@ public sealed class ReconcileService(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex, "慢更新失敗");
+                logger.LogWarning(ex, "Reconcile failed");
             }
             if (!await DelayAsync(interval, stoppingToken))
                 break;
@@ -60,7 +60,7 @@ public sealed class ReconcileService(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex, "慢更新 {Conversation} 失敗", id);
+                logger.LogWarning(ex, "Reconciling {Conversation} failed", id);
             }
         }
     }
@@ -78,11 +78,11 @@ public sealed class ReconcileService(
             if (result is IngestResult.Updated)
                 changed++;
             else if (result is IngestResult.Inserted) // 新訊息要靠慢更新才抓到 = Trouter 跟輪詢都漏了
-                logger.LogWarning("Trouter 漏接，慢更新補到：{Conversation} 訊息 {MessageId}（{Time:u}，{From}）",
+                logger.LogWarning("Trouter missed a message, caught by reconcile: {Conversation} message {MessageId} ({Time:u}, {From})",
                     id, item.Dto.Id, item.Dto.Time, item.Dto.FromName);
         }
         if (changed > 0)
-            logger.LogInformation("慢更新 {Conversation}：{Changed} 則編輯 / 刪除", id, changed);
+            logger.LogInformation("Reconciled {Conversation}: {Changed} edits / deletions", id, changed);
     }
 
     private static async Task<bool> DelayAsync(TimeSpan delay, CancellationToken ct)

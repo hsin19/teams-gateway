@@ -56,7 +56,7 @@ appsettings 放完整 default，secret 走 env（雙底線覆蓋）或 user-secr
 
 **頻道策略**：有 `Routes` 就只訂閱表內那些 Teams 對話、各自轉到對應頻道；要「全部進一個頻道」就只設 `DefaultChannel`、不填 Routes。
 
-**頻道只能填 id**（`C…`）：除了發新訊息，原地更新、按表情、讀歷史這些 Slack API 都只認 id，而且頻道改名 id 也不變。核對哪個 id 是哪個群 / 頻道看啟動時的 log：`路由：<Teams 群名>（<對話 id>）→ #<頻道名>（<頻道 id>）`。名稱來自 gateway 的 `/v1/chats` 與 Slack 的 `conversations.info`（要 `channels:read`），查不到就只印 id，不影響轉送；路由的對話不在帳號的對話清單裡（id 打錯、帳號不在群裡）會記 warning。
+**頻道只能填 id**（`C…`）：除了發新訊息，原地更新、按表情、讀歷史這些 Slack API 都只認 id，而且頻道改名 id 也不變。核對哪個 id 是哪個群 / 頻道看啟動時的 log：`Route: <Teams 群名> (<對話 id>) → #<頻道名> (<頻道 id>)`。名稱來自 gateway 的 `/v1/chats` 與 Slack 的 `conversations.info`（要 `channels:read`），查不到就只印 id，不影響轉送；路由的對話不在帳號的對話清單裡（id 打錯、帳號不在群裡）會記 warning。
 
 Routes 刻意用 **list** 而非 dict：Teams 對話 id 含 `:`，當 config dict 的 key 會被 .NET config 的階層分隔符拆掉。非 secret 但屬部署專屬，放 gitignored 的 `appsettings.Local.json`（會載入、不進 repo）。
 

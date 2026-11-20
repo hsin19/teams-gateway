@@ -41,7 +41,7 @@ public sealed class StartupBackfillService(IServiceProvider services, ILogger<St
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex, "啟動回補 {Conversation} 失敗（可能還沒匯入 cookie）", id);
+                logger.LogWarning(ex, "Startup backfill of {Conversation} failed (login cookies may not be imported yet)", id);
             }
         }
     }

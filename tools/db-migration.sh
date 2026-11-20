@@ -14,7 +14,7 @@ PROJECT=services/TeamsGateway.Gateway
 
 case "${1:-}" in
   add)
-    [ -n "${2:-}" ] || { echo "用法：$0 add <名稱>" >&2; exit 1; }
+    [ -n "${2:-}" ] || { echo "usage: $0 add <Name>" >&2; exit 1; }
     for provider in Sqlite Postgres; do
       # namespace 由 output-dir 推（TeamsGateway.Gateway.Data.Migrations.<provider>）；另外給 --namespace 的話 snapshot 會跑到別的資料夾
       dotnet ef migrations add "$2" --project "$PROJECT" --context "${provider}GatewayDbContext" --output-dir "Data/Migrations/${provider}"
@@ -26,7 +26,7 @@ case "${1:-}" in
     done
     ;;
   *)
-    echo "用法：$0 add <名稱> | remove" >&2
+    echo "usage: $0 add <Name> | remove" >&2
     exit 1
     ;;
 esac

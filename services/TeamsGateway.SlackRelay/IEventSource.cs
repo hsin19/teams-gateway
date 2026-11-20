@@ -57,7 +57,7 @@ public sealed class SseEventSource(GatewayEventStream stream, MessageLinks links
                     }
                     catch (Exception ex)
                     {
-                        logger.LogWarning(ex, "gateway SSE 連線中斷，{Seconds}s 後重連", backoff.TotalSeconds);
+                        logger.LogWarning(ex, "Gateway SSE connection dropped; reconnecting in {Seconds}s", backoff.TotalSeconds);
                         break;
                     }
                     backoff = FirstBackoff; // 收得到就重置退避

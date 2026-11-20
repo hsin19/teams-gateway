@@ -20,6 +20,6 @@ try
 }
 catch (Exception ex) when (ex is not HostAbortedException)
 {
-    Console.Error.WriteLine($"relay 因未處理的例外結束：{ex}");
+    Console.Error.WriteLine($"relay terminated by an unhandled exception: {ex}");
     return 1;
 }

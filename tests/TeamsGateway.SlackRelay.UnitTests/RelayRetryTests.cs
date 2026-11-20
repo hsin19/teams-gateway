@@ -141,7 +141,7 @@ public class RelayRetryTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (++Calls <= failures)
-                throw new HttpRequestException("Slack 暫時連不上");
+                throw new HttpRequestException("Slack is temporarily unreachable");
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent("""{"ok":true,"ts":"111.222"}""", Encoding.UTF8, "application/json"),

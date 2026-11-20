@@ -3,7 +3,7 @@ using TeamsGateway.SlackRelay;
 
 namespace TeamsGateway.SlackRelay.UnitTests;
 
-/// <summary>啟動時印的路由：查得到名稱就「名稱（id）」，查不到只印 id。</summary>
+/// <summary>啟動時印的路由：查得到名稱就 <c>名稱 (id)</c>，查不到只印 id。</summary>
 public class RouteLoggerTests
 {
     private const string Chat = "19:aaa@thread.v2";
@@ -16,7 +16,7 @@ public class RouteLoggerTests
             topics: new Dictionary<string, string?> { [Chat] = "teams-gateway test" },
             channelNames: new Dictionary<string, string> { ["C1"] = "teams-test" });
 
-        Assert.Equal(("teams-gateway test（19:aaa@thread.v2）", "#teams-test（C1）"), Assert.Single(lines));
+        Assert.Equal(("teams-gateway test (19:aaa@thread.v2)", "#teams-test (C1)"), Assert.Single(lines));
     }
 
     // gateway 查不到（null）、1:1 沒有名稱、Slack 沒給 channels:read：都退回只印 id
@@ -42,7 +42,7 @@ public class RouteLoggerTests
         var withoutRoutes = RouteLogger.Describe(new Dictionary<string, string>(), "C9", null, names);
         var withRoutes = RouteLogger.Describe(new Dictionary<string, string> { [Chat] = "C1" }, "C9", null, names);
 
-        Assert.Equal(("所有對話", "#teams-test（C9）"), Assert.Single(withoutRoutes));
+        Assert.Equal(("all chats", "#teams-test (C9)"), Assert.Single(withoutRoutes));
         Assert.DoesNotContain(withRoutes, line => line.Slack.Contains("C9", StringComparison.Ordinal));
     }
 

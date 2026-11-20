@@ -24,14 +24,14 @@ public static class ChatsApi
             LastFailureAt: tokens.LastFailureAt,
             LastError: tokens.Healthy ? null : tokens.LastError,
             TokenExpiresAt: tokens.Current?.ExpiresAt)))
-        .WithSummary("Teams 認證健康")
-        .WithDescription("回報 gateway 與 Teams 的連線認證是否正常（relay 用來偵測登入 cookie 失效並告警）。")
+        .WithSummary("Teams auth health")
+        .WithDescription("Whether the gateway's sign-in to Teams is working (the relay uses it to detect expired login cookies and alert).")
         .WithTags("Status");
 
         v1.MapGet("/chats", async (ChatsvcClient chatsvc, CancellationToken ct) =>
             TypedResults.Ok(await chatsvc.GetConversationsAsync(ct)))
-        .WithSummary("列出對話")
-        .WithDescription("列出帳號的所有 Teams 對話（群組 / 1:1）。")
+        .WithSummary("List chats")
+        .WithDescription("Lists every Teams chat of the account (group / 1:1).")
         .WithTags("Chats");
 
         v1.MapGet("/chats/{id}/messages", async Task<Results<Ok<MessagePage>, BadRequest<ApiError>>> (
@@ -39,12 +39,12 @@ public static class ChatsApi
         {
             cursor = string.IsNullOrEmpty(cursor) ? null : cursor;
             if (cursor is not null && !chatsvc.IsValidCursor(id, cursor))
-                return TypedResults.BadRequest(new ApiError("cursor 要帶同一個對話上一頁回的 nextCursor"));
+                return TypedResults.BadRequest(new ApiError("cursor must be the nextCursor of the previous page of this chat"));
             var page = await chatsvc.GetMessagesAsync(id, Math.Clamp(limit ?? 30, 1, 200), cursor, ct);
             return TypedResults.Ok(page);
         })
-        .WithSummary("讀某對話的訊息")
-        .WithDescription("即時從 chatsvc 讀。`limit` 1–200（預設 30）；`cursor` 帶上一頁回的 `nextCursor` 往更舊翻。")
+        .WithSummary("Read a chat's messages")
+        .WithDescription("Reads live from chatsvc. `limit` is 1-200 (default 30); pass the previous page's `nextCursor` as `cursor` to page back to older messages.")
         .WithTags("Chats");
 
         v1.MapPost("/chats/{id}/messages", async Task<Results<Ok<SendMessageResult>, BadRequest<ApiError>>> (
@@ -142,15 +142,15 @@ public static class ChatsApi
                 new MessageVersionDto(current.Version, current.Content, current.Edited, current.Deleted, current.UpdatedAt),
                 revisions));
         })
-        .WithSummary("一則訊息的編輯歷史")
-        .WithDescription("`current`（目前版本）+ `revisions`（被取代的舊版本，由舊到新）。只有訂閱對話、已入庫的訊息才有。")
+        .WithSummary("A message's edit history")
+        .WithDescription("`current` (the current version) plus `revisions` (superseded versions, oldest first). Only for stored messages in subscribed chats.")
         .WithTags("Messages");
 
         v1.MapGet("/media", async Task<Results<FileContentHttpResult, BadRequest<ApiError>, ProblemHttpResult>> (
             string url, MediaClient media, CancellationToken ct) =>
         {
             if (!MediaClient.IsAllowed(url, out var uri))
-                return TypedResults.BadRequest(new ApiError("只代理 Teams 媒體網址（https://*.asm.skype.com）"));
+                return TypedResults.BadRequest(new ApiError("Only Teams media URLs (https://*.asm.skype.com) are proxied"));
             try
             {
                 var (bytes, contentType) = await media.GetAsync(uri, ct);
@@ -161,8 +161,8 @@ public static class ChatsApi
                 return TypedResults.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway);
             }
         })
-        .WithSummary("代抓訊息內嵌圖片")
-        .WithDescription("用 gateway 的 Teams 登入抓訊息裡的內嵌圖片（`<img src>` 指向 `*.asm.skype.com`，外部直接拿不到）。只接受這個網域。")
+        .WithSummary("Fetch an inline message image")
+        .WithDescription("Fetches an image embedded in a message (`<img src>` on `*.asm.skype.com`, not reachable without a Teams sign-in) using the gateway's Teams login. Only that domain is accepted.")
         .WithTags("Media");
 
         return v1;
