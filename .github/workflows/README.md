@@ -58,7 +58,7 @@ workflow 用觸發它的事件命名，不叫 `ci.yml`：它們跑的是同一�
 
 開始前先打 `/version`，把目標的版本記在 log 與 run summary，失敗時對得上是哪一版。
 runner 上只有 API key，Teams cookie 一直待在部署端。少了任一個 secret，第一個 step 就會失敗：
-不然測試會因為沒有 key 整組 skip，變成假綠燈。
+不然打 gateway 的測試會因為沒有 key 全部 skip，變成假綠燈。
 
 ## Dependency review
 

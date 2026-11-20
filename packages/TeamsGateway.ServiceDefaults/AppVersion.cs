@@ -5,7 +5,7 @@ namespace Microsoft.Extensions.Hosting;
 /// <summary>
 /// 這支程式的版本，取自 build 時 SDK 壓進的 <see cref="AssemblyInformationalVersionAttribute"/>：
 /// release 帶 <c>-p:Version</c>，後面接 Source Link 從 git 拿到的 commit。commit 縮成 7 碼，例如 <c>0.3.0+33be044</c>；
-/// 本機沒帶版本時是 <c>1.0.0+…</c>。
+/// 本機 build 是 <c>0.0.0-dev+…</c>（根目錄 <c>Directory.Build.props</c>）。
 /// </summary>
 public static class AppVersion
 {

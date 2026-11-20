@@ -39,7 +39,7 @@ docker load -i bin/relay.tar.gz
 - CI 在 `.github/workflows/`（架構見裡面的 README）：`check.yml` 是唯一的檢查定義，PR、push 到 main、release 都跑它（含 Postgres 版 functional test 與 shellcheck）；打 `v*` tag 由 `release.yml` 出 amd64 + arm64 image 到 GHCR。加新的檢查就加在 `check.yml`。
 - image 的設定在 csproj 與 `services/Directory.Build.props` 的 `Container*` 屬性（ADR 0010）。relay 是 Native AOT、gateway 是 JIT；`ServiceDefaults`、`Contracts` 開了 `IsAotCompatible`，build 時就跑 AOT 分析，警告一樣擋建置。image 以 uid 1654 跑、沒有 shell；改了 entrypoint、環境變數、資料路徑這類東西，用上面的 `PublishContainer` 出一份實際跑過再說。
 - `TreatWarningsAsErrors` 開著，warning 會擋建置。
-- E2E 打的是真帳號、會真的在 Teams 發訊息；沒設 `GATEWAY_API_KEY` 會整組 skip。要跑先問。
+- E2E 打的是真帳號、會真的在 Teams 發訊息；沒設 `GATEWAY_API_KEY` 時打 gateway 的測試都會 skip。要跑先問。
 - 改了行為就補測試；修 bug 時先確認新測試在修正前會失敗。
 
 ## 程式慣例

@@ -5,7 +5,7 @@ namespace TeamsGateway.Gateway.E2E;
 
 /// <summary>
 /// 目標 gateway 比 <see cref="Minimum"/> 舊就 skip：功能合併了、部署端還沒換版時，每天的 canary 不會因為舊版沒有這個功能而紅。
-/// 本機沒帶版本時是 <c>1.0.0</c>，一律會跑；讀不到版本（連不上、看不懂）也照跑，讓真正的錯誤露出來。
+/// 本機 build（<c>0.0.0-dev</c>）一律會跑；讀不到版本（連不上、看不懂）也照跑，讓真正的錯誤露出來。
 /// 沒配置 live 目標（沒有 API key）時不查，交給測試本身 skip。
 /// </summary>
 /// <remarks>

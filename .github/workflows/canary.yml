@@ -28,7 +28,7 @@ jobs:
       TEAMS_E2E_CHAT: ${{ secrets.TEAMS_E2E_CHAT }}
 
     steps:
-      # 測試沒有 API key 會整組 skip：少設 secret 會變成假綠燈，所以先擋
+      # 沒有 API key 時打 gateway 的測試都會 skip：少設 secret 會變成假綠燈，所以先擋
       - name: Require canary secrets
         run: |
           for name in GATEWAY_BASE_URL GATEWAY_API_KEY TEAMS_E2E_CHAT; do

@@ -4,7 +4,7 @@
 
 ## 跑
 
-靠環境變數配置；沒設 `GATEWAY_API_KEY` 就整組 skip（一般 `dotnet test` 不會誤跑）。
+靠環境變數配置；沒設 `GATEWAY_API_KEY` 時打 gateway 的測試都會 skip（一般 `dotnet test` 不會誤跑），只剩不連線的版本解析測試。
 
 | 環境變數 | 預設 | 說明 |
 |---|---|---|
@@ -33,7 +33,7 @@ GATEWAY_API_KEY=tgw_xxx dotnet test --project tests/TeamsGateway.Gateway.E2E/Tea
 ```
 
 - `[LiveFact]` 取代 `[Fact]`：打真的 gateway、會在 Teams 發訊息的都用它，一般 `dotnet test` 才不會誤打。
-- `[MinGatewayVersion("<版本>")]` 給新功能用：功能合併了、部署端還沒換版時，每天的 canary 不會因為舊版沒有這個功能而紅。本機沒帶版本（`1.0.0+…`）一律會跑；讀不到版本（連不上、看不懂）也照跑，讓真正的錯誤露出來。出版的版本號比門檻小的話，記得把門檻改成實際出版的那一版。
+- `[MinGatewayVersion("<版本>")]` 給新功能用：功能合併了、部署端還沒換版時，每天的 canary 不會因為舊版沒有這個功能而紅。本機 build（`0.0.0-dev+…`）一律會跑；讀不到版本（連不上、看不懂）也照跑，讓真正的錯誤露出來。出版的版本號比門檻小的話，記得把門檻改成實際出版的那一版。
 
 形狀斷言共用 `packages/TeamsGateway.Contracts` 的 wire DTO：契約只有一份 source of truth，Teams 真的變了就一定被我們看到。
 

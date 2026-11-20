@@ -40,9 +40,15 @@ public static class GatewayTarget
     /// <summary>目標的版本（<c>/version</c>，不用 API key），整個測試行程只查一次；讀不到是 null。</summary>
     public static Lazy<Task<Version?>> Version { get; } = new(FetchVersionAsync);
 
-    /// <summary><c>/version</c> 的 <c>0.6.1+9028dee</c> → 0.6.1；看不懂回 null。</summary>
-    internal static Version? ParseVersion(string text) =>
-        System.Version.TryParse(text.Split('+', '-')[0].Trim(), out var version) ? version : null;
+    /// <summary>
+    /// <c>/version</c> 的 <c>0.6.1+9028dee</c> → 0.6.1（pre-release 只看前面的數字）。
+    /// 本機 build（<c>0.0.0-dev</c>）不是任何一個出版的版本，跟看不懂的一樣回 null，版本門檻就不擋。
+    /// </summary>
+    internal static Version? ParseVersion(string text)
+    {
+        var core = text.Split('+')[0].Trim();
+        return !core.EndsWith("-dev", StringComparison.Ordinal) && System.Version.TryParse(core.Split('-')[0], out var version) ? version : null;
+    }
 
     private static async Task<Version?> FetchVersionAsync()
     {

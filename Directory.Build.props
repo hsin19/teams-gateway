@@ -9,6 +9,8 @@
     <!-- NuGet audit 的漏洞提示仍顯示為警告，但不擋建置：目前唯一來源是 Aspire dashboard 透傳的 MessagePack，只在 dev 的 AppHost、不部署 -->
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- 本機 build 的版本，跟出版的分得開（/version、OTel 的 service.version 一看就知道）；release 用 -p:Version 帶 tag 的版本號蓋過去 -->
+    <Version>0.0.0-dev</Version>
   </PropertyGroup>
 
 </Project>
