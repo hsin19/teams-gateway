@@ -8,26 +8,26 @@
 
 **服務**（會部署、對外提供能力）
 
-| 路徑 | 是什麼 | 狀態 |
-|---|---|---|
-| `services/TeamsGateway.Gateway` | Teams → HTTP/SSE gateway（列群組/讀/發/事件串流） | ✅ 可用 |
-| `services/TeamsGateway.SlackRelay` | 訂閱 gateway、把訊息轉進 Slack（只看 Slack 就能接收與回覆） | Phase 1 ✅（Teams→Slack）、Phase 2 ✅（Slack→Teams） |
+| 路徑 | 是什麼 |
+|---|---|
+| `services/TeamsGateway.Gateway` | Teams → HTTP/SSE gateway（列群組/讀/發/事件串流） |
+| `services/TeamsGateway.SlackRelay` | 訂閱 gateway、把訊息轉進 Slack，也能從 Slack 回到 Teams（只看 Slack 就能接收與回覆） |
 
 **Client**（接 gateway 的）
 
-| 路徑 | 是什麼 | 狀態 |
-|---|---|---|
-| `clients/python` | Python client（程式 / 常駐訂閱用，含 SSE） | ✅ |
-| `clients/mcp` | agent 接法：gateway 原生 MCP server（`/mcp`） | ✅ |
+| 路徑 | 是什麼 |
+|---|---|
+| `clients/python` | Python client（程式 / 常駐訂閱用，含 SSE） |
+| `clients/mcp` | agent 接法：gateway 原生 MCP server（`/mcp`） |
 
 **共用 / 編排**（不是服務，不單獨部署）
 
-| 路徑 | 是什麼 | 狀態 |
-|---|---|---|
-| `packages/TeamsGateway.Contracts` | 對外 wire DTO，服務與 .NET client 共用 | ✅ |
-| `packages/TeamsGateway.ServiceDefaults` | Aspire 共用（OTel / health / resilience） | ✅ |
-| `tools/TeamsGateway.AppHost` | Aspire 編排：本機開發一次起 gateway + relay（不部署） | ✅ |
-| `spike/` | 逆向非官方 API 的拋棄式 Python 腳本；結論在 [`spike/FINDINGS.md`](spike/FINDINGS.md) | — |
+| 路徑 | 是什麼 |
+|---|---|
+| `packages/TeamsGateway.Contracts` | 對外 wire DTO，服務與 .NET client 共用 |
+| `packages/TeamsGateway.ServiceDefaults` | Aspire 共用（OTel / health / resilience） |
+| `tools/TeamsGateway.AppHost` | Aspire 編排：本機開發一次起 gateway + relay（不部署） |
+| `spike/` | 逆向非官方 API 的拋棄式 Python 腳本；結論在 [`spike/FINDINGS.md`](spike/FINDINGS.md) |
 
 技術選型、結構等決策的理由見 [`docs/adr/`](docs/adr/)（0001 選型、0002 服務內部結構、0003 monorepo、0004 先跑在本機、0005 agent 介面用 MCP、0006 事件出入口抽象化、0007 本機只當開發環境、0008 資料庫可切換 SQLite / Postgres、0009 EF migration、0010 image 由 SDK 出、0011 認證與授權分開、接上 Cloudflare Access、0012 Slack → Teams 發話、0013 送出後在 Slack 上改 / 刪同步到 Teams）。
 

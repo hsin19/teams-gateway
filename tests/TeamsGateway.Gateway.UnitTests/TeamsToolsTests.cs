@@ -16,7 +16,7 @@ public class TeamsToolsTests
     private static Task<ContentBlock> FakeFetch(string url, int n) =>
         Task.FromResult<ContentBlock>(new TextContentBlock { Text = $"fetched {n}: {url}" });
 
-    // 圖片（內嵌 + 圖片附件）照順序抓；同一則的檔案下載還沒做，在說明裡列名字，圖片照樣回
+    // 圖片（內嵌 + 圖片附件）照順序抓；同一則的檔案不下載，在說明裡列名字，圖片照樣回
     [Fact]
     public async Task Returns_images_and_names_files_not_downloaded()
     {
@@ -33,7 +33,7 @@ public class TeamsToolsTests
             result.Content.OfType<TextContentBlock>().Select(c => c.Text));
     }
 
-    // 只有檔案：整個回錯誤（下載還沒做），agent 才知道拿不到
+    // 只有檔案：整個回錯誤（檔案不下載），agent 才知道拿不到
     [Fact]
     public async Task Files_only_is_not_implemented()
     {

@@ -117,7 +117,7 @@ public class RelaySentFromSlackTests
         Assert.Equal(1793220599999, links.Lookup(TeamsId)?.Version);
     }
 
-    // 不是從 Slack 發的（例如 MCP 發的，id 是 19 碼）：照 Phase 1 由 bot 轉送，不問 Slack
+    // 不是從 Slack 發的（例如 MCP 發的，id 是 19 碼）：照一般 Teams → Slack 由 bot 轉送，不問 Slack
     [Fact]
     public async Task Other_sends_are_relayed_as_usual()
     {

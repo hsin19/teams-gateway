@@ -5,7 +5,7 @@ using TeamsGateway.Contracts;
 namespace TeamsGateway.SlackRelay;
 
 /// <summary>
-/// Phase 1：從 <see cref="IEventSource"/> 逐筆收 gateway 的事件，把 Teams 訊息轉貼進對應 Slack 頻道。
+/// Teams → Slack：從 <see cref="IEventSource"/> 逐筆收 gateway 的事件，把 Teams 訊息轉貼進對應 Slack 頻道。
 /// 游標、續接、重連都在 source 裡（ADR 0006）；這裡處理完一筆才拿下一筆。
 /// </summary>
 public sealed class RelayWorker(

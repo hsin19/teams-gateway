@@ -78,9 +78,15 @@ image、副本數與必要設定見根目錄 README〈部署〉。
 ## 訂閱哪些對話（範圍）
 
 gateway **只追 / 存訂閱中的對話**（Trouter 會推帳號的所有對話，但只有訂閱的會入庫、才會進 SSE / webhook）。
-訂閱時會同步回補一段歷史（預設 7 天，`Gateway:BackfillDays`，只存不發）；重啟 / 睡眠後也會補停機期間的缺口並發出——給之後接 Elasticsearch 歷史搜尋留料。缺口從每個對話的水位線（`SyncedThrough`，最後一次完整同步到的時間）算起，只有回補 / 輪詢這種整段抓的會推進它；重新訂閱時歸零，沒追的那段不會被當成漏接發出。
+訂閱時會同步回補一段歷史（預設 7 天，`Gateway:BackfillDays`，只存不發）；重啟 / 睡眠後也會補停機期間的缺口並發出。缺口從每個對話的水位線（`SyncedThrough`，最後一次完整同步到的時間）算起，只有回補 / 輪詢這種整段抓的會推進它；重新訂閱時歸零，沒追的那段不會被當成漏接發出。
 
-**編輯 / 刪除**：訊息 `version` 在編輯時遞增。同 id、version 更大而且看得到的內容（文字 / 附件 / 刪除標記）有變 = 被編輯 / 刪除，gateway 會更新 DB 的內容與 `Edited` / `Deleted` 標記並重發事件。覆蓋前先把舊版本存進 `MessageRevisions` 表（`MessageEvents` 永遠是最新版，`MessageRevisions` 是編輯歷史），所以改過的訊息也看得到被改掉前的內容，給之後 ES 歷史搜尋與稽核留料。推播不一定帶每個編輯，所以還有「慢更新」：每 `Gateway:ReconcileMinutes`（預設 15）分重掃訂閱對話近 `ReconcileWindowHours`（預設 24）小時的訊息，把漏接的編輯 / 刪除補上。
+```
+curl -X PUT    -H "X-Admin-Token: $T" -H "Content-Type: application/json" -d '{"chat":"General Chat"}' $BASE/admin/subscriptions  # chat 可給 id 或群名
+curl           -H "X-Admin-Token: $T"                                        $BASE/admin/subscriptions  # 列訂閱
+curl -X DELETE -H "X-Admin-Token: $T"  $BASE/admin/subscriptions/<id>                                    # 取消（保留已存歷史）
+```
+
+**編輯 / 刪除**：訊息 `version` 在編輯時遞增。同 id、version 更大而且看得到的內容（文字 / 附件 / 刪除標記）有變 = 被編輯 / 刪除，gateway 會更新 DB 的內容與 `Edited` / `Deleted` 標記並重發事件。覆蓋前先把舊版本存進 `MessageRevisions` 表（`MessageEvents` 永遠是最新版，`MessageRevisions` 是編輯歷史），所以改過的訊息也看得到被改掉前的內容。推播不一定帶每個編輯，所以還有「慢更新」：每 `Gateway:ReconcileMinutes`（預設 15）分重掃訂閱對話近 `ReconcileWindowHours`（預設 24）小時的訊息，把漏接的編輯 / 刪除補上。
 
 **表情**：有人按 / 收回表情時 Teams 也會讓 `version` 往上跳，但內容沒變，不當編輯（不留 revision、不重發 `message`），改比對前後兩版發 `reaction` 事件。晚到的訊息（例如睡眠後才被輪詢 / 回補抓到）第一次看到時就已經掛著的表情，會接在那則 `message` 之後一起發出，不會因為沒有前一版可比而漏掉。
 
@@ -97,12 +103,6 @@ gateway **只追 / 存訂閱中的對話**（Trouter 會推帳號的所有對話
 
 ```
 dnx dotnet-counters monitor -p <pid> --counters TeamsGateway.Gateway
-```
-
-```
-curl -X PUT    -H "X-Admin-Token: $T" -H "Content-Type: application/json" -d '{"chat":"General Chat"}' $BASE/admin/subscriptions  # chat 可給 id 或群名
-curl           -H "X-Admin-Token: $T"                                        $BASE/admin/subscriptions  # 列訂閱
-curl -X DELETE -H "X-Admin-Token: $T"  $BASE/admin/subscriptions/<id>                                    # 取消（保留已存歷史）
 ```
 
 ## 對外 API（給 skills / client / slack-relay 接）
@@ -126,7 +126,7 @@ API 文件在 `/scalar`（OpenAPI 文件 `/openapi/v1.json`），根目錄 `/` �
 
 即時推播由背景的 Trouter 連線收進來，跟輪詢 / 回補 / 慢更新一樣經過變更偵測，要發的事件跟訊息同一個交易寫進內部事件 log（`PublishedEvents`），commit 之後通知 SSE 連線與各 sink 從自己的游標往後讀（`docs/adr/0006`）。自己發的訊息也會推回來（`from` 是自己）。
 
-事件 log 至少留 `Gateway:EventRetentionDays`（預設 7）天，超過的要等所有啟用中的 sink 都送過才清；SSE 的游標在 client，斷線比保留期還久就從現在開始收。sink 用 `Gateway:Sinks:<名稱>:Enabled` 開關（目前只有 `Webhook`，沒設 = 開）。
+事件 log 至少留 `Gateway:EventRetentionDays`（預設 7）天，超過的要等所有啟用中的 sink 都送過才清；SSE 的游標在 client，斷線比保留期還久就從現在開始收。sink 用 `Gateway:Sinks:<名稱>:Enabled` 開關（只有 `Webhook`，沒設 = 開）。
 
 ```
 curl -N -H "Authorization: Bearer $KEY" "$BASE/v1/events?chats=19:...@thread.v2"

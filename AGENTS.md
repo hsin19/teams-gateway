@@ -83,6 +83,6 @@ docker load -i bin/relay.tar.gz
 
 - `aspire start` 在背景起 gateway（`localhost:5199`）+ slack-relay + dashboard，`aspire stop` 停；`aspire ps` 看有沒有在跑。改了程式要 `aspire resource <gateway|slack-relay> rebuild`（`restart` 不會重新編譯）才會生效；改了 `AppHost.cs` 或它的 `appsettings.Local.json` 要 `aspire stop` 再 `aspire start`。
 - repo 根目錄的 `aspire.config.json` 指定 AppHost：functional test 專案也是 Aspire SDK（Postgres 版測試要起 container），不指定的話 CLI 會要你二選一，非互動模式直接失敗。
-- 全域 `aspire` CLI 要跟 `global.json` 的 `Aspire.AppHost.Sdk` 同一個 minor（現在 13.6）。CLI 比較舊時會經 `dnx` 轉給新版跑、外層連不上 backchannel，`aspire start` 剛好 120 秒後整組被砍（log 有 `Timed out waiting 120s for AppHost to start`）；`dotnet tool update -g Aspire.Cli` 升上去。
+- 全域 `aspire` CLI 要跟 `global.json` 的 `Aspire.AppHost.Sdk` 同一個 minor。CLI 比較舊時會經 `dnx` 轉給新版跑、外層連不上 backchannel，`aspire start` 剛好 120 秒後整組被砍（log 有 `Timed out waiting 120s for AppHost to start`）；`dotnet tool update -g Aspire.Cli` 升上去。
 - log：`aspire logs <resource> -t`（帶時間）、`aspire otel logs <resource>`（structured）。`Microsoft.*` / `System.*` / `Polly` 只記 warning 以上。dashboard 不留歷史，要查更早「什麼時候發生」看 DB 的時間欄位（`MessageEvents.ComposeTime` / `ReceivedAt`、`PublishedEvents.PublishedAt`，Unix 毫秒），用唯讀模式開：`sqlite3 'file:.data/gateway.db?mode=ro'`。
 - 訊息晚到先查 Mac 有沒有睡眠（`pmset -g log`）：睡眠時 gateway 跟著暫停，醒來後由輪詢補上並記 `Trouter missed a message`（睡超過 15 分鐘是整段回補，記 `Missed while down`）warning，不一定是推播壞了。
