@@ -32,7 +32,7 @@ workflow 用觸發它的事件命名，不叫 `ci.yml`：它們跑的是同一�
 - 沒有 Dockerfile：`dotnet publish -t:PublishContainer` 照專案設定（`services/Directory.Build.props` 與各自的 csproj，
   見 ADR 0010）出 image 進本機 Docker，再用 `docker` 指令推；workflow 裡沒有 Docker 的 action。
 - 每個 image、每個架構各一個 build job，跑在該架構的原生 runner 上（`ubuntu-24.04`、`ubuntu-24.04-arm`）：
-  1. build 進本機 Docker。gateway（JIT）直接用 SDK；relay（Native AOT）在 AOT 版的 SDK image（`sdk:11.0-noble-aot`）裡編，
+  1. build 進本機 Docker。gateway（JIT）直接用 SDK；relay（Native AOT）在 AOT 版的 SDK image（`sdk:11.0-resolute-aot`）裡編，
      跟本機出 image 的做法一樣。
   2. smoke check：gateway 在沒有任何 secret 的情況下要回 `/health` Healthy，relay 要回 `/alive` Healthy
      （它的 `/health` 要有 Slack 頻道、連著 gateway，在這裡一定是 Unhealthy）。gateway 拿到一個屬於 uid 1654
@@ -84,4 +84,4 @@ runner 上只有 API key，Teams cookie 一直待在部署端。少了任一個 
 只在打 tag 時才用到的 action，第一次跑就是真的 release，那它就要放進名稱以 `-manual` 結尾的 Dependabot group，
 共用 workflow 會跳過這種 group、留給人看。
 
-base image 沒有固定版本，也不需要 Dependabot：`noble-chiseled` 是浮動 tag，每次 release 都會拿到最新修補過的 runtime。
+base image 沒有固定版本，也不需要 Dependabot：`resolute-chiseled` 是浮動 tag，每次 release 都會拿到最新修補過的 runtime。

@@ -8,8 +8,9 @@
          分架構的只有 NuGet 帶來的 native 函式庫）。release 不走這條：每個架構在自己的 runner 上出（見 release.yml） -->
     <RuntimeIdentifiers>linux-x64;linux-arm64</RuntimeIdentifiers>
     <ContainerRuntimeIdentifiers>linux-x64;linux-arm64</ContainerRuntimeIdentifiers>
-    <!-- chiseled：沒有 shell 與套件管理、以非 root（uid 1654）執行；InvariantGlobalization 開著，不需要 ICU -->
-    <ContainerFamily>noble-chiseled</ContainerFamily>
+    <!-- chiseled：沒有 shell 與套件管理、以非 root（uid 1654）執行；InvariantGlobalization 開著，不需要 ICU。
+         .NET 11 的 Ubuntu image 只有 26.04（resolute），沒有 noble -->
+    <ContainerFamily>resolute-chiseled</ContainerFamily>
     <!-- 讓 SDK 產生 org.opencontainers.image.source / revision label：GHCR 靠 source 把 package 連到 repo -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
   </PropertyGroup>

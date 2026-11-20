@@ -4,7 +4,7 @@
 
 - 兩個服務的 image 用 `dotnet publish -t:PublishContainer` 出。repository 名稱、環境變數寫在各自的 csproj，架構與 base image 寫在 `services/Directory.Build.props`。Dockerfile 與 `.dockerignore` 拿掉。
 - 同一個 tag 含 `linux/amd64` 與 `linux/arm64`：`ContainerRuntimeIdentifiers` 讓 SDK 各 publish 一份，再合成一個 OCI image index。CI 在 x64 runner 上一次出兩份，不用 QEMU，也不用 arm64 runner。（後來 release 改成兩個 image 都在各自架構的 runner 上出、smoke 過的那份直接推，再合成同一個 tag：推出去的就是跑過的，relay 改成 Native AOT 後原生碼也本來就要這樣編。）
-- base image 是 `aspnet:10.0-noble-chiseled`（relay 原本也是，因為 ServiceDefaults 參照了 ASP.NET Core；改成 Native AOT 後是 `runtime-deps:10.0-noble-chiseled`，不帶 .NET runtime）：沒有 shell、沒有套件管理，以非 root（uid 1654）執行。
+- base image 是 `aspnet:10.0-noble-chiseled`（relay 原本也是，因為 ServiceDefaults 參照了 ASP.NET Core；改成 Native AOT 後是 `runtime-deps:10.0-noble-chiseled`，不帶 .NET runtime）：沒有 shell、沒有套件管理，以非 root（uid 1654）執行。（升到 .NET 11 後改成 `resolute-chiseled`：.NET 11 的 Ubuntu image 只有 26.04，沒有 noble；relay 編 AOT 的 SDK image 也跟著換成 `sdk:11.0-resolute-aot`。）
 - release 照舊先在 runner 上 smoke check 再推，但只能跑 x64 那份。（後來兩個架構各在原生 runner（`ubuntu-24.04` / `ubuntu-24.04-arm`）上 build、smoke check，arm64 也實際跑過才推。）
 
 ## 背景
