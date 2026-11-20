@@ -47,7 +47,7 @@
 
   <!-- 測試（xunit v3，走 Microsoft.Testing.Platform，不用 VSTest 的 Test.Sdk） -->
   <ItemGroup>
-    <PackageVersion Include="xunit.v3" Version="4.0.2" />
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="11.0.0" />
   </ItemGroup>
