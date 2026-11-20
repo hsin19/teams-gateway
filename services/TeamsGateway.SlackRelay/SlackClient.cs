@@ -261,7 +261,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
     /// </summary>
     internal static bool IsFrom(HistoryMessage m, string? botId) => botId is null || m.BotId == botId;
 
-    /// <summary>讀頻道歷史，撈出我們轉過（帶 metadata）的訊息：(Teams id, ts, 當前文字, 版本)。往回翻到 <paramref name="oldestUnixSeconds"/>。</summary>
+    /// <summary>讀頻道歷史，撈出我們轉過（帶 metadata）的訊息：(Teams id, ts, 當前文字, 版本, 對話)。往回翻到 <paramref name="oldestUnixSeconds"/>。</summary>
     public async Task<IReadOnlyList<RelayedMessage>> ReadRelayedAsync(string channel, long oldestUnixSeconds, string? botId, CancellationToken ct)
     {
         var found = new List<RelayedMessage>();
@@ -280,9 +280,10 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         return null;
     }
 
+    /// <summary>自己 bot 轉的、metadata 帶齊 Teams id / 版本 / 對話的才算；缺欄位的（很早期的 relay 轉的）不認。</summary>
     private static RelayedMessage? AsRelayed(HistoryMessage m, string? botId) =>
-        IsFrom(m, botId) && m.Metadata?.EventType == MetaEventType && m.Metadata.EventPayload?.TeamsId is { } tid && m.Ts is { } ts
-            ? new RelayedMessage(tid, ts, m.Text ?? "", m.Metadata.EventPayload.Version, m.Metadata.EventPayload.Chat)
+        IsFrom(m, botId) && m is { Ts: { } ts, Metadata: { EventType: MetaEventType, EventPayload: { TeamsId: { } tid, Version: { } version, Chat: { } chat } } }
+            ? new RelayedMessage(tid, ts, m.Text ?? "", version, chat)
             : null;
 
     /// <summary>某則訊息 thread 裡已經貼過的表情留言的事件序號（<see cref="PostReactionNoteAsync"/> 夾的 metadata）；讀不到就是空的。</summary>
@@ -398,7 +399,7 @@ public sealed class SlackClient(HttpClient http, ILogger<SlackClient> logger)
         }
     }
 
-    public readonly record struct RelayedMessage(string TeamsId, string Ts, string Text, long? Version, string? Chat = null);
+    public readonly record struct RelayedMessage(string TeamsId, string Ts, string Text, long Version, string Chat);
 }
 
 /// <summary>Slack 回了暫時性的錯誤（限流、Slack 自己出錯），重試會好。<see cref="RetryAfter"/> 是 Slack 要我們等多久（有給的話）。</summary>

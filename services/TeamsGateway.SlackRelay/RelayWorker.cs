@@ -182,7 +182,7 @@ public sealed class RelayWorker(
         if (channel is null)
             return; // 沒對應頻道、也沒 default
 
-        var version = message.Version > 0 ? message.Version : (long?)null;
+        var version = message.Version;
 
         // 這則我們轉過 → 編輯 / 刪除：原地更新，舊版進 thread 留證（不加 (edited)，靠 Slack 原生標記）
         if (links.Lookup(message.Id) is { } prior)
@@ -200,7 +200,8 @@ public sealed class RelayWorker(
                 await RelayHumanSendEditAsync(message, prior, version, ct);
                 return;
             }
-            await slack.PostReplyAsync(prior.Channel, prior.Ts, $"{VersionLabel(message.Id, prior.Version)}\n{prior.Text}", prior.Images, ct);
+            // bot 轉的那則一定記了版本（新貼的帶 message.Version，重啟回補只認帶版本的 metadata）
+            await slack.PostReplyAsync(prior.Channel, prior.Ts, $"{VersionLabel(message.Id, prior.Version!.Value)}\n{prior.Text}", prior.Images, ct);
             var updated = message.Deleted
                 ? new SlackContent("_(message deleted)_", []) // 誰說的、原本寫什麼，在上面那則 thread 留證裡
                 : await FormatAsync(message, prior.Channel, ct);
@@ -255,11 +256,11 @@ public sealed class RelayWorker(
     /// 對應表沒記版本（剛送出、或重啟後從表情補回來的）時先看 thread 裡貼過哪一版：重啟後 gateway 會重送之前的編輯，不要每次重啟都再貼。
     /// Slack 上本來就是這個樣子（從 Slack 同步過去的，ADR 0013）也不貼。貼成了才記版本，沒貼成的下次重送還會再試。
     /// </summary>
-    private async Task RelayHumanSendEditAsync(MessageDto message, MessageLinks.SlackRef prior, long? version, CancellationToken ct)
+    private async Task RelayHumanSendEditAsync(MessageDto message, MessageLinks.SlackRef prior, long version, CancellationToken ct)
     {
         var chat = prior.Chat ?? message.ConversationId;
-        if (prior.Version is null && version is { } incoming
-            && await slack.ReadEditNoteVersionAsync(prior.Channel, prior.Ts, message.Id, (await bot.RequireAsync(ct)).BotId, ct) is { } noted && noted >= incoming)
+        if (prior.Version is null
+            && await slack.ReadEditNoteVersionAsync(prior.Channel, prior.Ts, message.Id, (await bot.RequireAsync(ct)).BotId, ct) is { } noted && noted >= version)
         {
             links.Remember(message.Id, prior.Channel, prior.Ts, prior.Text, noted, prior.Images, chat, byBot: false);
             return;
@@ -291,7 +292,7 @@ public sealed class RelayWorker(
 
     /// <summary>
     /// 轉過的訊息又來一次時，是真的有新版（編輯 / 刪除）還是重送。
-    /// Slack 上那則沒記版本（這功能上線前轉的）時，只有帶編輯 / 刪除標記才當新版。
+    /// 對應表沒記版本（從 Slack 發過去、還沒看過 Teams 推回來的版本，見 <see cref="SendTracker"/>）時，只有帶編輯 / 刪除標記才當新版。
     /// </summary>
     public static bool IsNewer(MessageDto message, long? shownVersion) =>
         shownVersion is { } shown ? message.Version > shown : message.Edited || message.Deleted;
@@ -300,13 +301,11 @@ public sealed class RelayWorker(
     /// thread 留證的標題：那一版是原文還是編輯、什麼時候寫的。連續編輯時一眼看出新舊。
     /// 時間用 Slack 的 <c>&lt;!date&gt;</c>，依看的人的時區顯示、精確到秒（同一分鐘內連改也分得出）。
     /// </summary>
-    public static string VersionLabel(string messageId, long? version)
+    public static string VersionLabel(string messageId, long version)
     {
-        if (version is not { } v)
-            return "_Previous version_";
-        var kind = v.ToString(CultureInfo.InvariantCulture) == messageId ? "Original" : "Edited";
-        var fallback = DateTimeOffset.FromUnixTimeMilliseconds(v).ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
-        return $"_{kind}_ · <!date^{v / 1000}^{{date_short_pretty}} {{time_secs}}|{fallback}>";
+        var kind = version.ToString(CultureInfo.InvariantCulture) == messageId ? "Original" : "Edited";
+        var fallback = DateTimeOffset.FromUnixTimeMilliseconds(version).ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
+        return $"_{kind}_ · <!date^{version / 1000}^{{date_short_pretty}} {{time_secs}}|{fallback}>";
     }
 
     /// <summary>加入各頻道並讀近 <paramref name="retentionHours"/> 的歷史，從 metadata 把 Teams id → Slack 訊息 撈回對應表。</summary>

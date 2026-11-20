@@ -17,9 +17,10 @@ public class WebhookSecretProtectorTests
         Assert.Equal("s3cret", _secrets.Unprotect(stored));
     }
 
-    // 這功能上線前存的明文照原樣用，舊 webhook 的簽章不會壞
+    // 存的值一定是加密格式；不是的話不拿來簽，寧可這個 webhook 送不出去
     [Fact]
-    public void Legacy_plaintext_passes_through() => Assert.Equal("old-secret", _secrets.Unprotect("old-secret"));
+    public void Value_without_the_prefix_is_rejected() =>
+        Assert.Throws<InvalidOperationException>(() => _secrets.Unprotect("plain-secret"));
 
     [Fact]
     public void No_secret_stays_null()

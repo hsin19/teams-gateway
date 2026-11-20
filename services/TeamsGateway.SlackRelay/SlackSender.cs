@@ -381,16 +381,15 @@ public sealed partial class SlackSender(
     {
         var routed = ChatsFor(channel);
         var parent = threadTs is null ? null : await slack.GetMessageAsync(channel, threadTs, null, ct);
-        if (parent is { Metadata: { EventType: SlackClient.MetaEventType, EventPayload.TeamsId: { } teamsId } meta })
+        if (parent is { Metadata: { EventType: SlackClient.MetaEventType, EventPayload: { TeamsId: { } teamsId } payload } })
         {
             // 別的 app（例如本機開發用的 bot）轉的：它的 metadata 不採信，也不能退回頻道的規則亂猜，使用者在 thread 裡就是要回那一則
             if (!SlackClient.IsFrom(parent, (await bot.RequireAsync(ct)).BotId))
                 return SendTarget.Fail("This thread's Teams message was relayed by another Slack app, so it can't be answered from here. Reply in Teams directly.");
-            // 對話 id 夾在 metadata 裡；這個欄位上線前轉的沒有，頻道只對到一個對話時用它
-            var chat = meta.EventPayload.Chat ?? (routed is [var only] ? only : null);
-            return chat is null
-                ? SendTarget.Fail("This Teams message was relayed before replies were supported, so its chat is unknown. Reply in Teams directly.")
-                : new SendTarget(chat, teamsId, null);
+            // 對話 id 夾在 metadata 裡；缺了一樣不能照頻道的規則猜
+            return payload.Chat is { } chat
+                ? new SendTarget(chat, teamsId, null)
+                : SendTarget.Fail("This thread's Teams message doesn't say which chat it came from, so it can't be answered from here. Reply in Teams directly.");
         }
         // 上層是從 Slack 發過去的（bot 按了已送出表情）：它在 Teams 上就是一則訊息，回它就是引用它。
         // 頂層發話只會出現在只對到一個對話的頻道；Teams id 用它的 clientMessageId 到對話裡找，relay 重啟過也找得到

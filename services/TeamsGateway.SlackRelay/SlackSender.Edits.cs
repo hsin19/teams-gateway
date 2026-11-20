@@ -223,7 +223,7 @@ public sealed partial class SlackSender
         }
     }
 
-    /// <summary>改、刪重送都安全：連不上、5xx 給 Retry；請求本身被拒（4xx，例如 gateway 還沒有這個端點）重試也沒用，只說明。</summary>
+    /// <summary>改、刪重送都安全：連不上、5xx 給 Retry；請求本身被拒（4xx）重試也沒用，只說明。</summary>
     private Task RespondChangeFailedAsync(string responseUrl, MessageRef r, string title, ChangeOutcome outcome, string retryAction, CancellationToken ct)
     {
         logger.LogWarning("{Title}: Slack message {Channel}/{Ts}: {Error}", title, r.Channel, r.Ts, outcome.Error);

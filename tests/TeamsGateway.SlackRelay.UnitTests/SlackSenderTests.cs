@@ -197,6 +197,20 @@ public partial class SlackSenderTests
         Assert.Contains("another Slack app", Responses(s)[^1].GetProperty("text").GetString());
     }
 
+    // thread 上層是自己 bot 轉的，但 metadata 沒有對話 id：頻道只對到一個對話也不照它猜，直接說明不送
+    [Fact]
+    public async Task Reply_under_a_relayed_message_without_chat_is_refused()
+    {
+        var s = Create();
+        var respond = s.Slack.Respond!;
+        s.Slack.Respond = uri => respond(uri)?.Replace($",\"chat\":\"{Chat}\"", "", StringComparison.Ordinal);
+
+        await s.Sender.OnActionAsync(Click("send", $"C1|{Ts}|{ThreadTs}"), Ct);
+
+        Assert.DoesNotContain(s.Gateway.Requests, r => r.Method == "POST");
+        Assert.Contains("which chat", Responses(s)[^1].GetProperty("text").GetString());
+    }
+
     // @bot 時也一樣：確認那則直接說明，沒有 Send 按鈕
     [Fact]
     public async Task Mention_under_another_bots_message_gets_no_send_button()

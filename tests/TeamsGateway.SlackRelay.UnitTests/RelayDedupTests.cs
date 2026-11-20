@@ -21,7 +21,7 @@ public class RelayDedupTests
     public void Higher_version_is_an_edit() =>
         Assert.True(RelayWorker.IsNewer(Msg(1792640480711, edited: true), 1792640000000));
 
-    // 這功能上線前轉的訊息沒記版本：只看編輯 / 刪除標記
+    // 從 Slack 發過去的那則還沒記版本：只看編輯 / 刪除標記
     [Fact]
     public void Unknown_shown_version_needs_edit_or_delete_marker()
     {

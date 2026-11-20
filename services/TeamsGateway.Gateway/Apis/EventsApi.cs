@@ -89,7 +89,7 @@ public static class EventsApi
     /// 1. 合法的 <c>Last-Event-ID</c>（斷線重連）；
     /// 2. 沒有的話看 <paramref name="afterMessage"/>：訂閱者重啟、序號沒留下來，但知道自己最後轉出去的是哪則訊息
     ///    （例如 relay 從 Slack 讀回來的）→ 從那則第一次發出之後補（之後的編輯也會重送，訂閱者照版本去重）；
-    /// 3. 都沒有 / 看不懂 / 比目前最大序號還大（例如舊 client 帶的訊息 id）→ 從現在開始、不補。
+    /// 3. 都沒有 / 看不懂 / 比目前最大序號還大（例如把訊息 id 當成序號帶）→ 從現在開始、不補。
     /// </summary>
     internal static async Task<long> StartCursorAsync(
         IDbContextFactory<GatewayDbContext> factory, string? lastEventId, string? afterMessage, CancellationToken ct)

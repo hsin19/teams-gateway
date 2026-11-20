@@ -94,7 +94,7 @@ public sealed class GatewaySendClient(HttpClient http, ILogger<GatewaySendClient
             if (resp.IsSuccessStatusCode)
                 return new ChangeOutcome(null, null);
             var body = await resp.Content.ReadAsStringAsync(ct);
-            // 404 要是 gateway 自己回的「沒有這則」（ApiError）才算 Teams 上沒有；其他的 404 多半是 gateway 還沒有這個端點（舊版）
+            // 404 要是 gateway 自己回的「沒有這則」（ApiError）才算 Teams 上沒有；其他的 404（路徑打錯、中間的 proxy 回的）不算
             var gone = resp.StatusCode == HttpStatusCode.Conflict || (resp.StatusCode == HttpStatusCode.NotFound && IsApiError(body));
             return new ChangeOutcome(resp.StatusCode, $"HTTP {(int)resp.StatusCode}{(body.Length > 0 ? $": {(body.Length > 200 ? body[..200] : body)}" : "")}", gone);
         }

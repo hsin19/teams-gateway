@@ -12,7 +12,7 @@ namespace TeamsGateway.SlackRelay.UnitTests;
 public class RelayResumeTests
 {
     private const string Relayed = """
-        {"ok":true,"messages":[{"ts":"1792000000.000100","text":"*Bob*:\nhi","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T1","version":1}}}]}
+        {"ok":true,"messages":[{"ts":"1792000000.000100","text":"*Bob*:\nhi","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T1","version":1,"chat":"19:x@thread.v2"}}}]}
         """;
     private const string Empty = """{"ok":true,"messages":[]}""";
 
@@ -67,21 +67,23 @@ public class RelayResumeTests
         Assert.Equal("19:x@thread.v2", post.Body.GetProperty("metadata").GetProperty("event_payload").GetProperty("chat").GetString());
     }
 
-    // 重啟回補時連對話一起記回來；這個欄位上線前轉的訊息沒有，是 null
+    // 重啟回補時連對話一起記回來；metadata 缺版本或對話的不當成轉過的訊息
     [Fact]
-    public async Task Warmup_remembers_the_chat_from_metadata()
+    public async Task Warmup_remembers_the_chat_and_skips_incomplete_metadata()
     {
         var (worker, links, slack) = Worker();
         slack.Responses["conversations.history"] = """
             {"ok":true,"messages":[
-              {"ts":"1792000000.000200","text":"*Bob*:\nnew","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T2","version":2,"chat":"19:x@thread.v2"}}},
-              {"ts":"1792000000.000100","text":"*Bob*:\nold","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T1","version":1}}}]}
+              {"ts":"1792000000.000300","text":"*Bob*:\nnew","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T3","version":3,"chat":"19:x@thread.v2"}}},
+              {"ts":"1792000000.000200","text":"*Bob*:\nno chat","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T2","version":2}}},
+              {"ts":"1792000000.000100","text":"*Bob*:\nno version","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T1","chat":"19:x@thread.v2"}}}]}
             """;
 
         await worker.WarmupLinksAsync(Routes, null, 24, TestContext.Current.CancellationToken);
 
-        Assert.Equal("19:x@thread.v2", links.Lookup("T2")?.Chat);
-        Assert.Null(links.Lookup("T1")?.Chat);
+        Assert.Equal("19:x@thread.v2", links.Lookup("T3")?.Chat);
+        Assert.Null(links.Lookup("T2"));
+        Assert.Null(links.Lookup("T1"));
     }
 
     // 同一個頻道裡別的 bot（例如本機開發用的另一個）也夾著 teams_relay metadata：只認自己 bot 貼的，續接點才不會跳到別人的進度
@@ -92,8 +94,8 @@ public class RelayResumeTests
         slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT","bot_id":"BME"}""";
         slack.Responses["conversations.history"] = """
             {"ok":true,"messages":[
-              {"ts":"1792000000.000300","bot_id":"BOTHER","text":"*Bob*:\nother","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T3","version":3}}},
-              {"ts":"1792000000.000100","bot_id":"BME","text":"*Bob*:\nmine","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T1","version":1}}}]}
+              {"ts":"1792000000.000300","bot_id":"BOTHER","text":"*Bob*:\nother","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T3","version":3,"chat":"19:x@thread.v2"}}},
+              {"ts":"1792000000.000100","bot_id":"BME","text":"*Bob*:\nmine","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T1","version":1,"chat":"19:x@thread.v2"}}}]}
             """;
 
         await worker.WarmupLinksAsync(Routes, null, 24, TestContext.Current.CancellationToken);
@@ -112,8 +114,8 @@ public class RelayResumeTests
         slack.Responses["auth.test"] = """{"ok":true,"user_id":"UBOT","bot_id":"BME"}""";
         slack.Responses["conversations.history"] = """
             {"ok":true,"messages":[
-              {"ts":"1792000000.000300","bot_id":"BOTHER","text":"*Bob*:\nother","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T3","version":3}}},
-              {"ts":"1792000000.000100","bot_id":"BME","text":"*Bob*:\nmine","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T1","version":1}}}]}
+              {"ts":"1792000000.000300","bot_id":"BOTHER","text":"*Bob*:\nother","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T3","version":3,"chat":"19:x@thread.v2"}}},
+              {"ts":"1792000000.000100","bot_id":"BME","text":"*Bob*:\nmine","metadata":{"event_type":"teams_relay","event_payload":{"teams_id":"T1","version":1,"chat":"19:x@thread.v2"}}}]}
             """;
 
         await worker.WarmupLinksAsync(Routes, null, 24, TestContext.Current.CancellationToken).WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);

@@ -23,9 +23,4 @@ public class VersionLabelTests
         Assert.Contains("<!date^1792640480^", label);
         Assert.Contains("|2026-", label); // 不支援日期格式的 client 顯示 fallback
     }
-
-    // 這功能上線前轉的訊息沒存版本，退回不帶時間的標題
-    [Fact]
-    public void Unknown_version_falls_back_to_plain_label() =>
-        Assert.Equal("_Previous version_", RelayWorker.VersionLabel("1792640000000", null));
 }

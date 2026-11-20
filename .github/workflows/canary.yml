@@ -38,7 +38,7 @@ jobs:
             fi
           done
 
-      # 先記下打的是哪一版：失敗時對得上是哪次換版弄壞的。舊版沒有 /version，拿不到不算失敗
+      # 先記下打的是哪一版：失敗時對得上是哪次換版弄壞的。連不上就記 unknown，讓後面的測試說明是哪裡壞了
       - name: Target version
         run: |
           version="$(curl -fsS --max-time 10 "$GATEWAY_BASE_URL/version" || echo unknown)"

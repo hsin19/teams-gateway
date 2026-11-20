@@ -68,7 +68,7 @@ public class CatchUpTests
     [InlineData("", 3)]
     [InlineData("garbage", 3)]
     [InlineData("-1", 3)]
-    [InlineData("1792527319389", 3)] // 舊 client 帶的訊息 id：比最大序號大，不能當游標（不然之後的事件全被當成送過）
+    [InlineData("1792527319389", 3)] // 把訊息 id 當成序號帶：比最大序號大，不能當游標（不然之後的事件全被當成送過）
     public async Task Start_cursor_falls_back_to_now_unless_valid(string? lastEventId, long expected)
     {
         using var db = new TestDb();

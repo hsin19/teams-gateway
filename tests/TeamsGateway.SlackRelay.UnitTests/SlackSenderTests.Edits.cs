@@ -125,7 +125,7 @@ public partial class SlackSenderTests
         Assert.Equal("update", last.GetProperty("blocks")[1].GetProperty("elements")[0].GetProperty("action_id").GetString());
     }
 
-    // gateway 還沒有這個端點（舊版，404 不是它回的「沒有這則」）、或請求被拒（400）：不是「Teams 上沒有了」，重試也沒用
+    // 不是 gateway 回的「沒有這則」的 404（例如路徑打錯）、或請求被拒（400）：不是「Teams 上沒有了」，重試也沒用
     [Theory]
     [InlineData(HttpStatusCode.NotFound, "")]
     [InlineData(HttpStatusCode.BadRequest, """{"error":"replyToId must be a message in this chat that the gateway has received"}""")]
