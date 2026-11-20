@@ -25,29 +25,29 @@
 
   <!-- MCP -->
   <ItemGroup>
-    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.3.1" />
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.4.0" />
   </ItemGroup>
 
   <!-- API doc：內建 OpenAPI + Scalar UI -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="11.0.0" />
-    <PackageVersion Include="Scalar.AspNetCore" Version="2.19.0" />
+    <PackageVersion Include="Scalar.AspNetCore" Version="2.21.0" />
   </ItemGroup>
 
   <!-- Aspire ServiceDefaults：resilience / service discovery / OpenTelemetry -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="11.0.0" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="11.0.0" />
-    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.20.1" />
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.20.1" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.20.2" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.20.2" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.20.1" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.21.0" />
   </ItemGroup>
 
   <!-- 測試（xunit v3，走 Microsoft.Testing.Platform，不用 VSTest 的 Test.Sdk） -->
   <ItemGroup>
-    <PackageVersion Include="xunit.v3" Version="4.0.2" />
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="11.0.0" />
   </ItemGroup>
