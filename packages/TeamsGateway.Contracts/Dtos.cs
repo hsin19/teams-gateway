@@ -26,8 +26,9 @@ public sealed record MessageDto(
     string? ClientMessageId = null);
 
 /// <summary>
-/// 訊息附件（個人版 Teams 存在發送者的 OneDrive）。<c>PreviewUrl</c> 是 Teams 產的預覽圖（圖片才有），
-/// 跟內嵌圖片一樣要經 <c>/v1/media</c> 代抓；<c>ShareUrl</c> 是 OneDrive 分享連結。
+/// 訊息附件（個人版 Teams 存在發送者的 OneDrive）。<c>PreviewUrl</c> 是 Teams 產的預覽圖（圖片才有，有些只在 OneDrive 的圖沒有），
+/// 跟內嵌圖片一樣要經 <c>/v1/media</c> 代抓；<c>ShareUrl</c> 是 OneDrive 分享連結（<c>https://1drv.ms/…</c>），
+/// 沒有預覽圖的圖也能把它交給 <c>/v1/media</c> 抓原檔。
 /// </summary>
 public sealed record AttachmentDto(string Name, string? Type, string? PreviewUrl, string? ShareUrl);
 

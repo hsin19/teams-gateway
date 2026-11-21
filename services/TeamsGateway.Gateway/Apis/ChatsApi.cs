@@ -150,7 +150,7 @@ public static class ChatsApi
             string url, MediaClient media, CancellationToken ct) =>
         {
             if (!MediaClient.IsAllowed(url, out var uri))
-                return TypedResults.BadRequest(new ApiError("Only Teams media URLs (https://*.asm.skype.com) are proxied"));
+                return TypedResults.BadRequest(new ApiError("Only Teams media URLs (https://*.asm.skype.com) and OneDrive share links (https://1drv.ms) are proxied"));
             try
             {
                 var (bytes, contentType) = await media.GetAsync(uri, ct);
@@ -161,8 +161,8 @@ public static class ChatsApi
                 return TypedResults.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway);
             }
         })
-        .WithSummary("Fetch an inline message image")
-        .WithDescription("Fetches an image embedded in a message (`<img src>` on `*.asm.skype.com`, not reachable without a Teams sign-in) using the gateway's Teams login. Only that domain is accepted.")
+        .WithSummary("Fetch a message image")
+        .WithDescription("Fetches an image from a message: an inline image or attachment preview (`*.asm.skype.com`, not reachable without a Teams sign-in) using the gateway's Teams login, or the original of an attachment that only lives in OneDrive (its `https://1drv.ms` share link, fetched the way a signed-out browser opens it). Only those URLs are accepted.")
         .WithTags("Media");
 
         return v1;

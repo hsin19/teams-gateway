@@ -80,6 +80,22 @@ public class McpTextTests
         Assert.Equal("[2 images #1767310200000] [file: recipe.pdf #1767310200000] Good morning pictures for everyone", McpText.Body(msg));
     }
 
+    // 只放在 OneDrive 的附件圖（沒有預覽圖）有 1drv.ms 分享連結就算圖片，get_attachments 經 /v1/media 抓得到；
+    // 分享連結不是 1drv.ms 的抓不到，還是列成檔案
+    [Fact]
+    public void OneDrive_only_image_counts_as_an_image()
+    {
+        AttachmentDto[] attachments =
+        [
+            new("pasted-image.png", "png", null, "https://1drv.ms/i/c/x/abc"),
+            new("other.png", "png", "", "https://example.com/other.png"),
+        ];
+        var msg = Msg("", attachments: attachments);
+
+        Assert.Equal(["https://1drv.ms/i/c/x/abc"], McpText.ImageUrls(msg));
+        Assert.Equal("[image #1767310200000] [file: other.png #1767310200000]", McpText.Body(msg));
+    }
+
     // 只附檔、沒有文字
     [Fact]
     public void Attachment_only_message_has_just_the_marker()

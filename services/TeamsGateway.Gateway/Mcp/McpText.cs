@@ -91,7 +91,8 @@ internal static partial class McpText
     }
 
     /// <summary>
-    /// 這則訊息自己的圖片網址，照出現順序：內嵌的 Teams 媒體圖（引用裡的、表情符號的 CDN 圖不算）加上圖片附件的預覽圖。
+    /// 這則訊息自己的圖片網址，照出現順序：內嵌的 Teams 媒體圖（引用裡的、表情符號的 CDN 圖不算）加上圖片附件的預覽圖
+    /// （只在 OneDrive、沒有預覽圖的用分享連結）。
     /// 只收 gateway 代抓得到的網址（<see cref="MediaClient.IsAllowed"/>）。
     /// </summary>
     public static IReadOnlyList<string> ImageUrls(MessageDto m)
@@ -101,7 +102,7 @@ internal static partial class McpText
             urls.AddRange(ImgSrcRegex().Matches(BlockquoteRegex().Replace(m.Content, ""))
                 .Select(x => WebUtility.HtmlDecode(x.Groups[1].Value))
                 .Where(url => MediaClient.IsAllowed(url, out _)));
-        urls.AddRange((m.Attachments ?? []).Where(IsImage).Select(a => a.PreviewUrl!));
+        urls.AddRange((m.Attachments ?? []).Where(IsImage).Select(a => ImageUrl(a)!));
         return urls.Distinct().ToList();
     }
 
@@ -175,9 +176,18 @@ internal static partial class McpText
 
     private static bool IsHtml(MessageDto m) => m.Type != "Text";
 
-    /// <summary>圖片附件：圖片類型而且有預覽圖（預覽圖在 Teams 媒體，代抓得到）；其他附件的預覽圖是空字串。</summary>
+    /// <summary>
+    /// 圖片附件：圖片類型，而且代抓得到——有預覽圖（在 Teams 媒體），或沒有預覽圖、只放在 OneDrive 但有 <c>1drv.ms</c> 分享連結。
+    /// 其他附件的預覽圖是空字串。
+    /// </summary>
     private static bool IsImage(AttachmentDto a) =>
-        !string.IsNullOrEmpty(a.PreviewUrl) && a.Type is not null && ImageFileTypes.Contains(a.Type);
+        a.Type is not null && ImageFileTypes.Contains(a.Type) && ImageUrl(a) is not null;
+
+    /// <summary>附件圖要抓的網址：有預覽圖用預覽圖，不然用 OneDrive 分享連結；兩個都沒有回 null。</summary>
+    private static string? ImageUrl(AttachmentDto a) =>
+        !string.IsNullOrEmpty(a.PreviewUrl) ? a.PreviewUrl
+        : Uri.TryCreate(a.ShareUrl, UriKind.Absolute, out var share) && OneDriveShares.IsShareLink(share) ? a.ShareUrl
+        : null;
 
     private static string Sender(MessageDto m) =>
         !string.IsNullOrWhiteSpace(m.FromName) ? m.FromName.Trim() : m.From ?? "unknown";

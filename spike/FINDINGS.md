@@ -90,6 +90,21 @@
 - 錯誤：刪掉的再 PUT → 403、`subCode: MessageAlreadyDeleted`；不存在的 id，PUT 與 DELETE 都是 404、`subCode: MessageNotFound`。
   別人的訊息改不改得了沒驗（測試群組只有自己）。
 
+## OneDrive 分享檔（2026-11-21，`onedrive_capture.py`、`onedrive_anonymous.py`、`onedrive_download.py`）
+
+- 個人版的附件放在發送者 OneDrive 的「Microsoft Teams Chat Files」，`properties.files[]` 帶 `fileInfo.shareUrl`（`https://1drv.ms/…`）、
+  `fileInfo.shareId`（`u!` + 整個分享網址的 base64url，不補 `=`）、`objectUrl`（`my.microsoftpersonalcontent.com/personal/<cid>/Documents/…`）。
+- 貼上的圖多半另外傳到 AMS、`filePreview.previewUrl` 有值；但有些（檔名 `pasted-image-<UTC 時間>.png`）只放在 OneDrive，`previewUrl` 是空字串。
+  網頁版自己顯示這種圖是用同一個 client id 拿 refresh token 換 `https://graph.microsoft.com/Files.ReadWrite`，
+  打 `GET graph.microsoft.com/v1.0/shares/{shareId}/driveItem/thumbnails/0/c960x540/content`（302 到 `*-mediap.svc.ms`）——聊天室裡看到的是 960×540 縮圖。
+- 這些分享是「知道連結的人都能看」，不用帳號就抓得到原檔，跟沒登入的瀏覽器開 `1drv.ms` 一樣（`onedrive_anonymous.py` 錄、`onedrive_download.py` 驗）：
+  1. `POST https://api-badgerp.svc.ms/v1.0/token`，body `{"appId":"073204aa-c1e0-4e66-a200-e5815a0aa93d"}`（OneDrive 網頁檢視器的 app id）→ `{token, expiryTimeUtc, authScheme: "Badger"}`。
+  2. `POST https://my.microsoftpersonalcontent.com/_api/v2.0/shares/{shareId}/driveitem?$select=id,parentReference`，
+     帶 `Authorization: Badger <token>`、`Prefer: autoredeem`（兌換分享）→ `id` 與 `parentReference.driveId`。
+  3. `GET https://my.microsoftpersonalcontent.com/_api/v2.1/drives/{driveId}/items/{id}/content`，一樣帶 Badger → 原檔（實測 800×992 PNG）。
+  item id 裡的 `!` 編成 `%21` 也收。
+- 直接打 `api.onedrive.com/v1.0/shares/{shareId}/…` 或 Graph 而不帶 token 都是 401：401 不代表分享不公開，要走上面的 Badger 流程才算數。
+
 ## 即時事件（Trouter 推播，不需要瀏覽器）
 
 `trouter_client.py` 只用 skypetoken 就能收到推播，發話後約 0.4 秒到。
