@@ -88,6 +88,19 @@ public class ChatsvcClientTests
         Assert.Equal(msg.Attachments, ChatsvcClient.ParseAttachments(resource.GetRawText())); // 從 DB 的 RawJson 讀回來也一樣
     }
 
+    // 圖只在 OneDrive、媒體服務沒有預覽時，Teams 給的 previewUrl 是空字串：當成沒有，不然會被當成圖片去抓
+    [Fact]
+    public void ParseAttachments_treats_empty_urls_as_missing()
+    {
+        var files = JsonSerializer.Serialize(new object[]
+        {
+            new { fileName = "pasted-image.png", fileType = "png", fileInfo = new { shareUrl = "" }, filePreview = new { previewUrl = "" } },
+        });
+        var raw = JsonSerializer.Serialize(new { id = "1792641131222", content = "", properties = new { files } });
+
+        Assert.Equal([new AttachmentDto("pasted-image.png", "png", null, null)], ChatsvcClient.ParseAttachments(raw));
+    }
+
     [Fact]
     public void ParseMessage_without_files_has_no_attachments()
     {

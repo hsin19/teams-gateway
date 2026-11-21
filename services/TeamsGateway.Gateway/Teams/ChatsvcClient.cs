@@ -398,11 +398,14 @@ public sealed class ChatsvcClient(HttpClient http, SkypeTokenProvider tokens, IL
             result.Add(new AttachmentDto(
                 name,
                 GetString(f, "fileType") ?? GetString(f, "type"),
-                GetString(Child(f, "filePreview"), "previewUrl"),
-                GetString(Child(f, "fileInfo"), "shareUrl")));
+                NullIfEmpty(GetString(Child(f, "filePreview"), "previewUrl")),
+                NullIfEmpty(GetString(Child(f, "fileInfo"), "shareUrl"))));
         }
         return result.Count > 0 ? result : null;
     }
+
+    // 圖只在 OneDrive、媒體服務沒有預覽時，Teams 給的 previewUrl 是空字串
+    private static string? NullIfEmpty(string? s) => string.IsNullOrEmpty(s) ? null : s;
 
     private async Task<HttpResponseMessage> SendAsync(Func<HttpRequestMessage> make, CancellationToken ct)
     {

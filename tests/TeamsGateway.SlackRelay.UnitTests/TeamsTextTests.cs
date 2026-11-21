@@ -200,11 +200,13 @@ public class TeamsTextTests
     }
 
     // 附件：圖片類型 + 有預覽圖才當圖片；影片有縮圖也算一般檔案、沒預覽圖的圖也轉不了
+    // （Teams 有時給空字串：圖只在 OneDrive、媒體服務沒有預覽，當成沒有）
     [Theory]
     [InlineData("jpg", "https://us-api.asm.skype.com/v1/objects/0-a/views/imgo", true)]
     [InlineData("PNG", "https://us-api.asm.skype.com/v1/objects/0-b/views/imgo", true)]
     [InlineData("mp4", "https://us-api.asm.skype.com/v1/objects/0-c/views/imgo", false)]
     [InlineData("jpg", null, false)]
+    [InlineData("png", "", false)]
     [InlineData("pdf", null, false)]
     public void IsImage_needs_image_type_and_preview(string type, string? previewUrl, bool expected) =>
         Assert.Equal(expected, TeamsText.IsImage(new AttachmentDto("f", type, previewUrl, null)));

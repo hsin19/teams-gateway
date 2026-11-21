@@ -112,7 +112,7 @@ public static partial class TeamsText
     /// 影片等其他類型就算有預覽縮圖也當一般檔案。
     /// </summary>
     public static bool IsImage(AttachmentDto attachment) =>
-        attachment.PreviewUrl is not null && attachment.Type is not null && ImageFileTypes.Contains(attachment.Type);
+        !string.IsNullOrEmpty(attachment.PreviewUrl) && attachment.Type is not null && ImageFileTypes.Contains(attachment.Type);
 
     private static readonly HashSet<string> ImageFileTypes =
         new(["jpg", "jpeg", "png", "gif", "bmp", "webp", "heic", "heif", "tif", "tiff"], StringComparer.OrdinalIgnoreCase);
