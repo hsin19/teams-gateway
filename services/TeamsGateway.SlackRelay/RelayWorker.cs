@@ -422,48 +422,58 @@ public sealed class RelayWorker(
 
         // 圖片（內嵌的 + 附件裡的）貼成 image block；其他附件列成連結
         var attachments = message.Attachments ?? [];
+        var imageAttachments = attachments.Where(TeamsText.IsImage).ToList();
         var imageUrls = TeamsText.ImageUrls(message.Content)
-            .Concat(attachments.Where(TeamsText.IsImage).Select(a => a.PreviewUrl!))
+            .Concat(imageAttachments.Select(a => TeamsText.ImageUrl(a)!))
             .Distinct()
             .ToList();
         var files = attachments.Where(a => !TeamsText.IsImage(a)).ToList();
-        if (files.Count > 0)
-            text += $"\n{(files.Count == 1 ? "Attachment" : "Attachments")}: " + string.Join(", ", files.Select(FileLink));
 
         var (images, failed) = await UploadImagesAsync(imageUrls, ct);
-        if (failed > 0)
-            text += $"\n_({failed} image{(failed == 1 ? "" : "s")} could not be forwarded)_";
+        // 只在 OneDrive 的圖抓不到（例如分享不公開）時跟一般檔案一樣留連結，不然連開都開不了
+        var unreachable = imageAttachments.Where(a => string.IsNullOrEmpty(a.PreviewUrl) && failed.Contains(a.ShareUrl!)).ToList();
+        files.AddRange(unreachable);
+        if (files.Count > 0)
+            text += $"\n{(files.Count == 1 ? "Attachment" : "Attachments")}: " + string.Join(", ", files.Select(FileLink));
+        var lost = failed.Count - unreachable.Count;
+        if (lost > 0)
+            text += $"\n_({lost} image{(lost == 1 ? "" : "s")} could not be forwarded)_";
         return new SlackContent(text, images);
     }
 
     private static string FileLink(AttachmentDto file) =>
         file.ShareUrl is null ? TeamsText.EscapeMrkdwn(file.Name) : $"<{file.ShareUrl}|{TeamsText.EscapeMrkdwn(file.Name)}>";
 
-    /// <summary>圖片經 gateway 抓下來、上傳 Slack，回傳 file id 與失敗張數；同一張圖（編輯時）不重傳。</summary>
-    private async Task<(IReadOnlyList<string> FileIds, int Failed)> UploadImagesAsync(IReadOnlyList<string> urls, CancellationToken ct)
+    /// <summary>圖片經 gateway 抓下來、上傳 Slack，回傳 file id 與沒轉成的網址（含超過張數上限的）；同一張圖（編輯時）不重傳。</summary>
+    private async Task<(IReadOnlyList<string> FileIds, IReadOnlyList<string> Failed)> UploadImagesAsync(IReadOnlyList<string> urls, CancellationToken ct)
     {
         var fileIds = new List<string>();
+        var failed = urls.Skip(MaxImagesPerMessage).ToList();
         foreach (var url in urls.Take(MaxImagesPerMessage))
         {
             if (!_uploadedImages.TryGetValue(url, out var fileId))
             {
                 fileId = await UploadImageAsync(url, ct);
                 if (fileId is null)
+                {
+                    failed.Add(url);
                     continue;
+                }
                 if (_uploadedImages.Count >= MaxUploadedImages)
                     _uploadedImages.Clear();
                 _uploadedImages[url] = fileId;
             }
             fileIds.Add(fileId);
         }
-        return (fileIds, urls.Count - fileIds.Count);
+        return (fileIds, failed);
     }
 
     private async Task<string?> UploadImageAsync(string url, CancellationToken ct)
     {
         try
         {
-            // 訊息給的是 Teams 的預覽縮圖，先抓原圖；抓不到或格式 Slack 顯示不了（例如原檔是 webp）才退回預覽圖
+            // 訊息給的是 Teams 的預覽縮圖，先抓原圖；抓不到或格式 Slack 顯示不了（例如原檔是 webp）才退回預覽圖。
+            // OneDrive 分享連結本來就是原檔，直接抓
             var image = TeamsText.FullSizeImageUrl(url) is { } original ? await FetchImageAsync(original, ct) : null;
             image ??= await FetchImageAsync(url, ct);
             return image is { } found ? await slack.UploadFileAsync(found.Bytes, $"teams-image{found.Extension}", ct) : null;

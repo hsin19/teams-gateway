@@ -108,11 +108,24 @@ public static partial class TeamsText
     }
 
     /// <summary>
-    /// 附件是不是圖片：圖片類型且有 Teams 預覽圖（預覽圖放在 Teams 媒體，跟內嵌圖片一樣能代抓）。
+    /// 附件是不是圖片：圖片類型，而且 gateway 代抓得到——有 Teams 預覽圖（放在 Teams 媒體，跟內嵌圖片一樣），
+    /// 或沒有預覽圖、只放在發送者 OneDrive 但有 <c>1drv.ms</c> 分享連結（gateway 匿名抓原檔）。
     /// 影片等其他類型就算有預覽縮圖也當一般檔案。
     /// </summary>
     public static bool IsImage(AttachmentDto attachment) =>
-        !string.IsNullOrEmpty(attachment.PreviewUrl) && attachment.Type is not null && ImageFileTypes.Contains(attachment.Type);
+        attachment.Type is not null && ImageFileTypes.Contains(attachment.Type) && ImageUrl(attachment) is not null;
+
+    /// <summary>附件圖要經 gateway 抓的網址：有預覽圖用預覽圖，不然用 OneDrive 分享連結；兩個都沒有回 null。</summary>
+    public static string? ImageUrl(AttachmentDto attachment) =>
+        !string.IsNullOrEmpty(attachment.PreviewUrl) ? attachment.PreviewUrl
+        : IsOneDriveShareLink(attachment.ShareUrl) ? attachment.ShareUrl
+        : null;
+
+    /// <summary>個人版 OneDrive 的分享連結（<c>https://1drv.ms/…</c>），gateway 的 <c>/v1/media</c> 收這種網址。</summary>
+    public static bool IsOneDriveShareLink(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri)
+        && uri.Scheme == Uri.UriSchemeHttps
+        && uri.Host.Equals("1drv.ms", StringComparison.OrdinalIgnoreCase);
 
     private static readonly HashSet<string> ImageFileTypes =
         new(["jpg", "jpeg", "png", "gif", "bmp", "webp", "heic", "heif", "tif", "tiff"], StringComparer.OrdinalIgnoreCase);

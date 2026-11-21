@@ -199,17 +199,31 @@ public class TeamsTextTests
         Assert.Equal("look", TeamsText.ToSlack(html, new HashSet<string> { "1" }));
     }
 
-    // 附件：圖片類型 + 有預覽圖才當圖片；影片有縮圖也算一般檔案、沒預覽圖的圖也轉不了
+    // 附件：圖片類型 + gateway 抓得到（有預覽圖，或只在 OneDrive、有 1drv.ms 分享連結）才當圖片；影片有縮圖也算一般檔案
     // （Teams 有時給空字串：圖只在 OneDrive、媒體服務沒有預覽，當成沒有）
     [Theory]
-    [InlineData("jpg", "https://us-api.asm.skype.com/v1/objects/0-a/views/imgo", true)]
-    [InlineData("PNG", "https://us-api.asm.skype.com/v1/objects/0-b/views/imgo", true)]
-    [InlineData("mp4", "https://us-api.asm.skype.com/v1/objects/0-c/views/imgo", false)]
-    [InlineData("jpg", null, false)]
-    [InlineData("png", "", false)]
-    [InlineData("pdf", null, false)]
-    public void IsImage_needs_image_type_and_preview(string type, string? previewUrl, bool expected) =>
-        Assert.Equal(expected, TeamsText.IsImage(new AttachmentDto("f", type, previewUrl, null)));
+    [InlineData("jpg", "https://us-api.asm.skype.com/v1/objects/0-a/views/imgo", null, true)]
+    [InlineData("PNG", "https://us-api.asm.skype.com/v1/objects/0-b/views/imgo", null, true)]
+    [InlineData("mp4", "https://us-api.asm.skype.com/v1/objects/0-c/views/imgo", null, false)]
+    [InlineData("png", "", "https://1drv.ms/i/c/x/abc", true)]
+    [InlineData("jpg", null, "https://1drv.ms/i/c/x/abc", true)]
+    [InlineData("jpg", null, null, false)]
+    [InlineData("png", "", "https://example.com/x.png", false)]
+    [InlineData("pdf", null, "https://1drv.ms/b/c/x/def", false)]
+    public void IsImage_needs_image_type_and_a_url_the_gateway_can_fetch(string type, string? previewUrl, string? shareUrl, bool expected) =>
+        Assert.Equal(expected, TeamsText.IsImage(new AttachmentDto("f", type, previewUrl, shareUrl)));
+
+    // 抓哪個網址：有預覽圖用預覽圖（relay 再換成原圖），只在 OneDrive 的用分享連結
+    [Fact]
+    public void ImageUrl_prefers_the_preview_over_the_share_link()
+    {
+        const string preview = "https://us-api.asm.skype.com/v1/objects/0-a/views/imgo";
+        const string share = "https://1drv.ms/i/c/x/abc";
+
+        Assert.Equal(preview, TeamsText.ImageUrl(new AttachmentDto("a.png", "png", preview, share)));
+        Assert.Equal(share, TeamsText.ImageUrl(new AttachmentDto("a.png", "png", null, share)));
+        Assert.Null(TeamsText.ImageUrl(new AttachmentDto("a.png", "png", null, null)));
+    }
 
     // 預覽縮圖 views/imgo 換成同一個物件的原圖；其他網址不動
     [Theory]

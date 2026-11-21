@@ -13,7 +13,7 @@ bot 的 app 定義在 [`slack-app-manifest.yaml`](slack-app-manifest.yaml)。到
 
 表情：Teams 有人按 / 收回表情時，在那則 Slack 訊息的 thread 留一句「*誰* reacted 👀」/「removed」，bot 也在原訊息按上同一個 Slack 表情（最後一個人收回時拿掉），頻道裡一眼看得到有人按。送到 Teams 的 Slack 訊息會保留送出狀態表情；若 Teams 的表情對應到同一個名稱，只留 thread 通知、不鏡像，以免移除狀態標記。留言的 metadata 夾著 gateway 的事件序號（`teams_reaction`）：relay 重啟後從 Slack 上最後一則續接會重送之後的表情事件（表情沒有版本號可去重），貼之前先讀那則 thread（`conversations.replies`，之後記在記憶體），同一個序號貼過就不再貼。表情代碼對照見 `TeamsEmoji`，對不到 Slack 表情的只留言（顯示原始代碼）。訊息晚到時（例如 gateway 睡眠後才補到），當時已經有人按的表情會在訊息貼出後接著補上。需要 `reactions:write`。
 
-訊息裡的內嵌圖片：relay 經 gateway 的 `/v1/media` 抓下來，上傳成 Slack 檔案（不分享到頻道），再用 image block 貼在同一則訊息裡；抓不到或上傳失敗時文字照送，末尾註記幾張圖未能轉送。訊息裡的 `views/imgo` 是 Teams 的預覽縮圖（寬最多 800px、重壓成 JPEG），relay 改抓同一張的原圖 `views/imgpsh_fullsize_anim`，抓不到或格式 Slack 顯示不了才退回預覽圖。
+訊息裡的內嵌圖片：relay 經 gateway 的 `/v1/media` 抓下來，上傳成 Slack 檔案（不分享到頻道），再用 image block 貼在同一則訊息裡；抓不到或上傳失敗時文字照送，末尾註記幾張圖未能轉送。訊息裡的 `views/imgo` 是 Teams 的預覽縮圖（寬最多 800px、重壓成 JPEG），relay 改抓同一張的原圖 `views/imgpsh_fullsize_anim`，抓不到或格式 Slack 顯示不了才退回預覽圖。有些貼上的圖只放在發送者的 OneDrive、附件沒有預覽圖，relay 改用它的 `1drv.ms` 分享連結經 `/v1/media` 抓原檔；抓不到（例如分享不公開）就跟其他附件一樣列成連結。
 
 送不出去時：Slack 一時不通（連不上、`internal_error` 之類 Slack 自己的錯誤）每則重試兩次，還是不行就放棄那則、記 error；被限流（`ratelimited`，每頻道約每秒一則，睡眠醒來補一批時容易撞到）不算次數，照 `Retry-After` 等到送得出去為止，後面的事件跟著排隊。頻道不存在、沒權限這類重試也沒用的錯誤直接記 error 放棄。編輯時原地更新被拒，對照表留著舊版，不會當成已經更新過。
 
