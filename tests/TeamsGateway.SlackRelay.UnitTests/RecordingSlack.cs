@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace TeamsGateway.SlackRelay.UnitTests;
 
 /// <summary>
-/// 假的 Slack Web API：記下每個呼叫（method + JSON body），一律回成功；auth.test 回 bot user <c>UBOT</c>（沒有 bot id = 不過濾 metadata），
+/// 假的 Slack Web API：記下每個呼叫（method + JSON body；不是 JSON 的 body 記成 default），一律回成功；auth.test 回 bot user <c>UBOT</c>（沒有 bot id = 不過濾 metadata），
 /// chat.getPermalink 回由 ts 組成的 permalink。
 /// 要特定回應（例如 conversations.replies 讀到的 thread）就放進 <see cref="Responses"/>。
 /// </summary>
@@ -30,9 +30,10 @@ internal sealed class RecordingSlack : HttpMessageHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var method = request.RequestUri!.Segments[^1];
-        var body = request.Content is null
-            ? default
-            : JsonDocument.Parse(await request.Content.ReadAsStringAsync(cancellationToken)).RootElement.Clone();
+        // 上傳圖片那幾步是 form / 原始位元組，不是 JSON：記成 default
+        var body = request.Content?.Headers.ContentType?.MediaType == "application/json"
+            ? JsonDocument.Parse(await request.Content.ReadAsStringAsync(cancellationToken)).RootElement.Clone()
+            : default;
         lock (Requests)
             Requests.Add((method, body));
         if (BeforeRespondAsync is { } hook)

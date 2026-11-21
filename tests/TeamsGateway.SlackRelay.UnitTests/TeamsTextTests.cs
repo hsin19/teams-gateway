@@ -211,6 +211,15 @@ public class TeamsTextTests
     public void IsImage_needs_image_type_and_preview(string type, string? previewUrl, bool expected) =>
         Assert.Equal(expected, TeamsText.IsImage(new AttachmentDto("f", type, previewUrl, null)));
 
+    // 預覽縮圖 views/imgo 換成同一個物件的原圖；其他網址不動
+    [Theory]
+    [InlineData("https://us-api.asm.skype.com/v1/objects/0-a/views/imgo", "https://us-api.asm.skype.com/v1/objects/0-a/views/imgpsh_fullsize_anim")]
+    [InlineData("https://experimental-api.asm.skype.com/v1/objects/0-b/views/imgo", "https://experimental-api.asm.skype.com/v1/objects/0-b/views/imgpsh_fullsize_anim")]
+    [InlineData("https://us-api.asm.skype.com/v1/objects/0-c/views/imgpsh_fullsize_anim", null)]
+    [InlineData("https://us-api.asm.skype.com/v1/objects/0-d/views/imgt1", null)]
+    public void FullSizeImageUrl_swaps_the_preview_view_for_the_original(string url, string? expected) =>
+        Assert.Equal(expected, TeamsText.FullSizeImageUrl(url));
+
     [Fact]
     public void ImageUrls_empty_without_images()
     {

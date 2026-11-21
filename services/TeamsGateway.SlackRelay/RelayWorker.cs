@@ -463,20 +463,27 @@ public sealed class RelayWorker(
     {
         try
         {
-            if (await media.GetAsync(url, ct) is not { } image)
-                return null;
-            if (ImageExtension(image.ContentType) is not { } ext)
-            {
-                logger.LogWarning("Image type {ContentType} can't be shown in a Slack image block; skipping it", image.ContentType);
-                return null;
-            }
-            return await slack.UploadFileAsync(image.Bytes, $"teams-image{ext}", ct);
+            // 訊息給的是 Teams 的預覽縮圖，先抓原圖；抓不到或格式 Slack 顯示不了（例如原檔是 webp）才退回預覽圖
+            var image = TeamsText.FullSizeImageUrl(url) is { } original ? await FetchImageAsync(original, ct) : null;
+            image ??= await FetchImageAsync(url, ct);
+            return image is { } found ? await slack.UploadFileAsync(found.Bytes, $"teams-image{found.Extension}", ct) : null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Relaying an image failed: {Url}", url);
             return null;
         }
+    }
+
+    /// <summary>經 gateway 抓一張圖；抓不到、或不是 Slack image block 能顯示的格式回 null。</summary>
+    private async Task<(byte[] Bytes, string Extension)?> FetchImageAsync(string url, CancellationToken ct)
+    {
+        if (await media.GetAsync(url, ct) is not { } image)
+            return null;
+        if (ImageExtension(image.ContentType) is { } ext)
+            return (image.Bytes, ext);
+        logger.LogWarning("Image type {ContentType} can't be shown in a Slack image block: {Url}", image.ContentType, url);
+        return null;
     }
 
     // image block 的 slack_file 只支援 png / jpg / gif

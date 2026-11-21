@@ -118,6 +118,18 @@ public static partial class TeamsText
         new(["jpg", "jpeg", "png", "gif", "bmp", "webp", "heic", "heif", "tif", "tiff"], StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// 同一張圖的原圖網址；不是 <c>views/imgo</c> 的回 null。內嵌圖片與附件預覽給的 <c>imgo</c> 是聊天室用的縮圖
+    /// （寬最多 800px、PNG 也重壓成 JPEG），Teams 點開時才另外載 <c>imgpsh_fullsize_anim</c>（原檔，GIF 保留動畫）。
+    /// </summary>
+    public static string? FullSizeImageUrl(string url) =>
+        url.EndsWith(PreviewView, StringComparison.OrdinalIgnoreCase)
+            ? string.Concat(url.AsSpan(0, url.Length - PreviewView.Length), FullSizeView)
+            : null;
+
+    private const string PreviewView = "/views/imgo";
+    private const string FullSizeView = "/views/imgpsh_fullsize_anim";
+
+    /// <summary>
     /// 被引用的一則：Teams 訊息 id（blockquote 的 itemid）、HTML 裡寫的發話者名稱、發話者的 Teams 帳號（MRI）。
     /// HTML 裡的名稱不可靠（可能是舊名，甚至是 "Display Name"）——Teams 自己是拿 MRI 去查現在的名字。
     /// </summary>
