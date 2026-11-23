@@ -39,7 +39,7 @@ public sealed class GatewayMetrics
         if (result is IngestResult.Unchanged)
             return;
         // 自己帳號發的訊息不管註冊對不對都會推來，要跟別人的分開看才看得出推播有沒有壞
-        var sender = _tokens.Current is { } token && message.From == $"8:{token.SkypeId}" ? "self" : "others";
+        var sender = _tokens.Current is { } token && message.From == token.Mri ? "self" : "others";
         _delivered.Add(1,
             new KeyValuePair<string, object?>("source", source.ToString().ToLowerInvariant()),
             new KeyValuePair<string, object?>("change", result is IngestResult.Inserted ? "new" : "edit"),

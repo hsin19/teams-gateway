@@ -14,7 +14,11 @@ public sealed record LoginCookie(string Name, string Value, string Domain, strin
 /// skypetoken（chatsvc / Trouter 用）與一起換到的 MT token（<c>api/mt</c> 端點用，例如用帳號查人名）。
 /// 兩顆都約 8 小時；<see cref="ExpiresAt"/> 取兩者較早的，一起換。
 /// </summary>
-public sealed record SkypeToken(string Token, string SkypeId, DateTimeOffset ExpiresAt, string? MtToken = null);
+public sealed record SkypeToken(string Token, string SkypeId, DateTimeOffset ExpiresAt, string? MtToken = null)
+{
+    /// <summary>帳號自己的 MRI：經這個帳號發的訊息推回來時，<c>from</c> 就是它。</summary>
+    public string Mri => $"8:{SkypeId}";
+}
 
 /// <summary>
 /// 用登入 cookie 經純 HTTP 換到 skypetoken，並快取到快過期才重換。整個流程不需要瀏覽器。

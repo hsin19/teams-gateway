@@ -28,4 +28,9 @@ public class SkypeTokenProviderTests
     [Fact]
     public void Remints_without_cache() =>
         Assert.False(SkypeTokenProvider.CanReuse(null, rejectedToken: "old-token", Now));
+
+    // 自己發的訊息推回來時 from 是 8:<skypeid>
+    [Fact]
+    public void Mri_is_the_skype_id_with_the_user_prefix() =>
+        Assert.Equal("8:live:me", Fresh.Mri);
 }
