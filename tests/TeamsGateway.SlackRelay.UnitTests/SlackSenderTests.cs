@@ -668,6 +668,7 @@ public partial class SlackSenderTests
             links,
             tracker,
             RelayFakes.Bot(slack),
+            RelayFakes.Account(),
             Options.Create(options),
             NullLogger<RelayWorker>.Instance);
         var sender = new SlackSender(

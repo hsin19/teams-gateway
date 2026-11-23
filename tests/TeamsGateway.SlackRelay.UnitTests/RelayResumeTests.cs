@@ -137,6 +137,7 @@ public class RelayResumeTests
             links,
             RelayFakes.Sends(slack, links),
             RelayFakes.Bot(slack),
+            RelayFakes.Account(),
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance);
         return (worker, links, slack);

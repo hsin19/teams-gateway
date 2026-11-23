@@ -110,6 +110,7 @@ public class RelayRetryTests
             links,
             RelayFakes.Sends(slackHandler, links),
             RelayFakes.Bot(slackHandler),
+            RelayFakes.Account(),
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance)
         {

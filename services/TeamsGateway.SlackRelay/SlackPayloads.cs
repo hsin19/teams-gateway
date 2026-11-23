@@ -46,8 +46,11 @@ internal sealed record SlackFileRef(string Id);
 /// </summary>
 internal sealed record SlackMetadata(string? EventType, SlackRelayPayload? EventPayload);
 
-/// <summary><c>Chat</c>：那則 Teams 訊息所在的對話 id，從 Slack 回覆時要靠它知道送去哪（一個頻道可能對到多個對話）。</summary>
-internal sealed record SlackRelayPayload(string? TeamsId, long? Version, long? Seq = null, string? Chat = null);
+/// <summary>
+/// <c>Chat</c>：那則 Teams 訊息所在的對話 id，從 Slack 回覆時要靠它知道送去哪（一個頻道可能對到多個對話）。
+/// <c>FromSelf</c>：發話者是 gateway 綁的帳號（見 <see cref="TeamsAccount"/>），只在是的時候帶 true。
+/// </summary>
+internal sealed record SlackRelayPayload(string? TeamsId, long? Version, long? Seq = null, string? Chat = null, bool? FromSelf = null);
 
 internal sealed record JoinRequest(string Channel);
 

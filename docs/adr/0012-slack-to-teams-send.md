@@ -129,4 +129,4 @@ relay 的 Phase 2：在 Slack 寫的話經 gateway 的 `POST /v1/chats/{id}/mess
 - 結果不明時，「經 gateway 找有沒有這個 `clientMessageId`」是唯一擋重送的地方：Teams 不去重。找的時候訊息剛好還沒出現，會誤判成沒送，按 Retry 就多一則。找的時候使用者在等：從現在往前翻到那則 Slack 訊息寫下的時間，通常一兩頁；確認之後隔很久才按 Send、對話又很熱鬧時頁數會多，最多 40 頁，超過就當查不完。
 - `clientMessageId` 換回 `ts` 後查不到東西時，當一般的 Teams 訊息處理。誤判要 Teams 自己的 client 產生的 16 碼亂數剛好落在時間範圍內、又剛好對到那個頻道某則帶 bot 狀態表情的訊息，不另外防。
 - 重啟後的處理多打 Slack API（`reactions.get`、讀歷史），只發生在推回來的是自己發的訊息、記憶體裡又沒有的時候。
-- 從 Slack 發的和經其他路徑發的（別的 API key、`/mcp` 的 `send_message`），推回來時 `From` 都是帳號自己。後者照 Phase 1 由 bot 轉送，兩者只靠 `clientMessageId` 分得出來。
+- 從 Slack 發的和經其他路徑發的（別的 API key、`/mcp` 的 `send_message`），推回來時 `From` 都是帳號自己。後者照 Phase 1 由 bot 轉送，兩者只靠 `clientMessageId` 分得出來。（不論哪條路徑，bot 轉貼的那則 metadata 都帶 `from_self: true`：帳號從 gateway `/v1/status` 的 `accountMri` 查。讀頻道的 agent 靠它認出是自己這邊送出去的話；沒有它時，thread 裡發的回覆貼到頂層後被 agent 當成對方的補充，又查了一輪。）
