@@ -109,13 +109,16 @@ public sealed record WebhookDto(Guid Id, string? ConversationId, string TargetUr
 /// <summary>
 /// <c>GET /v1/status</c>：gateway 與 Teams 的認證健康。<c>TeamsAuth</c> 是 <c>ok</c> 或 <c>failed</c>；
 /// 訂閱者（relay）拿來偵測登入 cookie 失效並告警。
+/// <c>AccountMri</c> 是 gateway 綁的帳號（<c>8:…</c>），訊息的 <c>From</c> 等於它就是經這個帳號發的
+/// （從 Slack、別的 API key、MCP 發的都是）；還沒換到 token 時是 null。
 /// </summary>
 public sealed record AuthStatusDto(
     string TeamsAuth,
     DateTimeOffset? LastTokenAt,
     DateTimeOffset? LastFailureAt,
     string? LastError,
-    DateTimeOffset? TokenExpiresAt);
+    DateTimeOffset? TokenExpiresAt,
+    string? AccountMri = null);
 
 /// <summary>發話結果。<c>MessageId</c> 是 Teams 給新訊息的 id（推播、讀回來的都是這個），Teams 沒回時是 null。</summary>
 public sealed record SendMessageResult(string ClientMessageId, string? MessageId = null);

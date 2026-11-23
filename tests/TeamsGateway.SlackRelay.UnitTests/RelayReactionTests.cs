@@ -216,6 +216,7 @@ public class RelayReactionTests
             links,
             RelayFakes.Sends(slack, links, options),
             RelayFakes.Bot(slack),
+            RelayFakes.Account(),
             Options.Create(options),
             NullLogger<RelayWorker>.Instance);
         return (worker, slack);

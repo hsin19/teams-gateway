@@ -48,6 +48,7 @@ public static class Extensions
 
         builder.Services.AddSingleton<MessageLinks>();
         builder.Services.AddSingleton<SlackBotIdentity>();
+        builder.Services.AddSingleton<TeamsAccount>();
         builder.Services.AddSingleton<SendTracker>();
         builder.Services.AddHostedService<RelayWorker>();
 

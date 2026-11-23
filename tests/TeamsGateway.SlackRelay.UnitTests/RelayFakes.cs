@@ -17,6 +17,10 @@ internal static class RelayFakes
         new(Slack(slack), Bot(slack), links, Options.Create(options ?? new RelayOptions()), NullLogger<SendTracker>.Instance);
 
     public static HttpClient Gateway(FakeGateway gateway) => new(gateway) { BaseAddress = new Uri("http://gateway.test") };
+
+    /// <summary>gateway 綁的帳號；沒給 gateway 就永遠查不到（訊息都不算自己發的）。</summary>
+    public static TeamsAccount Account(FakeGateway? gateway = null) =>
+        new(new GatewayStatusClient(gateway is null ? new HttpClient() : Gateway(gateway), NullLogger<GatewayStatusClient>.Instance));
 }
 
 /// <summary>

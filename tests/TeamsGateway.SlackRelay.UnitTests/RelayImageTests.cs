@@ -151,6 +151,7 @@ public class RelayImageTests
             links,
             RelayFakes.Sends(slack, links),
             RelayFakes.Bot(slack),
+            RelayFakes.Account(),
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance);
         var message = new MessageDto("1792640099000", Conv, "8:bob", "Bob", "RichText/Html", content, 2, DateTimeOffset.UtcNow, 1792640099000,

@@ -89,6 +89,7 @@ public class RelayReplyTests
             links,
             RelayFakes.Sends(slack, links),
             RelayFakes.Bot(slack),
+            RelayFakes.Account(),
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance);
         var routes = new Dictionary<string, string> { [Conv] = "C1" };

@@ -3,7 +3,7 @@ using TeamsGateway.Contracts;
 
 namespace TeamsGateway.SlackRelay;
 
-/// <summary>查 gateway 的 <c>/v1/status</c>（Teams 認證健康）與 <c>/v1/chats</c>（對話名稱，啟動時印路由用）。</summary>
+/// <summary>查 gateway 的 <c>/v1/status</c>（Teams 認證健康、綁的帳號）與 <c>/v1/chats</c>（對話名稱，啟動時印路由用）。</summary>
 public sealed class GatewayStatusClient(HttpClient http, ILogger<GatewayStatusClient> logger)
 {
     /// <summary>
@@ -20,6 +20,20 @@ public sealed class GatewayStatusClient(HttpClient http, ILogger<GatewayStatusCl
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogDebug(ex, "Querying /v1/status failed; treating the auth state as unknown");
+            return null;
+        }
+    }
+
+    /// <summary>gateway 綁的帳號的 MRI；gateway 還沒換到 token、連不上、或是還沒有這個欄位的舊版時回 null。</summary>
+    public async Task<string?> GetAccountMriAsync(CancellationToken ct)
+    {
+        try
+        {
+            return (await http.GetFromJsonAsync("/v1/status", ContractsJsonContext.Default.AuthStatusDto, ct))?.AccountMri;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogDebug(ex, "Querying /v1/status failed; the gateway's account is unknown for now");
             return null;
         }
     }

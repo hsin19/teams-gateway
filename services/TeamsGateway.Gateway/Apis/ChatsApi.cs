@@ -23,9 +23,11 @@ public static class ChatsApi
             LastTokenAt: tokens.LastSuccessAt,
             LastFailureAt: tokens.LastFailureAt,
             LastError: tokens.Healthy ? null : tokens.LastError,
-            TokenExpiresAt: tokens.Current?.ExpiresAt)))
+            TokenExpiresAt: tokens.Current?.ExpiresAt,
+            AccountMri: tokens.Current?.Mri)))
         .WithSummary("Teams auth health")
-        .WithDescription("Whether the gateway's sign-in to Teams is working (the relay uses it to detect expired login cookies and alert).")
+        .WithDescription("Whether the gateway's sign-in to Teams is working (the relay uses it to detect expired login cookies and alert), "
+            + "and the MRI of the account it signs in as (null until it has a token): a message from that MRI was sent through the gateway.")
         .WithTags("Status");
 
         v1.MapGet("/chats", async (ChatsvcClient chatsvc, CancellationToken ct) =>

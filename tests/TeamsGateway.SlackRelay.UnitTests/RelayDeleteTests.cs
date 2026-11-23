@@ -23,6 +23,7 @@ public class RelayDeleteTests
             links,
             RelayFakes.Sends(slack, links),
             RelayFakes.Bot(slack),
+            RelayFakes.Account(),
             Options.Create(new RelayOptions()),
             NullLogger<RelayWorker>.Instance);
         var deleted = new MessageDto("1792640000000", Conv, "8:alice", "Alice", "RichText/Html", "", 1, DateTimeOffset.UtcNow, 1792640480711, Deleted: true);

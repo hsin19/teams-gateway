@@ -362,6 +362,7 @@ public class RelaySentFromSlackTests
             links,
             sends,
             RelayFakes.Bot(slack),
+            RelayFakes.Account(),
             Options.Create(options),
             NullLogger<RelayWorker>.Instance) { RateLimitFallback = rateLimitFallback ?? TimeSpan.FromSeconds(30) };
         return (worker, slack, links, sends);

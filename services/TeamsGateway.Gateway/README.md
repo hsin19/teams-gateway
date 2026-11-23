@@ -113,6 +113,7 @@ API 文件在 `/scalar`（OpenAPI 文件 `/openapi/v1.json`），根目錄 `/` �
 
 | 端點 | 說明 |
 |---|---|
+| `GET /v1/status` | Teams 登入健不健康（`teamsAuth`：`ok` / `failed`，relay 拿來告警），與綁定帳號的 MRI（`accountMri`：訊息的 `from` 等於它就是經這個帳號發的；還沒換到 token 時是 null） |
 | `GET /v1/chats` | 列對話 |
 | `GET /v1/chats/{id}/messages?limit=&cursor=` | 讀訊息（`cursor` 用上一頁回的 `nextCursor` 往更舊翻） |
 | `POST /v1/chats/{id}/messages` `{"text":"..."}` 或 `{"html":"..."}` | 發話：`html` 以 `RichText/Html` 送（呼叫端自己跳脫）。選填 `clientMessageId`（數字；這則的事件會帶著它，用來認出自己發的）、`replyToId`（送成那則的引用回覆，要是 gateway 收過、同一個對話的訊息）。回 `clientMessageId` 與 Teams 給新訊息的 `messageId` |

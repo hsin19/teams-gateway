@@ -84,5 +84,6 @@ public sealed class AdminEndpointTests(GatewayAppFixture fx) : IClassFixture<Gat
 
         Assert.Equal("failed", status.GetProperty("teamsAuth").GetString()); // 還沒換過 token = 不健康
         Assert.True(status.TryGetProperty("tokenExpiresAt", out _));
+        Assert.Equal(JsonValueKind.Null, status.GetProperty("accountMri").ValueKind); // 沒有 token 就不知道是哪個帳號
     }
 }

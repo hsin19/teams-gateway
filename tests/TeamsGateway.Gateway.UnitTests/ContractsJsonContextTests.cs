@@ -39,15 +39,20 @@ public class ContractsJsonContextTests
     }
 
     // /v1/status 原本回匿名物件：改成 contract record 後輸出不能變（relay 與外部訂閱者都在讀）
+    // （後來加的 accountMri 接在最後，原本的欄位不變）
     [Fact]
     public void Auth_status_matches_previous_anonymous_output()
     {
         var at = new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero);
-        var previous = new { teamsAuth = "failed", lastTokenAt = (DateTimeOffset?)at, lastFailureAt = (DateTimeOffset?)at.AddHours(1), lastError = "cookie expired", tokenExpiresAt = (DateTimeOffset?)null };
+        var previous = new
+        {
+            teamsAuth = "failed", lastTokenAt = (DateTimeOffset?)at, lastFailureAt = (DateTimeOffset?)at.AddHours(1), lastError = "cookie expired",
+            tokenExpiresAt = (DateTimeOffset?)null, accountMri = "8:live:me",
+        };
 
         Assert.Equal(
             JsonSerializer.Serialize(previous, Reflection),
-            JsonSerializer.Serialize(new AuthStatusDto("failed", at, at.AddHours(1), "cookie expired", null), ContractsJsonContext.Default.AuthStatusDto));
+            JsonSerializer.Serialize(new AuthStatusDto("failed", at, at.AddHours(1), "cookie expired", null, "8:live:me"), ContractsJsonContext.Default.AuthStatusDto));
     }
 
     // 舊 payload / 舊 client 可能沒帶 version 之後加的欄位：用建構子的預設值
