@@ -46,6 +46,7 @@ docker load -i bin/relay.tar.gz
 
 - 照周圍的寫法：primary constructor、`sealed`、DTO 用 `record`；JSON 走 source generator（`*JsonContext`），新的 wire 型別要註冊進去。
 - 語言：只有打開 repo 讀原始碼才看得到的用繁體中文（文件、註解、XML doc）；其他一律英文，包括執行時或在 UI 上會出現的字串（log、例外與錯誤訊息、health check 與 metric 的描述、API 回應、OpenAPI 的 summary / description、發到 Slack 的文字、console 輸出、workflow 的 job / step 名稱）。
+  - relay 加進 Slack 訊息的固定字（標頭的 `replied to`、`Attachments:`、`_Edited in Teams_`、`_(message deleted)_`、圖片未能轉送的註記這類）照數量用單複數；連結的標籤不加 emoji。Teams 的原文照轉，不翻譯、不改寫。
 - 註解有需要才寫：只寫程式碼看不出來的事（為什麼這樣做、限制、踩過的坑）。程式碼已經講清楚的不要再用中文翻一遍。
 - 測試名稱是英文、底線分隔的句子（例如 `Upsert_inserts_then_dedupes_same_version`），上面用中文註解說明情境；`CancellationToken` 用 `TestContext.Current.CancellationToken`，DB 用 `TestDb`。
 - DB 可切換 SQLite / Postgres（`Gateway:Database:Provider`，ADR 0008），本機預設 SQLite。動到 DB 的程式兩邊都要能跑：改完跑一次 Postgres 版的 functional test；寫 `PublishedEvents` 只能經過 `MessageIngestor` 的寫入鎖（序號要等於 commit 順序）。
